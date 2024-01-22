@@ -432,7 +432,8 @@ class LEDStripEffect : public IJSONSerializable
         hsv.hue = initialhue;
         hsv.val = 255;
         hsv.sat = 240;
-        for (int i = 0; i < numToFill; i+=everyNth)
+        // for (int i = 0; i < numToFill; i+=everyNth)
+        for(int i = numToFill - 1; i >= 0; i-=everyNth)
         {
             CRGB rgb;
             hsv2rgb_rainbow(hsv, rgb);
