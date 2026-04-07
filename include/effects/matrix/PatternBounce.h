@@ -57,8 +57,8 @@
 #define PatternBounce_H
 
 #include "Boid.h"
-#include "ledstripeffect.h"
 #include "Vector.h"
+#include "ledstripeffect.h"
 
 #if MATRIX_HEIGHT > 1
 
@@ -127,14 +127,18 @@ public:
             boid.update();
             totalVelocity += abs(boid.velocity.y);
 
-            if (g()->isValidPixel(boid.location.x, boid.location.y))
-                g()->setPixel(boid.location.x, boid.location.y, g()->ColorFromCurrentPalette(boid.colorIndex));
-
-            if (boid.location.y >= MATRIX_HEIGHT - 1)
-            {
+            if (boid.location.x < 0) boid.location.x = 0;
+            if (boid.location.x >= MATRIX_WIDTH) boid.location.x = MATRIX_WIDTH - 1;
+            
+            if (boid.location.y < 0) {
+                boid.location.y = 0;
+                boid.velocity.y *= -1.0;
+            } else if (boid.location.y >= MATRIX_HEIGHT - 1) {
                 boid.location.y = MATRIX_HEIGHT - 1;
                 boid.velocity.y *= -1.0;
             }
+
+            g()->setPixel((int)boid.location.x, (int)boid.location.y, g()->ColorFromCurrentPalette(boid.colorIndex));
 
             g()->_boids[i] = boid;
         }
