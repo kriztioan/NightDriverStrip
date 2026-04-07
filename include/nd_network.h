@@ -108,19 +108,6 @@
 
     const char* WLtoString(wl_status_t status);
 
-    // get_mac_address_raw
-    //
-    // Reads the raw MAC
-
-    void get_mac_address_raw(uint8_t *mac);
-
-    // get_mac_address
-    //
-    // Returns a packed (non-pretty, without colons) version of the MAC id
-
-    String get_mac_address();
-    String get_mac_address_pretty();
-
     // SetSocketBlockingEnabled
     //
     // In blocking mode, socket API calls wait until the operation is complete before returning control to the application.
@@ -160,5 +147,19 @@
       void CancelReader(size_t index);
   };
 #endif
+
+  // get_mac_address_raw
+  //
+  // Reads the raw MAC via eFuse (works without WiFi)
+
+  void get_mac_address_raw(uint8_t *mac);
+
+  // get_mac_address / get_mac_address_pretty
+  //
+  // Returns the MAC address as a string. Uses cached WiFi MAC when
+  // the driver is ready, falls back to eFuse MAC otherwise.
+
+  String get_mac_address();
+  String get_mac_address_pretty();
 
   void InitNetworkCLI();
