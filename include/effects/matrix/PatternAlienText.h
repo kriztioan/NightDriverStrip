@@ -105,9 +105,15 @@ public:
 
     CRGB color1 = RandomSaturatedColor();
 
-    for (int i = 0; i < (charWidth / 2 + 1); i++)
+    int maxX = std::min(charWidth / 2 + 1, (int)(MATRIX_WIDTH - x));
+    int maxY = std::min(charHeight - 1, (int)(MATRIX_HEIGHT - y));
+
+    for (int i = 0; i < maxX; i++)
     {
-      for (int j = 0; j < (charHeight - 1); j++)
+      int mirrorX = x + ((charWidth / 2 + 1) - i);
+      bool drawMirror = (i < 2) && (mirrorX < MATRIX_WIDTH);
+
+      for (int j = 0; j < maxY; j++)
       {
         CRGB color = CRGB::Black;
 
@@ -116,8 +122,10 @@ public:
 
         graphics->setPixel(x + i, y + j, color);
 
-        if (i < 2)
-          graphics->setPixel(x + ((charWidth / 2 + 1) - i), y + j, color);
+        if (drawMirror)
+        {
+          graphics->setPixel(mirrorX, y + j, color);
+        }
       }
     }
 

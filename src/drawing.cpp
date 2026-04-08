@@ -37,12 +37,8 @@
 #include <mutex>
 
 #include "colordata.h"
-#include "deviceconfig.h"
-#include "effectmanager.h"
-#include "gfxbase.h"
-#include "jsonserializer.h"
 #include "ledbuffer.h"
-#include "ledstripeffect.h"
+#include "nd_network.h"
 #include "ntptimeclient.h"
 #include "systemcontainer.h"
 
@@ -292,7 +288,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
 
         graphics->PrepareFrame();
 
-        if (WiFi.isConnected())
+        if (nd_network::IsWiFiConnected())
             wifiPixelsDrawn = WiFiDraw();
 
         // If we didn't draw now, and it's been a while since we did, and we have at least one local effect, then draw the local effect instead

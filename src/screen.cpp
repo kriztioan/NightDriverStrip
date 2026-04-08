@@ -29,6 +29,7 @@
 //---------------------------------------------------------------------------
 
 #include "globals.h"
+#include "nd_network.h"
 
 #if USE_SCREEN
 
@@ -146,12 +147,11 @@ public:
         // WiFi info line 2
         auto lineHeight = display.fontHeight();
         display.setCursor(xMargin + 0, yMargin + lineHeight);
-        if (!WiFi.isConnected())
+        if (!nd_network::IsWiFiConnected())
             display.println("No Wifi");
         else
         {
-            const IPAddress address = WiFi.localIP();
-            display.println(str_sprintf("%ddB:%d.%d.%d.%d", (int)labs(WiFi.RSSI()), (int)address[0], (int)address[1], (int)address[2], (int)address[3]));
+            display.println(str_sprintf("%ddB:%s", abs(nd_network::GetWiFiRSSI()), nd_network::GetWiFiLocalIP().c_str()));
         }
 
         // Buffer Status Line 3
@@ -295,7 +295,7 @@ public:
         // Full header/footer for larger displays
         const uint16_t backColor = display.IsMonochrome() ? BLACK16 : Screen::to16bit(CRGB(0, 0, 64));
         static int lasteffect = g_ptrSystem->GetEffectManager().GetCurrentEffectIndex();
-        static String sip = WiFi.localIP().toString();
+        static String sip = nd_network::GetWiFiLocalIP();
         static String lastFooter;
         static uint32_t lastFullDraw = 0;
 
@@ -312,7 +312,7 @@ public:
         {
             lastFullDraw = millis();
             const int currentEffect = g_ptrSystem->GetEffectManager().GetCurrentEffectIndex();
-            const String currentIP = WiFi.localIP().toString();
+            const String currentIP = nd_network::GetWiFiLocalIP();
 
             if (bRedraw || lasteffect != currentEffect || sip != currentIP)
             {
@@ -339,7 +339,7 @@ public:
                 display.print(g_ptrSystem->GetEffectManager().GetCurrentEffectName());
                 yh += display.fontHeight();
 
-                String sIP = WiFi.isConnected() ? currentIP.c_str() : "No Wifi";
+                String sIP = nd_network::IsWiFiConnected() ? currentIP.c_str() : "No Wifi";
                 display.setTextColor(display.GetBorderColor(), backColor);
                 w = display.textWidth(sIP);
                 display.setCursor(display.width() / 2 - w / 2, yh);
