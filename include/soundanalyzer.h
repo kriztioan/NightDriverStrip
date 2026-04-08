@@ -54,7 +54,8 @@
 // Defaults below start with Mesmerizer values; others can diverge over time.
 
 // You can adjust the amount of compression (which makes the bar)
-struct AudioInputParams {
+struct AudioInputParams
+{
     float windowPowerCorrection;  // Windowing power correction (Hann ~4.0)
     float energyNoiseAdapt;       // Noise floor rise rate when signal present
     float energyNoiseDecay;       // Noise floor decay factor when below floor
@@ -70,7 +71,8 @@ struct AudioInputParams {
 };
 
 // Mesmerizer (default) tuning
-inline constexpr AudioInputParams kParamsMesmerizer{
+inline constexpr AudioInputParams kParamsMesmerizer
+{
     4.0f,      // windowPowerCorrection
     0.02f,     // energyNoiseAdapt
     0.98f,     // energyNoiseDecay
@@ -89,7 +91,8 @@ inline constexpr AudioInputParams kParamsMesmerizer{
 inline constexpr AudioInputParams kParamsPCRemote = kParamsMesmerizer;
 
 // M5 variants use a higher postScale by default
-inline constexpr AudioInputParams kParamsM5{
+inline constexpr AudioInputParams kParamsM5
+{
     4.0f,      // windowPowerCorrection
     0.02f,     // energyNoiseAdapt
     0.98f,     // energyNoiseDecay
@@ -103,7 +106,8 @@ inline constexpr AudioInputParams kParamsM5{
     1000000,   // quietEnvFloorGate (cutoff gates all ssound when below this level)
     1000.0f    // liveAttackPerSec
 };
-inline constexpr AudioInputParams kParamsM5Plus2{
+inline constexpr AudioInputParams kParamsM5Plus2
+{
     4.0f,      // windowPowerCorrection
     0.02f,     // energyNoiseAdapt
     0.98f,     // energyNoiseDecay
@@ -119,7 +123,8 @@ inline constexpr AudioInputParams kParamsM5Plus2{
 };
 
 // I2S External microphones (INMP441, etc.) use higher postScale and less aggressive gating
-inline constexpr AudioInputParams kParamsI2SExternal{
+inline constexpr AudioInputParams kParamsI2SExternal
+{
     4.0f,           // windowPowerCorrection (increased from 4.0f for more gain)
     0.02f,          // energyNoiseAdapt (slower noise adaptation)
     0.98f,          // energyNoiseDecay (slower noise floor decay)
@@ -217,57 +222,81 @@ class SoundAnalyzer : public ISoundAnalyzer // Non-audio case stub
     {
         return 0.0f;
     }
+
     float VURatioFade() const override
     {
         return 0.0f;
     }
+
     float VU() const override
     {
         return 0.0f;
     }
+
     float PeakVU() const override
     {
         return 0.0f;
     }
+
     float MinVU() const override
     {
         return 0.0f;
     }
+
     int AudioFPS() const override
     {
         return 0;
     }
+
     int SerialFPS() const override
     {
         return 0;
     }
-    bool IsRemoteAudioActive() const override { return false; }
+
+    bool IsRemoteAudioActive() const override
+    {
+        return false;
+    }
+
     const PeakData &Peaks() const override
     {
         return _emptyPeaks;
     }
+
     float Peak2Decay(int) const override
     {
         return 0.0f;
     }
+
     float Peak1Decay(int) const override
     {
         return 0.0f;
     }
+
     unsigned long LastPeak1Time(int) const override
     {
         return 0;
     }
+
     void SetPeakDecayRates(float, float) override
     {
     }
 
+    bool GetSimulateBeat() const override
+    {
+		return false;
+	}
+
+    int GetSimulateBPM() const override
+	{
+		return 0;
+	}
+
     void SetSimulateBeat(bool) override {}
     void SetSimulateBPM(int) override {}
-    bool GetSimulateBeat() const override { return false; }
-    int GetSimulateBPM() const override { return 0; }
     void RunSamplerPass() override {}
     void SimulateBeatPass() override {}
+
 };
 
 #else // Audio case
@@ -300,57 +329,105 @@ class SoundAnalyzerBase : public ISoundAnalyzer
 
     // Measured audio processing frames-per-second.
     // For diagnostics/telemetry; not critical to effects logic.
-    int AudioFPS() const override { return _AudioFPS; }
+    int AudioFPS() const override
+    {
+        return _AudioFPS;
+    }
 
     // Measured serial streaming FPS (if enabled).
     // For diagnostics; may be zero if not used.
-    int SerialFPS() const override { return _serialFPS; }
+    int SerialFPS() const override
+    {
+        return _serialFPS;
+    }
 
     // Indicates whether peaks came from local mic or remote source.
     // Effects may choose to show status based on this.
     // True if we used remote peaks recently
-    bool IsRemoteAudioActive() const override { return millis() - _msLastRemoteAudio <= AUDIO_PEAK_REMOTE_TIMEOUT; }
+    bool IsRemoteAudioActive() const override
+    {
+        return millis() - _msLastRemoteAudio <= AUDIO_PEAK_REMOTE_TIMEOUT;
+    }
 
     // Average normalized energy this frame (0..1 after gating/compression).
     // Updated in ProcessPeaksEnergy()/SetPeakDataFromRemote via UpdateVU().
-    float VU() const override { return _VU; }
+    float VU() const override
+    {
+        return _VU;
+    }
 
     // Current beat/level ratio value used by visual effects.
     // Typically maintained by higher-level audio logic.
     // Range ~[0..something], consumer-specific.
-    float VURatio() const override { return _VURatio; }
+    float VURatio() const override
+    {
+        return _VURatio;
+    }
 
     // Smoothed/decayed version of VURatio for more graceful visuals.
     // Use when you want beat emphasis without sharp jumps.
-    float VURatioFade() const override { return _VURatioFade; }
+    float VURatioFade() const override
+    {
+        return _VURatioFade;
+    }
 
     // Highest recent VU observed (peak hold with damping).
     // Useful for setting adaptive effect ceilings.
-    float PeakVU() const override { return _PeakVU; }
+    float PeakVU() const override
+    {
+        return _PeakVU;
+    }
 
     // Lowest recent VU observed (floor with damping).
     // Useful as denominator clamps for normalized ratios.
-    float MinVU() const override { return _MinVU; }
+    float MinVU() const override
+    {
+        return _MinVU;
+    }
 
     // Returns the latest per-band normalized peaks (0..1).
     // Pointer remains valid until next ProcessPeaksEnergy/SetPeakDataFromRemote.
-    const PeakData & Peaks() const override { return _Peaks; }
+    const PeakData & Peaks() const override
+    {
+        return _Peaks;
+    }
 
     // Returns the faster-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
-    float Peak1Decay(int band) const override { return (band >= 0 && band < NUM_BANDS) ? _peak1Decay[band] : 0.0f; }
+    float Peak1Decay(int band) const override
+    {
+        return (band >= 0 && band < NUM_BANDS) ? _peak1Decay[band] : 0.0f;
+    }
 
     // Returns the slower-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
-    float Peak2Decay(int band) const override { return (band >= 0 && band < NUM_BANDS) ? _peak2Decay[band] : 0.0f; }
+    float Peak2Decay(int band) const override
+    {
+        return (band >= 0 && band < NUM_BANDS) ? _peak2Decay[band] : 0.0f;
+    }
 
     // Returns the timestamp of the last time the primary peak for this band was updated.
-    unsigned long LastPeak1Time(int band) const override { return (band >= 0 && band < NUM_BANDS) ? _lastPeak1Time[band] : 0; }
+    unsigned long LastPeak1Time(int band) const override
+    {
+        return (band >= 0 && band < NUM_BANDS) ? _lastPeak1Time[band] : 0;
+    }
 
-    void SetSimulateBeat(bool b) override { _simulateBeat = b; }
-    void SetSimulateBPM(int bpm) override { _simBPM = bpm; }
-    bool GetSimulateBeat() const override { return _simulateBeat; }
-    int GetSimulateBPM() const override { return _simBPM; }
+    void SetSimulateBeat(bool b) override
+    {
+        _simulateBeat = b;
+    }
+    void SetSimulateBPM(int bpm) override
+    {
+        _simBPM = bpm;
+    }
+    bool GetSimulateBeat() const override
+    {
+        return _simulateBeat;
+    }
+    int GetSimulateBPM() const override
+    {
+        return _simBPM;
+    }
 
     void DecayPeaks();
     void UpdatePeakData();
@@ -358,11 +435,17 @@ class SoundAnalyzerBase : public ISoundAnalyzer
 
     // Return pointer to last captured raw samples (int16).
     // Valid until the next FillBufferI2S() call.
-    const int16_t *GetSampleBuffer() const { return ptrSampleBuffer.get(); }
+    const int16_t *GetSampleBuffer() const
+    {
+        return ptrSampleBuffer.get();
+    }
 
     // Return count of samples in the sample buffer (MAX_SAMPLES).
     // Pairs with GetSampleBuffer() when drawing waveforms.
-    size_t GetSampleBufferSize() const { return MAX_SAMPLES; }
+    size_t GetSampleBufferSize() const
+    {
+        return MAX_SAMPLES;
+    }
 
     // BeatEnhance
     //
@@ -469,7 +552,9 @@ class SoundAnalyzer : public SoundAnalyzerBase
 
     // Construct analyzer, allocate buffers (PSRAM-preferred), set initial state.
     // Throws std::runtime_error on allocation failure. Computes band layout once.
-    SoundAnalyzer() : SoundAnalyzerBase() {}
+    SoundAnalyzer() : SoundAnalyzerBase()
+    {
+    }
 
   protected:
     // Energy spectrum processing (implemented in soundanalyzer.cpp)
@@ -479,23 +564,6 @@ class SoundAnalyzer : public SoundAnalyzerBase
 };
 
 #endif
-
-#if ENABLE_AUDIO
-    #if M5STICKCPLUS2
-    using ProjectSoundAnalyzer = SoundAnalyzer<kParamsM5Plus2>;
-    #elif USE_M5
-    using ProjectSoundAnalyzer = SoundAnalyzer<kParamsM5>;
-    #elif USE_I2S_AUDIO
-    using ProjectSoundAnalyzer = SoundAnalyzer<kParamsI2SExternal>;
-    #else
-    using ProjectSoundAnalyzer = SoundAnalyzer<kParamsMesmerizer>;
-    #endif
-#else
-    using ProjectSoundAnalyzer = SoundAnalyzer;
-#endif
-
-extern ProjectSoundAnalyzer g_Analyzer;
-
 
 #if ENABLE_AUDIO
     #if M5STICKCPLUS2
