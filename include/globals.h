@@ -84,6 +84,7 @@
 //
 //---------------------------------------------------------------------------
 
+#pragma once
 
 //  See https://github.com/PlummersSoftwareLLC/NightDriverStrip/issues/515
 #define FASTLED_ESP32_FLASH_LOCK 1
@@ -92,7 +93,6 @@
 extern std::mutex g_buffer_mutex;
 
 #include <FastLED.h>
-
 // If we're not using GNU C, (unlikely in embedded, especially in this
 // heavily ESP/Arduino-accented probject) elide __attribute__ - but even
 // clang defines and supports this...
@@ -205,6 +205,7 @@ extern std::mutex g_buffer_mutex;
 #define FASTLED_INTERNAL            1   // Suppresses the compilation banner from FastLED
 #define __STDC_FORMAT_MACROS
 
+
 // Project Configuration
 //
 // One and only one of DEMO, SPECTRUM, ATOMLIGHT, etc. should be set to true by the build config for your project
@@ -224,6 +225,7 @@ extern std::mutex g_buffer_mutex;
     #include "custom_globals.h"
 
 #endif
+
 // This is a simple demo configuration used when no other project is defined; it's only purpose is
 // to serve as a build to be run for [all-deps]
 
@@ -245,7 +247,6 @@ extern std::mutex g_buffer_mutex;
 #ifndef RING_SIZE_0
     #define RING_SIZE_0             MATRIX_WIDTH
 #endif
-
 
 // Once you have a working project, selectively enable various additional features by setting
 // them to 1 in the list below.  This DEMO config assumes no audio (mic), or screen, etc.
@@ -745,6 +746,7 @@ extern const int g_aRingSizeTable[];
 // Headers that are only included when certain features are enabled
 
 #include "interfaces.h"
+#include "logger.h"
 #include "types.h"
 
 // 16-bit (5:6:5) color definitions for common colors
@@ -769,6 +771,3 @@ extern const int g_aRingSizeTable[];
     #include <SPI.h>
     #include <TFT_eSPI.h>
 #endif
-
-#include <RemoteDebug.h>
-extern RemoteDebug Debug;           // Let everyone in the project know about it.  If you don't have it, delete this
