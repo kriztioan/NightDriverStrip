@@ -39,11 +39,17 @@ namespace nd_network {
     void NetworkHandlingLoopEntry(void *);
     void InitNetworkCLI();
 
+    // Configuration
+    String GetWiFiLocalIP();
+
     // Status & Telemetry
     bool IsWiFiConnected();
     int GetWiFiRSSI();
-    String GetWiFiLocalIP();
+    void SetWiFiModeSTA();
+
+    // Identity
     void GetMacAddressRaw(uint8_t *mac);
+    String GetMacAddressPretty();
 
     // Low-level Socket Utilities
     bool SetSocketBlockingEnabled(int fd, bool blocking);
@@ -72,10 +78,8 @@ enum NetworkPort : int
 
     namespace nd_network {
         String GetMacAddress();
-        String GetMacAddressPretty();
         bool GetWiFiHostByName(const char* hostname, IPAddress& ip);
         int GetWiFiStatus();
-        void SetWiFiModeSTA();
         const char* WLtoString(int status);
     };
 

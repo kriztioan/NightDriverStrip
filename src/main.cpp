@@ -367,13 +367,13 @@ void setup()
     ESP_ERROR_CHECK(err);
 
     #if ENABLE_ESPNOW
-        SetWiFiModeSTA();
+        nd_network::SetWiFiModeSTA();
 
         if (esp_now_init() != ESP_OK)
             throw std::runtime_error("Error initializing ESP-NOW");
         // Register receive callback function
         esp_now_register_recv_cb(onReceiveESPNOW);
-        debugI("ESP-NOW initialized with MAC address: %s", GetMacAddressPretty().c_str());
+        debugI("ESP-NOW initialized with MAC address: %s", nd_network::GetMacAddressPretty().c_str());
     #endif
 
     #if ENABLE_WIFI
