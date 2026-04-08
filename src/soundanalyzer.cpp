@@ -30,6 +30,7 @@
 //---------------------------------------------------------------------------
 
 #include "globals.h"
+
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -56,43 +57,36 @@
     #include <M5Unified.h>
 #endif
 
-// Explicit implementations of template methods for SoundAnalyzer
-
-// SoundAnalyzer
+// SoundAnalyzerBase
 //
 // Construct analyzer, allocate buffers (PSRAM-preferred), set initial state.
 // Throws std::runtime_error on allocation failure. Computes band layout once.
-template<const AudioInputParams& Params>
-SoundAnalyzer<Params>::SoundAnalyzer()
-    : _FFT(_vReal.data(), _vImaginary.data(), MAX_SAMPLES, SAMPLING_FREQUENCY, true) // Enable precomputed weights
+SoundAnalyzerBase::SoundAnalyzerBase()
+    : _FFT(_vReal.data(), _vImaginary.data(), MAX_SAMPLES, SAMPLING_FREQUENCY, true)
 {
     ptrSampleBuffer.reset((int16_t *)heap_caps_malloc(MAX_SAMPLES * sizeof(int16_t), MALLOC_CAP_8BIT));
     if (!ptrSampleBuffer)
+    {
         throw std::runtime_error("Failed to allocate sample buffer");
+    }
     _oldVU = _oldPeakVU = _oldMinVU = 0.0f;
-    this->ComputeBandLayout();
-    this->Reset();
+    ComputeBandLayout();
+    Reset();
 }
 
-// ~SoundAnalyzer
-//
-// Free any heap/PSRAM buffers allocated by the constructor.
-// Safe to call at shutdown/reset.
-template<const AudioInputParams& Params>
-SoundAnalyzer<Params>::~SoundAnalyzer()
+SoundAnalyzerBase::~SoundAnalyzerBase()
 {
     // Stop I2S if it was started
     #if !USE_M5 && (ELECROW || USE_I2S_AUDIO || !defined(USE_I2S_AUDIO))
-        i2s_stop(I2S_NUM_0);
-        i2s_driver_uninstall(I2S_NUM_0);
+    i2s_stop(I2S_NUM_0);
+    i2s_driver_uninstall(I2S_NUM_0);
     #endif
 }
 
 // Reset
 //
 // Reset and clear the FFT buffers
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::Reset()
+void SoundAnalyzerBase::Reset()
 {
     _vReal.fill(0.0f);
     _vImaginary.fill(0.0f);
@@ -102,8 +96,7 @@ void SoundAnalyzer<Params>::Reset()
 // FFT
 //
 // Perform the FFT
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::FFT()
+void SoundAnalyzerBase::FFT()
 {
     // _FFT is now a member variable to avoid ctor/dtor overhead per frame.
     // Windowing and computation use either the Hann window or others as configured.
@@ -115,8 +108,7 @@ void SoundAnalyzer<Params>::FFT()
 // SampleAudio
 //
 // Sample the audio
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::SampleAudio()
+void SoundAnalyzerBase::SampleAudio()
 {
     size_t bytesRead = 0;
 
@@ -125,14 +117,14 @@ void SoundAnalyzer<Params>::SampleAudio()
 #endif
 
 #if USE_M5
-    bytesRead = this->SampleM5();
+    bytesRead = SampleM5();
 #else
     // Attempt to sample from all supported backends.
     // Those not active in the current configuration will return 0 immediately.
-    if (bytesRead == 0) bytesRead = this->SampleI2S_Modern();
-    if (bytesRead == 0) bytesRead = this->SampleI2S_Legacy();
-    if (bytesRead == 0) bytesRead = this->SampleADC_Modern();
-    if (bytesRead == 0) bytesRead = this->SampleADC_Legacy();
+    if (bytesRead == 0) bytesRead = SampleI2S_Modern();
+    if (bytesRead == 0) bytesRead = SampleI2S_Legacy();
+    if (bytesRead == 0) bytesRead = SampleADC_Modern();
+    if (bytesRead == 0) bytesRead = SampleADC_Legacy();
 #endif
 
     if (bytesRead == 0) return;
@@ -145,8 +137,7 @@ void SoundAnalyzer<Params>::SampleAudio()
 // UpdateVU
 //
 // Update the VU and peak values based on the new sample. Instant rise, dampened fall.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::UpdateVU(float newval)
+void SoundAnalyzerBase::UpdateVU(float newval)
 {
     // If VUDAMPEN is 0, this simplifies to _VU = newval
     _VU = (newval > _oldVU) ? newval : (_oldVU * VUDAMPEN + newval) / (VUDAMPEN + 1);
@@ -166,8 +157,7 @@ void SoundAnalyzer<Params>::UpdateVU(float newval)
 // This computes the start and end bins for each band based on the sampling frequency,
 // ensuring that the bands are spaced logarithmically or in Mel scale as configured.
 // The results are stored in _bandBinStart and _bandBinEnd arrays.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::ComputeBandLayout()
+void SoundAnalyzerBase::ComputeBandLayout()
 {
     const float fMin = LOWEST_FREQ;
     const float fMax = std::min<float>(HIGHEST_FREQ, SAMPLING_FREQUENCY / 2.0f);
@@ -200,157 +190,6 @@ void SoundAnalyzer<Params>::ComputeBandLayout()
     _bandBinEnd[NUM_BANDS - 1] = (MAX_SAMPLES / 2 - 1);
 }
 
-// ProcessPeaksEnergy
-//
-// Processes the FFT results and extracts energy per frequency band, applying scaling and normalization.
-template<const AudioInputParams& Params>
-const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
-{
-    // Band offset handled in ComputeBandLayout so index 0 is the lowest VISIBLE band
-     float frameMax = 0.0f;
-     float frameSumRaw = 0.0f;
-     float noiseSum = 0.0f;
-     float noiseMaxAll = 0.0f; // Tracks max noise floor across bands
-     // Display gain and band floor constants
-     const float kDisplayGain = _params.postScale;  // Use postScale from AudioInputParams instead of hardcoded value
-     constexpr float kBandFloorMin = 0.01f;
-     constexpr float kBandFloorScale = 0.05f;
-
-    // Attack rate from mic params (frame-rate independent)
-    const float kLiveAttackPerSec = _params.liveAttackPerSec;
-    // Use reciprocal of AudioFPS for frame-rate independent attack limiting
-    float dt = (_AudioFPS > 0) ? (1.0f / (float)_AudioFPS) : 0.016f;
-    // Fallback to reasonable default if FPS is invalid
-    if (dt <= 0.0f || dt > 0.1f)
-        dt = 0.016f;
-    for (int b = 0; b < NUM_BANDS; b++)
-    {
-        int start = _bandBinStart[b];
-        int end = _bandBinEnd[b];
-        if (end <= start)
-        {
-            _vPeaks[b] = 0.0f;
-            continue;
-        }
-
-        // Sum of squares using inner_product (hipster voodoo for power calculation)
-        float sumPower = std::inner_product(_vReal.begin() + start, _vReal.begin() + end,
-                                           _vReal.begin() + start, 0.0f);
-
-        int widthBins = end - start;
-        float avgPower = (widthBins > 0) ? (sumPower / (float)widthBins) : 0.0f;
-        avgPower *= _params.windowPowerCorrection;
-
-        // Apply aggressive logarithmic bass suppression with steeper initial curve
-        float bandRatio = (float)b / (NUM_BANDS - 1);  // 0.0 to 1.0 across all bands
-
-        // Two-stage suppression: moderate suppression on first few bands, then quick recovery
-        float suppression;
-        if (bandRatio < 0.1f) {  // First 10% of bands get moderate suppression
-            // Quadratic suppression for the very first bands (band 0 gets maximum suppression)
-            float localRatio = bandRatio / 0.1f;  // 0.0 to 1.0 over first 10% of spectrum
-            suppression = 0.005f + (0.05f - 0.005f) * (localRatio * localRatio);  // 0.005 to 0.05 (99.5% to 95% attenuation)
-        } else if (bandRatio < 0.4f) {  // Next 30% get moderate suppression with quick recovery
-            // Exponential recovery from 0.05 to bandCompHigh over bands 10-40%
-            float localRatio = (bandRatio - 0.1f) / 0.3f;  // 0.0 to 1.0 over 10-40% of spectrum
-            suppression = 0.05f * expf(localRatio * logf(_params.bandCompHigh / 0.05f));
-        } else {
-            // Full gain for upper 60% of spectrum
-            suppression = _params.bandCompHigh;
-        }
-        avgPower *= suppression;
-
-        // Track pre-subtraction max for SNR gating
-        if (avgPower > frameSumRaw)
-            frameSumRaw = avgPower;
-
-        if (avgPower > _noiseFloor[b])
-            _noiseFloor[b] = _noiseFloor[b] * (1.0f - _params.energyNoiseAdapt) + (float)avgPower * _params.energyNoiseAdapt;
-        else
-            _noiseFloor[b] *= _params.energyNoiseDecay;
-
-        // Accumulate noise stats
-        noiseSum += _noiseFloor[b];
-        noiseMaxAll = std::max(noiseMaxAll, _noiseFloor[b]);
-
-        float signal = std::max(0.0f, (float)avgPower - _noiseFloor[b]);
-
-        #if ENABLE_AUDIO_SMOOTHING
-            // Weighted average: 0.25 * (2 * current + left + right)
-            float left = (b > 0) ? _rawPrev[b - 1] : signal;
-            float right = (b < NUM_BANDS - 1) ? _rawPrev[b + 1] : signal;
-            float smoothed = 0.25f * (2.0f * signal + left + right);
-            _rawPrev[b] = smoothed;
-            _vPeaks[b] = smoothed;
-            if (smoothed > frameMax)
-                frameMax = smoothed;
-        #else
-            _vPeaks[b] = signal;
-            if (signal > frameMax)
-                frameMax = signal;
-        #endif
-    }
-
-    // Manually clamp back the bands, as they are vastly over-represented
-
-    if (frameMax > _energyMaxEnv)
-        _energyMaxEnv = frameMax;
-    else
-        _energyMaxEnv = std::max(_params.energyMinEnv, _energyMaxEnv * _params.energyEnvDecay);
-
-    // Raw SNR-based frame gate (pre-normalization) to suppress steady HVAC and similar backgrounfd noises
-
-    float snrRaw = frameSumRaw / (noiseMaxAll + 1e-9f);
-    if (snrRaw < _params.frameSNRGate)
-    {
-        _vPeaks.fill(0.0f);
-        _Peaks.fill(0.0f);
-        this->UpdateVU(0.0f);
-        return _Peaks;
-    }
-
-    // Anchor normalization to noise-derived floor to avoid auto-gain blow-up
-    float noiseMean = noiseSum / (float)NUM_BANDS;
-    float envFloorRaw = noiseMean * _params.envFloorFromNoise; // raw (unclamped) env floor
-    // Quiet environment gate: if the derived env floor is below a configured threshold, suppress the whole frame
-    if (_params.quietEnvFloorGate > 0.0f && envFloorRaw < _params.quietEnvFloorGate)
-    {
-        _vPeaks.fill(0.0f);
-        _Peaks.fill(0.0f);
-        this->UpdateVU(0.0f);
-        return _Peaks;
-    }
-
-    float envFloor = std::max(_params.energyMinEnv, envFloorRaw);
-    float normDen = std::max(_energyMaxEnv, envFloor);
-    const float invEnv = 1.0f / normDen;
-    float sumNorm = 0.0f;
-
-    // Now that layout skips the lowest bins, emit all NUM_BANDS directly with no reindexing
-    for (int b = 0; b < NUM_BANDS; b++)
-    {
-        float vTarget = std::clamp(powf(std::max(0.0f, _vPeaks[b] * invEnv), _params.compressGamma), 0.0f, 1.0f);
-        vTarget = std::clamp(vTarget * kDisplayGain, 0.0f, 1.0f);
-
-        const float bandFloor = std::max(kBandFloorMin * 1.0f, kBandFloorScale); // Fixed kBandFloorMin usage
-        if (vTarget < bandFloor) { vTarget = 0.0f; }
-        float vCurr = _livePeaks[b];
-        float vNew = vTarget;
-        if (vTarget > vCurr)
-        {
-            const float maxRise = kLiveAttackPerSec * dt;
-            vNew = std::min(vTarget, vCurr + maxRise);
-        }
-        vNew = std::clamp(vNew, 0.0f, 1.0f);
-        _livePeaks[b] = vNew;
-        _vPeaks[b] = vNew;
-        _Peaks[b] = vNew;
-        sumNorm += vNew;
-    }
-    this->UpdateVU(sumNorm / (float)NUM_BANDS);
-    return _Peaks;
-}
-
 // BeatEnhance
 //
 // Looks like pure voodoo, but it returns the multiplier by which to scale a value to enhance it
@@ -360,14 +199,15 @@ const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
 //
 // Compute a blend factor using VURatioFade to "pulse" visuals.
 // amt in [0..1] controls how strongly the ratio influences the result.
-template<const AudioInputParams& Params>
-float SoundAnalyzer<Params>::BeatEnhance(float amt)
+float SoundAnalyzerBase::BeatEnhance(float amt)
 {
     return ((1.0f - amt) + (_VURatioFade / 2.0f) * amt);
 }
 
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::InitAudioInput()
+// InitAudioInput
+//
+// Entry point for configuring board-specific audio input (M5, I2S Digital, or I2S ADC Analog).
+void SoundAnalyzerBase::InitAudioInput()
 {
 #if INPUT_PIN < 0
     debugI("Audio: INPUT_PIN < 0, skipping hardware initialization. SimBeat only.");
@@ -377,15 +217,15 @@ void SoundAnalyzer<Params>::InitAudioInput()
     debugV("Begin InitAudioInput...");
 
 #if USE_M5
-    this->InitM5();
+    InitM5();
 #else
     // Digital Microphones
-    this->InitI2S_Modern();
-    this->InitI2S_Legacy();
+    InitI2S_Modern();
+    InitI2S_Legacy();
 
     // Analog Microphones
-    this->InitADC_Modern();
-    this->InitADC_Legacy();
+    InitADC_Modern();
+    InitADC_Legacy();
 #endif
     debugV("InitAudioInput Complete\n");
 }
@@ -394,8 +234,7 @@ void SoundAnalyzer<Params>::InitAudioInput()
 //
 // Apply time-based decay to the two peak overlay arrays.
 // Called once per frame; uses AppTime.LastFrameTime() and configurable rates.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::DecayPeaks()
+void SoundAnalyzerBase::DecayPeaks()
 {
     // Use reciprocal of AudioFPS for frame-rate independent decay timing
     float audioFrameTime = (_AudioFPS > 0) ? (1.0f / (float)_AudioFPS) : 0.016f;
@@ -415,8 +254,7 @@ void SoundAnalyzer<Params>::DecayPeaks()
 //
 // Update the per-band decay overlays from the latest peaks.
 // Rises are limited by VU_REACTIVITY_RATIO; records timestamps on new primary peaks.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::UpdatePeakData()
+void SoundAnalyzerBase::UpdatePeakData()
 {
     const float lastFrameTime = g_Values.AppTime.LastFrameTime();
     const float maxInc1 = std::max(0.0f, lastFrameTime * _peak1DecayRate * (float)VU_REACTIVITY_RATIO);
@@ -442,8 +280,7 @@ void SoundAnalyzer<Params>::UpdatePeakData()
 //
 // Configure how quickly the two decay overlays drop over time.
 // r1 = fast track, r2 = slow track; higher = faster decay.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::SetPeakDecayRates(float r1, float r2)
+void SoundAnalyzerBase::SetPeakDecayRates(float r1, float r2)
 {
     _peak1DecayRate = r1;
     _peak2DecayRate = r2;
@@ -453,14 +290,13 @@ void SoundAnalyzer<Params>::SetPeakDecayRates(float r1, float r2)
 //
 // Accept externally provided peaks (e.g., over WiFi) and update internal state.
 // Also recomputes VU from the new band values and records source time.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::SetPeakDataFromRemote(const PeakData &peaks)
+void SoundAnalyzerBase::SetPeakDataFromRemote(const PeakData &peaks)
 {
     _msLastRemoteAudio = millis();
     _Peaks = peaks;
     _vPeaks = _Peaks;
     float sum = std::accumulate(_vPeaks.begin(), _vPeaks.end(), 0.0f);
-    this->UpdateVU(sum / (float)NUM_BANDS);
+    UpdateVU(sum / (float)NUM_BANDS);
 }
 
 #if ENABLE_AUDIO_DEBUG
@@ -468,8 +304,7 @@ void SoundAnalyzer<Params>::SetPeakDataFromRemote(const PeakData &peaks)
 //
 // Print per-band [start-end] bin ranges over Serial for debugging.
 // Useful to verify spacing and coverage with current config.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::DumpBandLayout() const
+void SoundAnalyzerBase::DumpBandLayout() const
 {
     Serial.println("Band layout (start-end):");
     for (int b = 0; b < NUM_BANDS; b++)
@@ -483,8 +318,10 @@ void SoundAnalyzer<Params>::DumpBandLayout() const
 }
 #endif
 
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::SimulateBeatPass()
+// SimulateBeatPass
+//
+// Generates a mock "beat" at the configured BPM to allow visual testing when no mic is present or active.
+void SoundAnalyzerBase::SimulateBeatPass()
 {
     // --- Beat Timing Calculation ---
     const float beatsPerSecond = _simBPM / 60.0f;
@@ -517,42 +354,40 @@ void SoundAnalyzer<Params>::SimulateBeatPass()
     }
 
     _Peaks = simulatedPeaks;
-    this->UpdateVU(targetVU);
+    UpdateVU(targetVU);
 }
 
 // RunSamplerPass
 //
 // Perform one audio acquisition/processing step.
 // Uses local mic if no recent remote peaks; otherwise trusts remote and only updates VU.
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::RunSamplerPass()
+void SoundAnalyzerBase::RunSamplerPass()
 {
     if (_simulateBeat)
     {
-        this->SimulateBeatPass();
+        SimulateBeatPass();
         return;
     }
 
     if (millis() - _msLastRemoteAudio > AUDIO_PEAK_REMOTE_TIMEOUT)
     {
         // Use local microphone - type determined at compile time
-        this->Reset();
-        this->SampleAudio();
-        this->FFT();
-        this->ProcessPeaksEnergy();
+        Reset();
+        SampleAudio();
+        FFT();
+        ProcessPeaksEnergy();
     }
     else
     {
         // Using remote data - just update VU from existing peaks
         float sum = std::accumulate(_Peaks.begin(), _Peaks.end(), 0.0f);
-        this->UpdateVU(sum / NUM_BANDS);
+        UpdateVU(sum / NUM_BANDS);
     }
 }
 
 // --- Private Initialization Helpers ---
 
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::InitM5()
+void SoundAnalyzerBase::InitM5()
 {
 #if USE_M5
     debugI("Audio: Initializing M5Stack Microphone");
@@ -568,8 +403,7 @@ void SoundAnalyzer<Params>::InitM5()
 #endif
 }
 
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::InitI2S_Modern()
+void SoundAnalyzerBase::InitI2S_Modern()
 {
 #if (USE_I2S_AUDIO || ELECROW) && IS_IDF5
     debugI("Audio: Initializing I2S Digital Mic (Modern) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, INPUT_PIN);
@@ -594,8 +428,7 @@ void SoundAnalyzer<Params>::InitI2S_Modern()
 #endif
 }
 
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::InitI2S_Legacy()
+void SoundAnalyzerBase::InitI2S_Legacy()
 {
 #if (USE_I2S_AUDIO || ELECROW) && !IS_IDF5
     debugI("Audio: Initializing I2S Digital Mic (Legacy) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, INPUT_PIN);
@@ -627,8 +460,7 @@ void SoundAnalyzer<Params>::InitI2S_Legacy()
 #endif
 }
 
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::InitADC_Modern()
+void SoundAnalyzerBase::InitADC_Modern()
 {
 #if !USE_M5 && !USE_I2S_AUDIO && IS_IDF5
     debugI("Audio: Initializing I2S ADC Analog Mic (Modern) on Channel 0");
@@ -659,8 +491,7 @@ void SoundAnalyzer<Params>::InitADC_Modern()
 #endif
 }
 
-template<const AudioInputParams& Params>
-void SoundAnalyzer<Params>::InitADC_Legacy()
+void SoundAnalyzerBase::InitADC_Legacy()
 {
 #if !USE_M5 && !USE_I2S_AUDIO && !IS_IDF5 && defined(SOC_I2S_SUPPORTS_ADC)
     debugI("Audio: Initializing I2S ADC Analog Mic (Legacy) on Channel 0");
@@ -689,20 +520,20 @@ void SoundAnalyzer<Params>::InitADC_Legacy()
 
 // --- Private Sampling Helpers ---
 
-template<const AudioInputParams& Params>
-size_t SoundAnalyzer<Params>::SampleM5()
+size_t SoundAnalyzerBase::SampleM5()
 {
     size_t bytesRead = 0;
 #if USE_M5
     constexpr auto bytesExpected = MAX_SAMPLES * sizeof(ptrSampleBuffer[0]);
     if (M5.Mic.record((int16_t *)ptrSampleBuffer.get(), MAX_SAMPLES, SAMPLING_FREQUENCY, false))
+    {
         bytesRead = bytesExpected;
+    }
 #endif
     return bytesRead;
 }
 
-template<const AudioInputParams& Params>
-size_t SoundAnalyzer<Params>::SampleI2S_Modern()
+size_t SoundAnalyzerBase::SampleI2S_Modern()
 {
     size_t bytesReadTotal = 0;
 #if (USE_I2S_AUDIO || ELECROW) && IS_IDF5
@@ -725,8 +556,7 @@ size_t SoundAnalyzer<Params>::SampleI2S_Modern()
     return bytesReadTotal;
 }
 
-template<const AudioInputParams& Params>
-size_t SoundAnalyzer<Params>::SampleI2S_Legacy()
+size_t SoundAnalyzerBase::SampleI2S_Legacy()
 {
     size_t bytesRead = 0;
 #if (USE_I2S_AUDIO || ELECROW) && !IS_IDF5
@@ -767,16 +597,17 @@ size_t SoundAnalyzer<Params>::SampleI2S_Legacy()
     return bytesRead;
 }
 
-template<const AudioInputParams& Params>
-size_t SoundAnalyzer<Params>::SampleADC_Modern()
+size_t SoundAnalyzerBase::SampleADC_Modern()
 {
     size_t ret_num = 0;
 #if !USE_M5 && !USE_I2S_AUDIO && IS_IDF5
     constexpr size_t bytesToRead = MAX_SAMPLES * sizeof(uint16_t);
     esp_err_t err = adc_continuous_read(_adc_handle, (uint8_t*)ptrSampleBuffer.get(), bytesToRead, (uint32_t*)&ret_num, 0);
 
-    if (err == ESP_OK) {
-        for (int i = 0; i < MAX_SAMPLES; i++) {
+    if (err == ESP_OK)
+    {
+        for (int i = 0; i < MAX_SAMPLES; i++)
+        {
             if (i * 2 >= ret_num) break;
             uint16_t val = ptrSampleBuffer[i];
             uint16_t data = val & 0xFFF; // Keep 12 bits
@@ -787,8 +618,7 @@ size_t SoundAnalyzer<Params>::SampleADC_Modern()
     return ret_num;
 }
 
-template<const AudioInputParams& Params>
-size_t SoundAnalyzer<Params>::SampleADC_Legacy()
+size_t SoundAnalyzerBase::SampleADC_Legacy()
 {
     size_t bytesRead = 0;
 #if !USE_M5 && !USE_I2S_AUDIO && !IS_IDF5 && defined(SOC_I2S_SUPPORTS_ADC)
@@ -801,6 +631,188 @@ size_t SoundAnalyzer<Params>::SampleADC_Legacy()
     }
 #endif
     return bytesRead;
+}
+
+// SoundAnalyzer<Params>
+//
+// Explicit implementations of template methods for SoundAnalyzer
+
+// ProcessPeaksEnergy
+//
+// Processes the FFT results and extracts energy per frequency band, applying scaling and normalization.
+template<const AudioInputParams& Params>
+const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
+{
+    // Band offset handled in ComputeBandLayout so index 0 is the lowest VISIBLE band
+    float frameMax = 0.0f;
+    float frameSumRaw = 0.0f;
+    float noiseSum = 0.0f;
+    float noiseMaxAll = 0.0f; // Tracks max noise floor across bands
+
+    // Display gain and band floor constants
+    const float kDisplayGain = _params.postScale;  // Use postScale from AudioInputParams instead of hardcoded value
+    constexpr float kBandFloorMin = 0.01f;
+    constexpr float kBandFloorScale = 0.05f;
+
+    // Attack rate from mic params (frame-rate independent)
+    const float kLiveAttackPerSec = _params.liveAttackPerSec;
+    // Use reciprocal of AudioFPS for frame-rate independent attack limiting
+    float dt = (_AudioFPS > 0) ? (1.0f / (float)_AudioFPS) : 0.016f;
+
+    // Fallback to reasonable default if FPS is invalid
+    if (dt <= 0.0f || dt > 0.1f)
+    {
+        dt = 0.016f;
+    }
+
+    for (int b = 0; b < NUM_BANDS; b++)
+    {
+        int start = _bandBinStart[b];
+        int end = _bandBinEnd[b];
+        if (end <= start)
+        {
+            _vPeaks[b] = 0.0f;
+            continue;
+        }
+
+        // Sum of squares using inner_product (hipster voodoo for power calculation)
+        float sumPower = std::inner_product(_vReal.begin() + start, _vReal.begin() + end,
+                                           _vReal.begin() + start, 0.0f);
+
+        int widthBins = end - start;
+        float avgPower = (widthBins > 0) ? (sumPower / (float)widthBins) : 0.0f;
+        avgPower *= _params.windowPowerCorrection;
+
+        // Apply aggressive logarithmic bass suppression with steeper initial curve
+        float bandRatio = (float)b / (NUM_BANDS - 1);  // 0.0 to 1.0 across all bands
+
+        // Two-stage suppression: moderate suppression on first few bands, then quick recovery
+        float suppression;
+        if (bandRatio < 0.1f)
+        {  // First 10% of bands get moderate suppression
+            // Quadratic suppression for the very first bands (band 0 gets maximum suppression)
+            float localRatio = bandRatio / 0.1f;  // 0.0 to 1.0 over first 10% of spectrum
+            suppression = 0.005f + (0.05f - 0.005f) * (localRatio * localRatio);  // 0.005 to 0.05 (99.5% to 95% attenuation)
+        }
+        else if (bandRatio < 0.4f)
+        {  // Next 30% get moderate suppression with quick recovery
+            // Exponential recovery from 0.05 to bandCompHigh over bands 10-40%
+            float localRatio = (bandRatio - 0.1f) / 0.3f;  // 0.0 to 1.0 over 10-40% of spectrum
+            suppression = 0.05f * expf(localRatio * logf(_params.bandCompHigh / 0.05f));
+        }
+        else
+        {
+            // Full gain for upper 60% of spectrum
+            suppression = _params.bandCompHigh;
+        }
+        avgPower *= suppression;
+
+        // Track pre-subtraction max for SNR gating
+        if (avgPower > frameSumRaw)
+        {
+            frameSumRaw = avgPower;
+        }
+
+        if (avgPower > _noiseFloor[b])
+        {
+            _noiseFloor[b] = _noiseFloor[b] * (1.0f - _params.energyNoiseAdapt) + (float)avgPower * _params.energyNoiseAdapt;
+        }
+        else
+        {
+            _noiseFloor[b] *= _params.energyNoiseDecay;
+        }
+
+        // Accumulate noise stats
+        noiseSum += _noiseFloor[b];
+        noiseMaxAll = std::max(noiseMaxAll, _noiseFloor[b]);
+
+        float signal = std::max(0.0f, (float)avgPower - _noiseFloor[b]);
+
+        #if ENABLE_AUDIO_SMOOTHING
+            // Weighted average: 0.25 * (2 * current + left + right)
+            float left = (b > 0) ? _rawPrev[b - 1] : signal;
+            float right = (b < NUM_BANDS - 1) ? _rawPrev[b + 1] : signal;
+            float smoothed = 0.25f * (2.0f * signal + left + right);
+            _rawPrev[b] = smoothed;
+            _vPeaks[b] = smoothed;
+            if (smoothed > frameMax)
+            {
+                frameMax = smoothed;
+            }
+        #else
+            _vPeaks[b] = signal;
+            if (signal > frameMax)
+            {
+                frameMax = signal;
+            }
+        #endif
+    }
+
+    // Manually clamp back the bands, as they are vastly over-represented
+
+    if (frameMax > _energyMaxEnv)
+    {
+        _energyMaxEnv = frameMax;
+    }
+    else
+    {
+        _energyMaxEnv = std::max(_params.energyMinEnv, _energyMaxEnv * _params.energyEnvDecay);
+    }
+
+    // Raw SNR-based frame gate (pre-normalization) to suppress steady HVAC and similar backgrounfd noises
+
+    float snrRaw = frameSumRaw / (noiseMaxAll + 1e-9f);
+    if (snrRaw < _params.frameSNRGate)
+    {
+        _vPeaks.fill(0.0f);
+        _Peaks.fill(0.0f);
+        UpdateVU(0.0f);
+        return _Peaks;
+    }
+
+    // Anchor normalization to noise-derived floor to avoid auto-gain blow-up
+    float noiseMean = noiseSum / (float)NUM_BANDS;
+    float envFloorRaw = noiseMean * _params.envFloorFromNoise; // raw (unclamped) env floor
+    // Quiet environment gate: if the derived env floor is below a configured threshold, suppress the whole frame
+    if (_params.quietEnvFloorGate > 0.0f && envFloorRaw < _params.quietEnvFloorGate)
+    {
+        _vPeaks.fill(0.0f);
+        _Peaks.fill(0.0f);
+        UpdateVU(0.0f);
+        return _Peaks;
+    }
+
+    float envFloor = std::max(_params.energyMinEnv, envFloorRaw);
+    float normDen = std::max(_energyMaxEnv, envFloor);
+    const float invEnv = 1.0f / normDen;
+    float sumNorm = 0.0f;
+
+    // Now that layout skips the lowest bins, emit all NUM_BANDS directly with no reindexing
+    for (int b = 0; b < NUM_BANDS; b++)
+    {
+        float vTarget = std::clamp(powf(std::max(0.0f, _vPeaks[b] * invEnv), _params.compressGamma), 0.0f, 1.0f);
+        vTarget = std::clamp(vTarget * kDisplayGain, 0.0f, 1.0f);
+
+        const float bandFloor = std::max(kBandFloorMin * 1.0f, kBandFloorScale); // Fixed kBandFloorMin usage
+        if (vTarget < bandFloor)
+        {
+            vTarget = 0.0f;
+        }
+        float vCurr = _livePeaks[b];
+        float vNew = vTarget;
+        if (vTarget > vCurr)
+        {
+            const float maxRise = kLiveAttackPerSec * dt;
+            vNew = std::min(vTarget, vCurr + maxRise);
+        }
+        vNew = std::clamp(vNew, 0.0f, 1.0f);
+        _livePeaks[b] = vNew;
+        _vPeaks[b] = vNew;
+        _Peaks[b] = vNew;
+        sumNorm += vNew;
+    }
+    UpdateVU(sumNorm / (float)NUM_BANDS);
+    return _Peaks;
 }
 
 // Explicit implementations for all standard AudioInputParams configurations
