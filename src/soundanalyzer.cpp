@@ -41,17 +41,6 @@
 #if ENABLE_AUDIO
 
 #include <arduinoFFT.h>
-#include <esp_idf_version.h>
-
-#define IS_IDF5 (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0))
-
-#if IS_IDF5
-    #include <driver/i2s_std.h>
-    #include <esp_adc/adc_continuous.h>
-#else
-    #include <driver/adc.h>
-    #include <driver/i2s.h>
-#endif
 
 #if USE_M5
     #include <M5Unified.h>
@@ -76,11 +65,23 @@ SoundAnalyzerBase::SoundAnalyzerBase()
 
 SoundAnalyzerBase::~SoundAnalyzerBase()
 {
-    // Stop I2S if it was started
-    #if !USE_M5 && (ELECROW || USE_I2S_AUDIO || !defined(USE_I2S_AUDIO))
+#if IS_IDF5
+    // Stop the hardware first to kill any active DMA transfers
+    if (_rx_handle)
+    {
+        i2s_channel_disable(_rx_handle);
+        i2s_del_channel(_rx_handle);
+    }
+    if (_adc_handle)
+    {
+        adc_continuous_stop(_adc_handle);
+        adc_continuous_deinit(_adc_handle);
+    }
+#else
+    // Legacy cleanup - i2s_stop terminates DMA
     i2s_stop(I2S_NUM_0);
     i2s_driver_uninstall(I2S_NUM_0);
-    #endif
+#endif
 }
 
 // Reset

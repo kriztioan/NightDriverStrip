@@ -41,6 +41,17 @@
 #include <array>
 #include <memory>
 
+#include <esp_idf_version.h>
+#define IS_IDF5 (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0))
+
+#if IS_IDF5
+    #include <driver/i2s_std.h>
+    #include <esp_adc/adc_continuous.h>
+#else
+    #include <driver/adc.h>
+    #include <driver/i2s.h>
+#endif
+
 #ifndef SPECTRUM_BAND_SCALE_MEL
 #define SPECTRUM_BAND_SCALE_MEL 1
 #endif
