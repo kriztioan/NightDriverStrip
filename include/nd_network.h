@@ -32,13 +32,20 @@
 #include "esp_mac.h"
 #include "types.h"
 
+// Prototypes that should exist regardless of ENABLE_WIFI to
+// keep callers clean.
 namespace nd_network {
-    // Prototypes that should exist regardless of ENABLE_WIFI to
-    // keep callers clean.
-    void GetMacAddressRaw(uint8_t *mac);
-    void InitNetworkCLI();
-    bool IsWiFiConnected();
+    // Lifecycle & Loop
     void NetworkHandlingLoopEntry(void *);
+    void InitNetworkCLI();
+
+    // Status & Telemetry
+    bool IsWiFiConnected();
+    int GetWiFiRSSI();
+    String GetWiFiLocalIP();
+    void GetMacAddressRaw(uint8_t *mac);
+
+    // Low-level Socket Utilities
     bool SetSocketBlockingEnabled(int fd, bool blocking);
 };
 
@@ -67,8 +74,6 @@ enum NetworkPort : int
         String GetMacAddress();
         String GetMacAddressPretty();
         bool GetWiFiHostByName(const char* hostname, IPAddress& ip);
-        String GetWiFiLocalIP();
-        int GetWiFiRSSI();
         int GetWiFiStatus();
         void SetWiFiModeSTA();
         const char* WLtoString(int status);
