@@ -1,3 +1,5 @@
+#pragma once
+
 //+--------------------------------------------------------------------------
 //
 // File:        drawing.h
@@ -28,4 +30,6 @@
 //
 //---------------------------------------------------------------------------
 
-void IRAM_ATTR DrawLoopTaskEntry(void *);
+#include "globals.h"
+
+void DrawLoopTaskEntry(void *);

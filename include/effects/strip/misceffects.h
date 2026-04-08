@@ -1,3 +1,4 @@
+#pragma once
 //+--------------------------------------------------------------------------
 //
 // File:        misceffects.h
@@ -29,15 +30,24 @@
 //
 //---------------------------------------------------------------------------
 
-#pragma once
+
+
+
+#if HEXAGON
+#include "ws281xgfx.h"
+#endif
 
 #include <deque>
+
+#include "array_utils.h"
+#include "effects.h"
+#include "ntptimeclient.h"
+#include "systemcontainer.h"
+#include "values.h"
 
 #if USE_MATRIX
 #include "TJpg_Decoder.h"
 #endif
-#include "effects.h"
-#include "systemcontainer.h"
 
 // SimpleRainbowTestEffect
 //
@@ -272,8 +282,8 @@ class ColorFillEffect : public EffectWithId<ColorFillEffect>
     {
         if (_everyNth != 1)
           fillSolidOnAllChannels(CRGB::Black);
-        if (!_ignoreGlobalColor && g_ptrSystem->DeviceConfig().ApplyGlobalColors())
-          fillSolidOnAllChannels(g_ptrSystem->DeviceConfig().GlobalColor(), 0, NUM_LEDS, _everyNth);
+        if (!_ignoreGlobalColor && g_ptrSystem->GetDeviceConfig().ApplyGlobalColors())
+          fillSolidOnAllChannels(g_ptrSystem->GetDeviceConfig().GlobalColor(), 0, NUM_LEDS, _everyNth);
         else
           fillSolidOnAllChannels(_color, 0, NUM_LEDS, _everyNth);
     }
@@ -387,8 +397,10 @@ class StatusEffect : public EffectWithId<StatusEffect>
           color = CRGB::Purple;
         else if (!WiFi.isConnected())
           color = CRGB::Red;
+        #if ENABLE_NTP
         else if (!NTPTimeClient::HasClockBeenSet())
           color = CRGB::Green;
+        #endif
 
         if (_everyNth != 1)
           fillSolidOnAllChannels(CRGB::Black);
@@ -521,7 +533,7 @@ class SilonEffect : public EffectWithId<SilonEffect>
     SilonEffect() : EffectWithId<SilonEffect>("SilonEffect") {}
     SilonEffect(const JsonObjectConst& jsonObject) : EffectWithId<SilonEffect>(jsonObject) {}
 
-    virtual size_t DesiredFramesPerSecond() const
+    virtual size_t DesiredFramesPerSecond() const override
     {
         return 20;
     }
@@ -565,7 +577,7 @@ class PDPGridEffect : public EffectWithId<PDPGridEffect>
     PDPGridEffect() : EffectWithId<PDPGridEffect>("PDPGridEffect") {}
     PDPGridEffect(const JsonObjectConst& jsonObject) : EffectWithId<PDPGridEffect>(jsonObject) {}
 
-    virtual size_t DesiredFramesPerSecond() const
+    virtual size_t DesiredFramesPerSecond() const override
     {
         return 5;
     }
@@ -652,7 +664,7 @@ class PDPCMXEffect : public EffectWithId<PDPCMXEffect>
     PDPCMXEffect() : EffectWithId<PDPCMXEffect>("PDPCMXEffect") {}
     PDPCMXEffect(const JsonObjectConst& jsonObject) : EffectWithId<PDPCMXEffect>(jsonObject) {}
 
-    virtual size_t DesiredFramesPerSecond() const
+    virtual size_t DesiredFramesPerSecond() const override
     {
         return 30; // Moderate speed for scrolling effect
     }
@@ -716,4 +728,3 @@ class OuterHexRingEffect : public EffectWithId<OuterHexRingEffect>
     }
 };
 #endif // HEXAGON
-

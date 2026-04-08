@@ -1,3 +1,5 @@
+#pragma once
+
 //+--------------------------------------------------------------------------
 //
 // File:        NTPTimeClient.h
@@ -28,14 +30,11 @@
 //              Oct-09-2018         Davepl      Copied to LEDWifi project
 //---------------------------------------------------------------------------
 
-#pragma once
+#include "globals.h"
 
-#include <sys/cdefs.h>
-#include <sys/time.h>
-#include <ctime>
-#include <WiFi.h>
+#if ENABLE_NTP
+
 #include <WiFiUdp.h>
-#include <mutex>
 
 // NTPTimeClient
 //
@@ -45,24 +44,12 @@
 
 class NTPTimeClient
 {
-    static bool        _bClockSet;
-    static std::mutex  _clockMutex;
-
   public:
 
-    NTPTimeClient()
-    = default;
+    NTPTimeClient() = default;
 
-    static inline bool HasClockBeenSet()
-    {
-        return _bClockSet;
-    }
-
+    static bool HasClockBeenSet();
     static bool UpdateClockFromWeb(WiFiUDP * pUDP);
-
-    static void ShowUptime();
 };
 
-
-
-
+#endif // ENABLE_NTP

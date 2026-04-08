@@ -1,3 +1,5 @@
+#pragma once
+
 //+--------------------------------------------------------------------------
 //
 // File:        PatternAnimatedGIF.h
@@ -39,16 +41,17 @@
 #define PatternAnimatedGIF_H
 
 #include <Arduino.h>
-#include "globals.h"
-#include <string.h>
-#include <ledstripeffect.h>
-#include <hub75gfx.h>
+
 #include <ArduinoJson.h>
-#include "systemcontainer.h"
+#include <string.h>
 #include <map>
+
 #include "effects.h"
+#include "GifDecoder.h"
+#include "hub75gfx.h"
+#include "ledstripeffect.h"
+#include "systemcontainer.h"
 #include "types.h"
-#include <GifDecoder.h>
 
 // The GIF files are embedded within the flash image, and we need to tell the linker where they are
 
@@ -100,7 +103,7 @@ struct GIFInfo : public EmbeddedFile
     {}
 };
 
-static const std::map<GIFIdentifier, const GIFInfo, std::less<GIFIdentifier>, const psram_allocator<std::pair<GIFIdentifier, const GIFInfo>>> AnimatedGIFs =
+static const std::map<GIFIdentifier, const GIFInfo, std::less<GIFIdentifier>, psram_allocator<std::pair<const GIFIdentifier, const GIFInfo>>> AnimatedGIFs =
 {
     // Banana has 8 frames.  Most music is around 120BPM, so we need to play each frame for 1/15th of a second to somewhat align with a typical beat
     { GIFIdentifier::Banana,       GIFInfo(banana_start,      banana_end,      32, 32, 10 ) },      //  4 KB
@@ -160,7 +163,7 @@ class PatternAnimatedGIF : public EffectWithId<PatternAnimatedGIF>
 
     static void screenClearCallback(void)
     {
-        auto& g = *(g_ptrSystem->EffectManager().g());
+        auto& g = *(g_ptrSystem->GetEffectManager().g());
         g.Clear(g_gifDecoderState._bkColor);
     }
 
@@ -177,7 +180,7 @@ class PatternAnimatedGIF : public EffectWithId<PatternAnimatedGIF>
 
     static void drawPixelCallback(int16_t x, int16_t y, uint8_t red, uint8_t green, uint8_t blue)
     {
-        auto& g = *(g_ptrSystem->EffectManager().g(0));
+        auto& g = *(g_ptrSystem->GetEffectManager().g(0));
 
         // Apply scaling transformation
         int16_t scaledX = (int16_t)(x * g_gifDecoderState._scaleX) + g_gifDecoderState._offsetX;
@@ -292,7 +295,7 @@ public:
         int offsetY = (MATRIX_HEIGHT - dstHeight) / 2;
 
         debugI("GIF scaling: %dx%d -> %dx%d (scale %.2f,%.2f) offset (%d,%d)",
-               gifWidth, gifHeight, dstWidth, dstHeight, scaleX, scaleY, offsetX, offsetY);
+               (int)gifWidth, (int)gifHeight, (int)dstWidth, (int)dstHeight, scaleX, scaleY, (int)offsetX, (int)offsetY);
 
         g_gifDecoderState._offsetX   = offsetX;
         g_gifDecoderState._offsetY   = offsetY;

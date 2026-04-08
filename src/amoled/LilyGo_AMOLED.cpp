@@ -7,11 +7,13 @@
  *
  */
 
+#include "globals.h"
+
 #if AMOLED_S3
 
 #include "amoled/LilyGo_AMOLED.h"
-#include <esp_adc_cal.h>
 #include <driver/gpio.h>
+#include <esp_adc_cal.h>
 
 #define SEND_BUF_SIZE           (16384)
 #define TFT_SPI_MODE            SPI_MODE0
@@ -126,7 +128,7 @@ uint16_t LilyGo_AMOLED::getBattVoltage(void)
             }
         } else if (boards->adcPins != -1) {
             esp_adc_cal_characteristics_t adc_chars;
-            esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
+            esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_12, ADC_WIDTH_BIT_12, 1100, &adc_chars);
             uint32_t v1 = 0,  raw = 0;
             raw = analogRead(boards->adcPins);
             v1 = esp_adc_cal_raw_to_voltage(raw, &adc_chars) * 2;

@@ -1,5 +1,65 @@
+//+--------------------------------------------------------------------------
+//
+// File:        ntptimeclient.cpp
+//
+// NightDriverStrip - (c) 2018 Plummer's Software LLC.  All Rights Reserved.
+//
+// This file is part of the NightDriver software project.
+//
+//    NightDriver is free software: you can redistribute it and/or modify
+//    it under the terms of the GNU General Public License as published by
+//    the Free Software Foundation, either version 3 of the License, or
+//    (at your option) any later version.
+//
+//    NightDriver is distributed in the hope that it will be useful,
+//    but WITHOUT ANY WARRANTY; without even the implied warranty of
+//    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//    GNU General Public License for more details.
+//
+//    You should have received a copy of the GNU General Public License
+//    along with Nightdriver.  It is normally found in copying.txt
+//    If not, see <https://www.gnu.org/licenses/>.
+//
+// Description:
+//
+//    Sets the system clock from the specified NTP Server
+//
+// History:     Jul-12-2018         Davepl      Created for BigBlueLCD
+//              Oct-09-2018         Davepl      Copied to LEDWifi project
+//---------------------------------------------------------------------------
+
 #include "globals.h"
+
+#if ENABLE_NTP
+#include <ctime>
+#include <mutex>
+#include <sys/time.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
+#include "deviceconfig.h"
+#include "ntptimeclient.h"
 #include "systemcontainer.h"
+#include "values.h"
+
+// NTPTimeClient
+//
+// Basically, I took some really ancient NTP code that I had on hand that I knew
+// worked and wrapped it in a class.  As expected, it works, but it could likely
+// benefit from cleanup or even wholesale replacement.
+
+// File-static variables to replace class static members
+static DRAM_ATTR bool l_bClockSet = false;
+static DRAM_ATTR std::mutex l_clockMutex;
+
+bool NTPTimeClient::HasClockBeenSet()
+{
+    return l_bClockSet;
+}
+
+// UpdateClockFromWeb
+//
+// Obtains the time from the specified NTP Server and sets the ESP32 RTC to the result
 
 bool NTPTimeClient::UpdateClockFromWeb(WiFiUDP * pUDP)
 {
@@ -11,7 +71,7 @@ bool NTPTimeClient::UpdateClockFromWeb(WiFiUDP * pUDP)
 
     debugV("Updating Clock From Web...");
 
-    std::lock_guard<std::mutex> guard(_clockMutex);
+    std::lock_guard<std::mutex> guard(l_clockMutex);
 
     char chNtpPacket[NTP_PACKET_LENGTH];
     memset(chNtpPacket, 0, NTP_PACKET_LENGTH);
@@ -34,12 +94,16 @@ bool NTPTimeClient::UpdateClockFromWeb(WiFiUDP * pUDP)
     chNtpPacket[0] = 0b00011011;
 
     IPAddress ipNtpServer;
-    if (WiFi.hostByName(g_ptrSystem->DeviceConfig().GetNTPServer().c_str(), ipNtpServer) != 1)
+    if (WiFi.hostByName(g_ptrSystem->GetDeviceConfig().GetNTPServer().c_str(), ipNtpServer) != 1)
         ipNtpServer.fromString("216.239.35.12"); // Use Google Time as default. The pool.ntp.org servers (IPs) don't necessarily last very long.
 
     // Send the ntp packet.
     while (pUDP->parsePacket() != 0)
-        pUDP->flush();
+        #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+            pUDP->clear();
+        #else
+            pUDP->flush();
+        #endif
 
     if (!pUDP->beginPacket(ipNtpServer, 123))
     {
@@ -65,7 +129,11 @@ bool NTPTimeClient::UpdateClockFromWeb(WiFiUDP * pUDP)
     int iPass = 0;
     while (!pUDP->parsePacket())
     {
-        pUDP->flush();
+        #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+            pUDP->clear();
+        #else
+            pUDP->flush();
+        #endif
         delay(100);
         debugV(".");
         if (iPass++ > 100)
@@ -103,7 +171,7 @@ bool NTPTimeClient::UpdateClockFromWeb(WiFiUDP * pUDP)
         return false;
     }
 
-    debugW("NTP clock: Raw values sec=%u, usec=%llu", frac, microsecs);
+    debugW("NTP clock: Raw values sec=%lu, usec=%llu", (unsigned long)frac, microsecs);
 
     tvNew.tv_sec = ((unsigned long)chNtpPacket[40] << 24) +       // bits 24 through 31 of ntp time
         ((unsigned long)chNtpPacket[41] << 16) +                        // bits 16 through 23 of ntp time
@@ -141,53 +209,14 @@ bool NTPTimeClient::UpdateClockFromWeb(WiFiUDP * pUDP)
     char chBuffer[128];
     struct tm * tmPointer = localtime(&tvNew.tv_sec);
     strftime(chBuffer, sizeof(chBuffer), "%d %b %Y %H:%M:%S", tmPointer);
-    debugI("NTP clock: response received, updated time to: %ld.%ld, DELTA: %lf\n",
-            tvNew.tv_sec,
-            tvNew.tv_usec,
+    debugI("NTP clock: response received, updated time to: %lld.%lld, DELTA: %lf\n",
+            (long long)tvNew.tv_sec,
+            (long long)tvNew.tv_usec,
             dNew - dOld );
 
-    _bClockSet = true;  // Clock has been set at least once
+    l_bClockSet = true;  // Clock has been set at least once
 
     return true;
 }
 
-// Not NTP related. Convenience utility for debugging. Callable from gdb
-// serial shell, or network log debugger.
-
-void NTPTimeClient::ShowUptime()
-{
-    struct timeval timeval = { 0 };
-    // Microseconds since boot. File wrap bugreport in 292 million years.
-    auto uptime = esp_timer_get_time();
-
-    timeval.tv_sec = uptime / MICROS_PER_SECOND;
-    // timeval.tv_nsec = uptime % NANOS_PER_SECOND;
-
-    char buf[128];
-    struct tm *tm = gmtime(&timeval.tv_sec);
-    // No, I don't care about leap seconds.
-    strftime(buf, sizeof(buf), "%X", tm);
-    int ndays = timeval.tv_sec / (24 * 60 * 60);
-    debugI("Uptime: %d days - %s", ndays, buf);
-
-    const char* reason_text = "Unknown";
-    esp_reset_reason_t reason = esp_reset_reason();
-    switch (reason)
-    {
-        case ESP_RST_POWERON: reason_text = "Power On"; break;
-        case ESP_RST_EXT: reason_text = "External Pin"; break;
-        case ESP_RST_SW: reason_text = "Software Restart"; break;
-        case ESP_RST_PANIC: reason_text = "Panic"; break;
-        case ESP_RST_INT_WDT: reason_text = "Watchdog barked"; break;
-        case ESP_RST_TASK_WDT: reason_text = "Task Watchdog barked"; break;
-        case ESP_RST_WDT: reason_text = "Other Watchdog barked"; break;
-        case ESP_RST_DEEPSLEEP: reason_text = "Reset in deep sleep"; break;
-        case ESP_RST_BROWNOUT: reason_text = "Brownout"; break;
-        case ESP_RST_SDIO: reason_text = "Reset over SDIO"; break;
-	// Documented,  but not defined in ESP-IDF esp_system.h (v5.1.0) yet.
-        // case ESP_RST_USB: reason_text = "Reset by USB peripheral"; break;
-	default: reason_text = "Unknown"; break;
-    }
-    debugI("Last boot reason: (%d): %s", reason, reason_text);
-
-}
+#endif

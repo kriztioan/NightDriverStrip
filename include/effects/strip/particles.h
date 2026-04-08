@@ -1,3 +1,4 @@
+#pragma once
 //+--------------------------------------------------------------------------
 //
 // File:        Particles.h
@@ -30,13 +31,13 @@
 //
 //---------------------------------------------------------------------------
 
-#pragma once
 
 #include <deque>
 
 #include "effects.h"
-// Needed for FillRingPixels, DrawRingPixels, and fan/ring utilities
 #include "faneffects.h"
+#include "random_utils.h"
+#include "values.h"
 
 #if ENABLE_AUDIO
 // Needed for BeatEffectBase and audio-driven particle effects
@@ -310,7 +311,7 @@ template <typename Type = DrawableParticle> class ParticleSystem
 
     virtual void Render(const std::vector<std::shared_ptr<GFXBase>>& _gfx)
     {
-        debugV("ParticleSystemEffect::Draw for %d particles", _allParticles.size());
+        debugV("ParticleSystemEffect::Draw for %zu particles", (size_t)_allParticles.size());
 
         while (_allParticles.size() > 0 && _allParticles.front().Age() >= _allParticles.front().TotalLifetime())
             _allParticles.pop_front();
@@ -706,7 +707,7 @@ class MoltenGlassOnVioletBkgnd : public EffectWithId<MoltenGlassOnVioletBkgnd>, 
   private:
 
     int                    _iLastInsulator = 0;
-    const CRGBPalette16 & _Palette;
+    CRGBPalette16 _Palette;
     CRGB _baseColor = CRGB::Black;
 
   public:
@@ -797,9 +798,10 @@ class NewMoltenGlassOnVioletBkgnd : public EffectWithId<NewMoltenGlassOnVioletBk
 {
   private:
 
-    int  _iLastInsulator = 0;
-    const CRGBPalette16 & _Palette;
+    int                    _iLastInsulator = 0;
+    CRGBPalette16 _Palette;
     CRGB _baseColor = CRGB::Black;
+
 
   public:
 
@@ -889,7 +891,7 @@ class SparklySpinningMusicEffect : public EffectWithId<SparklySpinningMusicEffec
   private:
 
     int  _iLastInsulator = 0;
-    const CRGBPalette16 & _Palette;
+    CRGBPalette16 _Palette;
     CRGB _baseColor = CRGB::Black;
 
   public:
@@ -993,4 +995,3 @@ class MusicalHotWhiteInsulatorEffect : public EffectWithId<MusicalHotWhiteInsula
     }
 };
 #endif
-

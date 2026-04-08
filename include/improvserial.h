@@ -1,3 +1,5 @@
+#pragma once
+
 //+--------------------------------------------------------------------------
 //
 // File:        improvserial.h
@@ -30,15 +32,14 @@
 //
 //---------------------------------------------------------------------------
 
-#pragma once
-
-#include <improv.h>
-#include "network.h"
-#include "hexdump.h"
 #include "globals.h"
 
+#include <improv.h>
 #include <numeric>
 #include <SPIFFS.h>
+
+#include "hexdump.h"
+#include "nd_network.h"
 
 #define IMPROV_LOG_FILE             "/improv.log"
 
@@ -338,7 +339,7 @@ protected:
                         log_write(".Sending details for SSID %s", WiFi.SSID(i).c_str());
                         // Send each ssid separately to avoid overflowing the buffer
                         std::vector<uint8_t> data = improv::build_rpc_response(
-                            improv::GET_WIFI_NETWORKS, {WiFi.SSID(i), str_sprintf("%d", WiFi.RSSI(i)), WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "YES" : "NO"}, false);
+                            improv::GET_WIFI_NETWORKS, {WiFi.SSID(i), str_sprintf("%ld", (long)WiFi.RSSI(i)), WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "YES" : "NO"}, false);
                         this->send_response_(data);
                     }
                 }

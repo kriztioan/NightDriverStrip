@@ -7,10 +7,12 @@
  *
  */
 
+#include "globals.h"
+
 #if AMOLED_S3
 
-#include <Arduino.h>
 #include "amoled/LV_Helper.h"
+#include <Arduino.h>
 
 
 #if LV_VERSION_CHECK(9,0,0)
@@ -74,7 +76,7 @@ void beginLvglHelper(LilyGo_Display &board, bool debug)
     buf = (lv_color_t *)ps_malloc(lv_buffer_size);
     assert(buf);
 
-    Serial.printf("AMOLED: Allocated %d bytes for lvgl buffer: %p\n", lv_buffer_size, buf);
+    Serial.printf("AMOLED: Allocated %zu bytes for lvgl buffer: %p\n", (size_t)lv_buffer_size, buf);
 
     lv_disp_draw_buf_init( &draw_buf, buf, NULL, board.width() * board.height());
 

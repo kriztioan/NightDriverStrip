@@ -25,23 +25,34 @@
 //    Implementation of debugging command line interface to NightDriver.
 //
 
+#include "globals.h"
+
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstring>
-#include <esp_heap_caps.h>
-#include <esp_log.h>
-#include <esp_system.h> // esp_restart
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "globals.h"
+#include <esp_heap_caps.h>
+#include <esp_log.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <FS.h>
+#include <SPIFFS.h>
+
 #include "debug_cli.h"
+#include "deviceconfig.h"
 #include "effectmanager.h"
-#include "systemcontainer.h"
+#include "ledstripeffect.h"
 #include "soundanalyzer.h"
+#include "systemcontainer.h"
+
+namespace DebugCLI
+{
 
 //
 // Private Globals
@@ -121,6 +132,24 @@ bool StringCompareInsensitive(std::string_view sv, const char *in_s)
     return *s == '\0';
 }
 
+bool StringStartsWithInsensitive(std::string_view haystack, std::string_view needle)
+{
+    if (needle.length() > haystack.length())
+        return false;
+    return std::equal(needle.begin(), needle.end(), haystack.begin(),
+                      [](char ch1, char ch2) { return std::tolower(ch1) == std::tolower(ch2); });
+}
+
+bool ContainsInsensitive(std::string_view haystack, std::string_view needle)
+{
+    if (needle.empty())
+        return true;
+    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                          [](char ch1, char ch2) { return std::tolower(ch1) == std::tolower(ch2); });
+    return it != haystack.end();
+}
+
+
 //
 // Registration
 //
@@ -157,7 +186,7 @@ static void PrintHelp(const cli_argv &argv)
                 matches = 1;
                 break;
             }
-            if (strncasecmp(cmd->command, target.data(), target.length()) == 0)
+            if (StringStartsWithInsensitive(cmd->command, target))
             {
                 match = cmd;
                 matches++;
@@ -220,7 +249,11 @@ void RunCommand(const char *cmd_line)
         if (client && client->connected())
         {
             client->print("> ");
-            client->flush();
+            #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+                client->clear();
+            #else
+                client->flush();
+            #endif
         }
     }
 #endif
@@ -230,27 +263,142 @@ void RunCommand(const char *cmd_line)
 // print a space that's not in the command until newline is found. It will
 // not complete arguments, e.g. not 'reboot n<tab>' would not complete the
 // 'now' if that happened to be an option.
-std::string_view TabComplete(std::string_view partial)
+std::string_view TabComplete(std::string_view partial, std::string_view full_line)
 {
     if (partial.empty())
         return "";
-    std::string_view match = "";
-    int matches = 0;
 
-    for (const auto *cmd : g_CommandTable)
+    // If we're completing the first token (the command)
+    if (partial.data() == full_line.data())
     {
-        if (strncasecmp(cmd->command, partial.data(), partial.length()) == 0)
+        std::string_view match = "";
+        int matches = 0;
+
+        for (const auto *cmd : g_CommandTable)
         {
-            match = cmd->command;
+            if (StringStartsWithInsensitive(cmd->command, partial))
+            {
+                match = cmd->command;
+                matches++;
+            }
+        }
+
+        if (matches == 1)
+            return match.substr(partial.length());
+
+        if (matches > 1)
+        {
+            // Calculate longest common prefix among all matching commands
+            size_t common_len = match.length();
+            for (const auto *cmd : g_CommandTable)
+            {
+                if (StringStartsWithInsensitive(cmd->command, partial))
+                {
+                    size_t j = partial.length();
+                    while (j < common_len && j < strlen(cmd->command) &&
+                           tolower(match[j]) == tolower(cmd->command[j]))
+                        j++;
+                    common_len = j;
+                }
+            }
+            if (common_len > partial.length())
+                return match.substr(partial.length(), common_len - partial.length());
+        }
+    }
+    // If we're completing an argument for 'effect'
+    else if (full_line.substr(0, 6) == "effect")
+    {
+        auto& effectManager = g_ptrSystem->GetEffectManager();
+        std::string_view firstMatch = "";
+        int matches = 0;
+        size_t common_len = 0;
+
+        for (size_t i = 0; i < effectManager.EffectCount(); ++i)
+        {
+            const String& name = effectManager.EffectsList()[i]->FriendlyName();
+            if (StringStartsWithInsensitive(name.c_str(), partial))
+            {
+                if (matches == 0)
+                {
+                    firstMatch = name.c_str();
+                    common_len = firstMatch.length();
+                }
+                else
+                {
+                    size_t j = partial.length();
+                    while (j < common_len && j < (size_t)name.length() &&
+                           tolower(firstMatch[j]) == tolower(name[j]))
+                        j++;
+                    common_len = j;
+                }
+                matches++;
+            }
+        }
+
+        if (matches > 0 && common_len > partial.length())
+            return firstMatch.substr(partial.length(), common_len - partial.length());
+    }
+
+    return "";
+}
+
+
+//
+// Helper: Resolve Effect by index or name
+//
+static std::optional<size_t> ResolveEffect(std::string_view arg)
+{
+    auto& effectManager = g_ptrSystem->GetEffectManager();
+
+    // Try as index first
+    // Try as index first
+    size_t val = 0;
+    auto [ptr, ec] = std::from_chars(arg.begin(), arg.end(), val);
+    if (ec == std::errc() && ptr == arg.end())
+    {
+        if (val < effectManager.EffectCount())
+        {
+            return val;
+        }
+        else
+        {
+            cli_printf("Error: Effect index %zu out of range (0-%u)\n", val, effectManager.EffectCount() - 1);
+            return std::nullopt;
+        }
+    }
+
+    // Try fuzzy name match
+    int match_index = -1;
+    int matches = 0;
+    std::vector<std::string> candidates;
+
+    for (size_t i = 0; i < effectManager.EffectCount(); ++i)
+    {
+        const String& name = effectManager.EffectsList()[i]->FriendlyName();
+        if (ContainsInsensitive(name.c_str(), arg))
+        {
+            match_index = i;
             matches++;
+            candidates.push_back(name.c_str());
         }
     }
 
     if (matches == 1)
     {
-        return match.substr(partial.length());
+        return (size_t)match_index;
     }
-    return "";
+    else if (matches > 1)
+    {
+        cli_printf("Error: Ambiguous match for '%.*s'. Candidates:\n", (int)arg.length(), arg.data());
+        for (const auto& c : candidates)
+            cli_printf("  %s\n", c.c_str());
+        return std::nullopt;
+    }
+    else
+    {
+        cli_printf("Error: No effect matching '%.*s' found.\n", (int)arg.length(), arg.data());
+        return std::nullopt;
+    }
 }
 
 //
@@ -258,28 +406,42 @@ std::string_view TabComplete(std::string_view partial)
 //
 static void DoEffectCommand(const cli_argv &argv)
 {
-    cli_printf("Current Effect: %s\n", g_ptrSystem->EffectManager().GetCurrentEffectName().c_str());
+    auto& effectManager = g_ptrSystem->GetEffectManager();
+    cli_printf("Current Effect: %s\n", effectManager.GetCurrentEffectName().c_str());
+
     if (argv.size() > 1)
     {
-        if (argv[1] == "next")
+        std::string_view arg = argv[1];
+
+        if (arg == "next")
         {
-            g_ptrSystem->EffectManager().NextEffect();
+            effectManager.NextEffect();
         }
-        else if (argv[1] == "prev")
+        else if (arg == "prev")
         {
-            g_ptrSystem->EffectManager().PreviousEffect();
+            effectManager.PreviousEffect();
         }
-        cli_printf("New Effect: %s\n", g_ptrSystem->EffectManager().GetCurrentEffectName().c_str());
+        else
+        {
+            auto idx = ResolveEffect(arg);
+            if (idx)
+            {
+                effectManager.SetCurrentEffectIndex(*idx);
+            }
+            else
+            {
+                return;
+            }
+        }
+        cli_printf("New Effect: %s\n", effectManager.GetCurrentEffectName().c_str());
     }
 }
 
-#include <FS.h>
-#include <SPIFFS.h>
 static void DoDirectoryListing(const cli_argv &argv)
 {
-    fs::FS *fs = &SPIFFS;
+    fs::FS *fileSystem = &SPIFFS;
 
-    fs::File root = fs->open("/");
+    fs::File root = fileSystem->open("/");
 
     fs::File file = root.openNextFile();
     while (file)
@@ -290,13 +452,13 @@ static void DoDirectoryListing(const cli_argv &argv)
 
         if (file.isDirectory())
         {
-            cli_printf("%-32s DIR      %d-%02d-%02d %02d:%02d:%02d\n", file.name(), tm.tm_year + 1900, tm.tm_mon + 1,
-                       tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+            cli_printf("%-32s DIR      %d-%02d-%02d %02d:%02d:%02d\n", file.name(), (int)(tm.tm_year + 1900), (int)(tm.tm_mon + 1),
+                       (int)tm.tm_mday, (int)tm.tm_hour, (int)tm.tm_min, (int)tm.tm_sec);
         }
         else
         {
-            cli_printf("%-32s %8d %d-%02d-%02d %02d:%02d:%02d\n", file.name(), file.size(), tm.tm_year + 1900,
-                       tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+            cli_printf("%-32s %8zu %d-%02d-%02d %02d:%02d:%02d\n", file.name(), (size_t)file.size(), (int)(tm.tm_year + 1900),
+                       (int)(tm.tm_mon + 1), (int)tm.tm_mday, (int)tm.tm_hour, (int)tm.tm_min, (int)tm.tm_sec);
         }
         file = root.openNextFile();
     }
@@ -315,14 +477,14 @@ static void DoCat(const cli_argv &argv)
     if (fname[0] != '/')
         fname = "/" + fname;
 
-    fs::FS *fs = &SPIFFS;
-    if (!fs->exists(fname.c_str()))
+    fs::FS *fileSystem = &SPIFFS;
+    if (!fileSystem->exists(fname.c_str()))
     {
         cli_printf("File not found: %s\n", fname.c_str());
         return;
     }
 
-    fs::File file = fs->open(fname.c_str(), "r");
+    fs::File file = fileSystem->open(fname.c_str(), "r");
     if (!file || file.isDirectory())
     {
         cli_printf("Error opening file: %s\n", fname.c_str());
@@ -343,12 +505,48 @@ static void DoCat(const cli_argv &argv)
     file.close();
 }
 
+void DoUptime(const cli_argv &)
+{
+    struct timeval timeval = { 0 };
+    // Microseconds since boot. File wrap bugreport in 292 million years.
+    auto uptime = esp_timer_get_time();
+
+    timeval.tv_sec = uptime / MICROS_PER_SECOND;
+
+    char buf[128];
+    struct tm *tm = gmtime(&timeval.tv_sec);
+    // No, I don't care about leap seconds.
+    strftime(buf, sizeof(buf), "%X", tm);
+    int ndays = timeval.tv_sec / (24 * 60 * 60);
+    cli_printf("Uptime: %d days - %s\n", ndays, buf);
+
+    const char* reason_text = "Unknown";
+    esp_reset_reason_t reason = esp_reset_reason();
+    switch (reason)
+    {
+        case ESP_RST_POWERON: reason_text = "Power On"; break;
+        case ESP_RST_EXT: reason_text = "External Pin"; break;
+        case ESP_RST_SW: reason_text = "Software Restart"; break;
+        case ESP_RST_PANIC: reason_text = "Panic"; break;
+        case ESP_RST_INT_WDT: reason_text = "Watchdog barked"; break;
+        case ESP_RST_TASK_WDT: reason_text = "Task Watchdog barked"; break;
+        case ESP_RST_WDT: reason_text = "Other Watchdog barked"; break;
+        case ESP_RST_DEEPSLEEP: reason_text = "Reset in deep sleep"; break;
+        case ESP_RST_BROWNOUT: reason_text = "Brownout"; break;
+        case ESP_RST_SDIO: reason_text = "Reset over SDIO"; break;
+        // Documented,  but not defined in ESP-IDF esp_system.h (v5.1.0) yet.
+        // case ESP_RST_USB: reason_text = "Reset by USB peripheral"; break;
+        default: reason_text = "Unknown"; break;
+    }
+    cli_printf("Last boot reason: (%d): %s\n", reason, reason_text);
+}
+
 static const command core_commands[] = {
     {"cat", "Display file content", "Printing file...", DoCat},
     {"reboot", "Reboot system", "Rebooting. Please stand by...", [](const cli_argv &) { esp_restart(); }},
     {"clearsettings", "Reset persisted user settings", "Removing persisted settings",
      [](const cli_argv &) {
-         g_ptrSystem->DeviceConfig().RemovePersisted();
+         g_ptrSystem->GetDeviceConfig().RemovePersisted();
          RemoveEffectManagerConfig(); // Helper from effectmanager.h
      }},
     {"tasks", "Display FreeRTOS task list", "Task List:",
@@ -398,12 +596,12 @@ static const command core_commands[] = {
          if (argv.size() > 1)
          {
              int val = atoi(std::string(argv[1]).c_str());
-             g_ptrSystem->DeviceConfig().SetBrightness(val);
+             g_ptrSystem->GetDeviceConfig().SetBrightness(val);
          }
-         cli_printf("Brightness: %d\n", g_ptrSystem->DeviceConfig().GetBrightness());
+         cli_printf("Brightness: %lu\n", (unsigned long)g_ptrSystem->GetDeviceConfig().GetBrightness());
      }},
     {"ls", "Show filesytem directory", "NAME", DoDirectoryListing},                    // Function pointer
-    {"effect", "[next|prev] Show/change current effect", "Effects.", DoEffectCommand}, // Function pointer
+    {"effect", "[next|prev|name|index] Show/change current effect", "Effects.", DoEffectCommand}, // Function pointer
     {"simbeat", "[on|off] [bpm] Simulate audio beat", "Simulate Beat:",
      [](const cli_argv &argv) {
         if (argv.size() > 1) {
@@ -416,6 +614,17 @@ static const command core_commands[] = {
         }
         cli_printf("SimBeat: %s  BPM: %d\n", g_Analyzer.GetSimulateBeat() ? "ON" : "OFF", g_Analyzer.GetSimulateBPM());
      }},
+    {"+", "Nudge brightness up", "Brightness +10", [](const cli_argv &) {
+        int val = std::min(255, g_ptrSystem->GetDeviceConfig().GetBrightness() + 10);
+        g_ptrSystem->GetDeviceConfig().SetBrightness(val);
+        cli_printf("Brightness: %d\n", val);
+    }},
+    {"-", "Nudge brightness down", "Brightness -10", [](const cli_argv &) {
+        int val = std::max(0, g_ptrSystem->GetDeviceConfig().GetBrightness() - 10);
+        g_ptrSystem->GetDeviceConfig().SetBrightness(val);
+        cli_printf("Brightness: %d\n", val);
+    }},
+    {"uptime", "Show system uptime", "Showing uptime...", DoUptime},
     {"help", "Display command line options", "Displaying system help",
      PrintHelp} // Function pointer logic requires PrintHelp signature match. It does.
 };
@@ -450,7 +659,66 @@ void cli_printf(const char *fmt, ...)
     Debug.setSerialEnabled(true);
 }
 
+void ProcessCLIByte(uint8_t byte)
+{
+    // Essentially a global that never shrinks. We quickly reach
+    // the size of the length that people type, but it's free if
+    // never used.
+    static std::string cmd;
+
+    switch (byte)
+    {
+    case '\t':
+    {
+        size_t lastSpace = cmd.find_last_of(' ');
+        std::string_view partial = (lastSpace == std::string::npos) ? std::string_view(cmd) : std::string_view(cmd).substr(lastSpace + 1);
+        std::string_view suffix = TabComplete(partial, cmd);
+        if (!suffix.empty())
+        {
+            cmd += suffix;
+            cmd += " ";
+            Serial.print(suffix.data());
+            Serial.print(" ");
+        }
+        break;
+    }
+    case '\b':
+    case 0x7f:
+        if (!cmd.empty())
+        {
+            cmd.pop_back();
+            cli_printf("\b \b");
+        }
+        break;
+
+    case '\r':
+    case '\n':
+        if (byte == '\r')
+            Serial.println(); // Correctly handle CRLF for local echo
+        if (cmd.empty())
+        {
+            // If buffer was empty (just Enter), RunCommand("") handles the prompt
+            RunCommand("");
+        }
+        else
+        {
+            // User entered a command
+            cli_printf("\n");
+            RunCommand(cmd.c_str());
+            cmd.clear();
+        }
+        break;
+
+    default:
+        Serial.write(byte);
+        cmd += (char)byte;
+        break;
+    }
+}
+
 void InitDebugCLI()
 {
     RegisterCommands(core_commands);
 }
+
+} // namespace DebugCLI

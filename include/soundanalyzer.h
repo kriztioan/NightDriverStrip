@@ -35,21 +35,12 @@
 #pragma once
 
 #include "globals.h"
-#include <algorithm>
-#include <numeric>
-#include <array>
-#include <arduinoFFT.h>
-#include <esp_idf_version.h>
-#define IS_IDF5 (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0))
 
-#if IS_IDF5
-    #include <driver/i2s_std.h>
-    #include <esp_adc/adc_continuous.h>
-#else
-    #include <driver/i2s.h>
-    #include <driver/adc.h>
-#endif
+#include <Arduino.h>
+#include <arduinoFFT.h>
+#include <array>
 #include <memory>
+
 
 #ifndef SPECTRUM_BAND_SCALE_MEL
 #define SPECTRUM_BAND_SCALE_MEL 1
@@ -156,8 +147,8 @@ inline constexpr AudioInputParams kParamsI2SExternal{
   #define MIN_VU 0.05f
 #endif
 
-void IRAM_ATTR AudioSamplerTaskEntry(void *);
-void IRAM_ATTR AudioSerialTaskEntry(void *);
+void AudioSamplerTaskEntry(void *);
+void AudioSerialTaskEntry(void *);
 
 #ifndef GAINDAMPEN
     #define GAINDAMPEN 10      // How slowly brackets narrow in for spectrum bands
@@ -182,19 +173,35 @@ class ISoundAnalyzer
 {
   public:
     virtual ~ISoundAnalyzer() = default;
-    virtual float VURatio() const = 0;
-    virtual float VURatioFade() const = 0;
-    virtual float VU() const = 0;
-    virtual float PeakVU() const = 0;
-    virtual float MinVU() const = 0;
+
+    // --- Core Processing ---
+    virtual void RunSamplerPass() = 0;
+    virtual void SimulateBeatPass() = 0;
+    virtual void SetPeakDecayRates(float r1, float r2) = 0;
+
+    // --- Telemetry & Status ---
     virtual int AudioFPS() const = 0;
     virtual int SerialFPS() const = 0;
     virtual bool IsRemoteAudioActive() const = 0;
+
+    // --- VU Metrics ---
+    virtual float VU() const = 0;
+    virtual float VURatio() const = 0;
+    virtual float VURatioFade() const = 0;
+    virtual float PeakVU() const = 0;
+    virtual float MinVU() const = 0;
+
+    // --- Spectral Data (Bands) ---
     virtual const PeakData & Peaks() const = 0;
-    virtual float Peak2Decay(int band) const = 0;
     virtual float Peak1Decay(int band) const = 0;
+    virtual float Peak2Decay(int band) const = 0;
     virtual unsigned long LastPeak1Time(int band) const = 0;
-    virtual void SetPeakDecayRates(float r1, float r2) = 0;
+
+    // --- Simulation & Testing ---
+    virtual void SetSimulateBeat(bool) = 0;
+    virtual void SetSimulateBPM(int) = 0;
+    virtual bool GetSimulateBeat() const = 0;
+    virtual int GetSimulateBPM() const = 0;
 };
 
 #if !ENABLE_AUDIO
@@ -256,17 +263,18 @@ class SoundAnalyzer : public ISoundAnalyzer // Non-audio case stub
     {
     }
 
-    float BeatEnhance(float amt) { return 0.0f; }
-    void SetSimulateBeat(bool) {}
-    void SetSimulateBPM(int) {}
-    bool GetSimulateBeat() const { return false; }
-    int GetSimulateBPM() const { return 0; }
+    void SetSimulateBeat(bool) override {}
+    void SetSimulateBPM(int) override {}
+    bool GetSimulateBeat() const override { return false; }
+    int GetSimulateBPM() const override { return 0; }
+    void RunSamplerPass() override {}
+    void SimulateBeatPass() override {}
 };
 
 #else // Audio case
 
-void IRAM_ATTR AudioSamplerTaskEntry(void *);
-void IRAM_ATTR AudioSerialTaskEntry(void *);
+void AudioSamplerTaskEntry(void *);
+void AudioSerialTaskEntry(void *);
 
 // SoundAnalyzer
 //
@@ -279,8 +287,8 @@ class SoundAnalyzer : public ISoundAnalyzer
 {
   public:
     // Give internal audio task functions access to private members
-    friend void IRAM_ATTR AudioSamplerTaskEntry(void *);
-    friend void IRAM_ATTR AudioSerialTaskEntry(void *);
+    friend void AudioSamplerTaskEntry(void *);
+    friend void AudioSerialTaskEntry(void *);
 
     // I'm old enough I can only hear up to about 12000Hz, but feel free to adjust.  Remember from
     // school that you need to sample at double the frequency you want to process, so 24000 samples is 12000Hz
@@ -336,534 +344,50 @@ class SoundAnalyzer : public ISoundAnalyzer
     std::unique_ptr<int16_t[]> ptrSampleBuffer; // sample buffer storage
     PeakData _Peaks; // cached last normalized peaks
 
-    // --- Private Initialization Helpers ---
-
-    void InitM5()
-    {
-#if USE_M5
-        debugI("Audio: Initializing M5Stack Microphone");
-        // Can't use speaker and mic at the same time, and speaker defaults on, so turn it off
-        M5.Speaker.setVolume(255);
-        M5.Speaker.end();
-        auto cfg = M5.Mic.config();
-        cfg.sample_rate = SAMPLING_FREQUENCY;
-        cfg.noise_filter_level = 0;
-        cfg.magnification = 8;
-        M5.Mic.config(cfg);
-        M5.Mic.begin();
-#endif
-    }
-
-    void InitI2S_Modern()
-    {
-#if (USE_I2S_AUDIO || ELECROW) && IS_IDF5
-        debugI("Audio: Initializing I2S Digital Mic (Modern) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, INPUT_PIN);
-        // Digital Microphones (INMP441, etc.) - Standard I2S Mode
-        i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-        ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &_rx_handle));
-
-        i2s_std_config_t std_cfg = {
-            .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLING_FREQUENCY),
-            .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
-            .gpio_cfg = {
-                .mclk = I2S_GPIO_UNUSED,
-                .bkt = I2S_BCLK_PIN,
-                .ws = I2S_WS_PIN,
-                .dout = I2S_GPIO_UNUSED,
-                .din = INPUT_PIN,
-            },
-        };
-
-        ESP_ERROR_CHECK(i2s_channel_init_std_mode(_rx_handle, &std_cfg));
-        ESP_ERROR_CHECK(i2s_channel_enable(_rx_handle));
-#endif
-    }
-
-    void InitI2S_Legacy()
-    {
-#if (USE_I2S_AUDIO || ELECROW) && !IS_IDF5
-        debugI("Audio: Initializing I2S Digital Mic (Legacy) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, INPUT_PIN);
-        const i2s_config_t i2s_config = {.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-                                         .sample_rate = SAMPLING_FREQUENCY,
-                                         .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-                                         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-                                         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-                                         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-                                         .dma_buf_count = 4,
-                                         .dma_buf_len = (int)MAX_SAMPLES,
-                                         .use_apll = false,
-                                         .tx_desc_auto_clear = false,
-                                         .fixed_mclk = 0};
-
-        pinMode(I2S_BCLK_PIN, OUTPUT);
-        pinMode(I2S_WS_PIN, OUTPUT);
-        pinMode(INPUT_PIN, INPUT);
-
-        const i2s_pin_config_t pin_config = {.bck_io_num = I2S_BCLK_PIN,
-                                             .ws_io_num = I2S_WS_PIN,
-                                             .data_out_num = I2S_PIN_NO_CHANGE,
-                                             .data_in_num = INPUT_PIN};
-
-        ESP_ERROR_CHECK(i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL));
-        ESP_ERROR_CHECK(i2s_set_pin(I2S_NUM_0, &pin_config));
-        ESP_ERROR_CHECK(i2s_zero_dma_buffer(I2S_NUM_0));
-        ESP_ERROR_CHECK(i2s_start(I2S_NUM_0));
-#endif
-    }
-
-    void InitADC_Modern()
-    {
-#if !USE_M5 && !USE_I2S_AUDIO && IS_IDF5
-        debugI("Audio: Initializing I2S ADC Analog Mic (Modern) on Channel 0");
-        adc_continuous_handle_cfg_t adc_config = {
-            .max_store_buf_size = 1024,
-            .conv_frame_size = MAX_SAMPLES * sizeof(uint16_t),
-        };
-        ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &_adc_handle));
-
-        adc_continuous_config_t dig_cfg = {
-            .sample_freq_hz = SAMPLING_FREQUENCY,
-            .conv_mode = ADC_CONV_SINGLE_UNIT_1, // Using ADC1
-            .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
-        };
-
-        // Configure pattern: channel, attenuation, etc.
-        adc_digi_pattern_config_t adc_pattern[1] = {0};
-        adc_pattern[0].atten = ADC_ATTEN_DB_12; // 12dB (formerly 11dB) for full range ~3.3V
-        adc_pattern[0].channel = ADC_CHANNEL_0; // FIXED for now, ideally map from INPUT_PIN
-        adc_pattern[0].unit = ADC_UNIT_1;
-        adc_pattern[0].bit_width = ADC_BITWIDTH_12;
-
-        dig_cfg.adc_pattern = adc_pattern;
-        dig_cfg.pattern_num = 1;
-
-        ESP_ERROR_CHECK(adc_continuous_config(_adc_handle, &dig_cfg));
-        ESP_ERROR_CHECK(adc_continuous_start(_adc_handle));
-#endif
-    }
-
-    void InitADC_Legacy()
-    {
-#if !USE_M5 && !USE_I2S_AUDIO && !IS_IDF5 && defined(SOC_I2S_SUPPORTS_ADC)
-        debugI("Audio: Initializing I2S ADC Analog Mic (Legacy) on Channel 0");
-        static_assert(SOC_I2S_SUPPORTS_ADC, "This ESP32 model does not support ADC built-in mode");
-
-        const i2s_config_t i2s_config = {
-            .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN),
-            .sample_rate = SAMPLING_FREQUENCY,
-            .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-            .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-            .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-            .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-            .dma_buf_count = 2,
-            .dma_buf_len = MAX_SAMPLES,
-            .use_apll = false,
-            .tx_desc_auto_clear = false,
-            .fixed_mclk = 0
-        };
-
-        ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_BIT_12));
-        ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_0));
-        ESP_ERROR_CHECK(i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL));
-        ESP_ERROR_CHECK(i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0));
-#endif
-    }
-
-    // --- Private Sampling Helpers ---
-
-    size_t SampleM5()
-    {
-        size_t bytesRead = 0;
-#if USE_M5
-        constexpr auto bytesExpected = MAX_SAMPLES * sizeof(ptrSampleBuffer[0]);
-        if (M5.Mic.record((int16_t *)ptrSampleBuffer.get(), MAX_SAMPLES, SAMPLING_FREQUENCY, false))
-            bytesRead = bytesExpected;
-#endif
-        return bytesRead;
-    }
-
-    size_t SampleI2S_Modern()
-    {
-        size_t bytesRead = 0;
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-        constexpr size_t bytesExpected = MAX_SAMPLES * sizeof(int32_t);
-        esp_err_t err = i2s_channel_read(_rx_handle, (void *)ptrSampleBuffer.get(), bytesExpected, &bytesRead, 100 / portTICK_PERIOD_MS);
-
-        if (err != ESP_OK || bytesRead != bytesExpected) {
-            debugW("I2S Read Error: %s, read %u/%u\n", esp_err_to_name(err), bytesRead, bytesExpected);
-            return 0;
-        }
-
-        static int32_t tempBuffer[MAX_SAMPLES * 2];
-        constexpr int kChannels = 2;
-        size_t bytesToRead = MAX_SAMPLES * kChannels * sizeof(int32_t);
-        if (bytesToRead > sizeof(tempBuffer)) bytesToRead = sizeof(tempBuffer);
-
-        err = i2s_channel_read(_rx_handle, (void *)tempBuffer, bytesToRead, &bytesRead, 100 / portTICK_PERIOD_MS);
-        if (err != ESP_OK) return 0;
-
-        for (int i = 0; i < MAX_SAMPLES; i++)
-        {
-            if (i * kChannels >= (bytesRead / 4)) break;
-            int32_t s32 = tempBuffer[i * kChannels]; // Left channel
-            ptrSampleBuffer[i] = (int16_t)std::clamp(s32 >> 15, -32768, 32767);
-        }
-#endif
-        return bytesRead;
-    }
-
-    size_t SampleI2S_Legacy()
-    {
-        size_t bytesRead = 0;
-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
-        constexpr int kChannels = 2; // RIGHT + LEFT
-        constexpr auto wordsToRead = MAX_SAMPLES * kChannels;
-        constexpr auto bytesExpected32 = wordsToRead * sizeof(int32_t);
-        static int32_t raw32[wordsToRead];
-
-        ESP_ERROR_CHECK(i2s_read(I2S_NUM_0, (void *)raw32, bytesExpected32, &bytesRead, 100 / portTICK_PERIOD_MS));
-        if (bytesRead != bytesExpected32)
-        {
-            debugW("Only read %u of %u bytes from I2S\n", bytesRead, bytesExpected32);
-            return bytesRead;
-        }
-
-        static int s_chanIndex = -1;
-        if (s_chanIndex < 0)
-        {
-            long long sumAbs[2] = {0, 0};
-            for (int i = 0; i < MAX_SAMPLES; ++i)
-            {
-                int32_t r0 = raw32[i * kChannels + 0];
-                int32_t r1 = raw32[i * kChannels + 1];
-                sumAbs[0] += llabs((long long)r0);
-                sumAbs[1] += llabs((long long)r1);
-            }
-            s_chanIndex = (sumAbs[1] > sumAbs[0]) ? 1 : 0;
-        }
-
-        for (int i = 0; i < MAX_SAMPLES; i++)
-        {
-            int32_t v = raw32[i * kChannels + s_chanIndex];
-            int32_t scaled = (v >> 15);
-            ptrSampleBuffer[i] = (int16_t)std::clamp(scaled, (int32_t)INT16_MIN, (int32_t)INT16_MAX);
-        }
-        bytesRead = MAX_SAMPLES * sizeof(int16_t); // effectively valid now
-#endif
-        return bytesRead;
-    }
-
-    size_t SampleADC_Modern()
-    {
-        size_t ret_num = 0;
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-        constexpr size_t bytesToRead = MAX_SAMPLES * sizeof(uint16_t);
-        esp_err_t err = adc_continuous_read(_adc_handle, (uint8_t*)ptrSampleBuffer.get(), bytesToRead, (uint32_t*)&ret_num, 0);
-
-        if (err == ESP_OK) {
-            for (int i = 0; i < MAX_SAMPLES; i++) {
-                if (i * 2 >= ret_num) break;
-                uint16_t val = ptrSampleBuffer[i];
-                uint16_t data = val & 0xFFF; // Keep 12 bits
-                ptrSampleBuffer[i] = (int16_t)((data - 2048) * 16);
-            }
-        }
-#endif
-        return ret_num;
-    }
-
-    size_t SampleADC_Legacy()
-    {
-        size_t bytesRead = 0;
-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
-        constexpr auto bytesExpected16 = MAX_SAMPLES * sizeof(ptrSampleBuffer[0]);
-        ESP_ERROR_CHECK(i2s_read(I2S_NUM_0, (void *)ptrSampleBuffer.get(), bytesExpected16, &bytesRead, 100 / portTICK_PERIOD_MS));
-        if (bytesRead != bytesExpected16)
-        {
-            debugW("Could only read %u bytes of %u in FillBufferI2S()\n", bytesRead, bytesExpected16);
-            return bytesRead;
-        }
-#endif
-        return bytesRead;
-    }
-
-    // Reset and clear the FFT buffers
-
-    void Reset()
-    {
-        _vReal.fill(0.0f);
-        _vImaginary.fill(0.0f);
-        _vPeaks.fill(0.0f);
-    }
-
-    // Perform the FFT
-
-    void FFT()
-    {
-        ArduinoFFT<float> _FFT(_vReal.data(), _vImaginary.data(), MAX_SAMPLES, SAMPLING_FREQUENCY);
-        _FFT.dcRemoval();
-        _FFT.windowing(FFTWindow::Hann, FFTDirection::Forward);
-        _FFT.compute(FFTDirection::Forward);
-        _FFT.complexToMagnitude();
-    }
-
-    // Sample the audio
-
-    void SampleAudio()
-    {
-        size_t bytesRead = 0;
-
-#if INPUT_PIN < 0
-        return;
+#if IS_IDF5
+    i2s_chan_handle_t _rx_handle = nullptr;
+    adc_continuous_handle_t _adc_handle = nullptr;
 #endif
 
-#if USE_M5
-        bytesRead = SampleM5();
-#else
-        // Attempt to sample from all supported backends.
-        // Those not active in the current configuration will return 0 immediately.
-        if (bytesRead == 0) bytesRead = SampleI2S_Modern();
-        if (bytesRead == 0) bytesRead = SampleI2S_Legacy();
-        if (bytesRead == 0) bytesRead = SampleADC_Modern();
-        if (bytesRead == 0) bytesRead = SampleADC_Legacy();
-#endif
 
-        if (bytesRead == 0) return;
 
-        // Compute stats and copy into FFT input buffer
-        for (int i = 0; i < MAX_SAMPLES; i++)
-        {
-            int16_t s = ptrSampleBuffer[i];
-            _vReal[i] = (float)s;
-        }
-    }
+    // The FFT object is now a member variable to avoid ctor/dtor overhead per frame.
+    // Declaration order ensures _vReal and _vImaginary address are stable when _FFT is initialized.
+    ArduinoFFT<float> _FFT;
 
-    // Update the VU and peak values based on the new sample
+    void Reset();
+    void FFT();
+    void SampleAudio();
+    void UpdateVU(float newval);
+    void ComputeBandLayout();
+    const PeakData &ProcessPeaksEnergy();
 
-    void UpdateVU(float newval)
-    {
-        if (newval > _oldVU)
-            _VU = newval;
-        else
-            _VU = (_oldVU * VUDAMPEN + newval) / (VUDAMPEN + 1);
-        _oldVU = _VU;
-        if (_VU > _PeakVU)
-            _PeakVU = _VU;
-        else
-            _PeakVU = (_oldPeakVU * VUDAMPENMAX + _VU) / (VUDAMPENMAX + 1);
-        _oldPeakVU = _PeakVU;
-        if (_VU < _MinVU)
-            _MinVU = _VU;
-        else
-            _MinVU = (_oldMinVU * VUDAMPENMIN + _VU) / (VUDAMPENMIN + 1);
-        _oldMinVU = _MinVU;
-    }
+    void InitM5();
+    void InitI2S_Modern();
+    void InitI2S_Legacy();
+    void InitADC_Modern();
+    void InitADC_Legacy();
 
-    // Compute the band layout based on the sampling frequency and number of bands
-
-    // This computes the start and end bins for each band based on the sampling frequency,
-    // ensuring that the bands are spaced logarithmically or in Mel scale as configured.
-    // The results are stored in _bandBinStart and _bandBinEnd arrays.
-
-    void ComputeBandLayout()
-    {
-        const float fMin = LOWEST_FREQ;
-        const float fMax = std::min<float>(HIGHEST_FREQ, SAMPLING_FREQUENCY / 2.0f);
-        const float binWidth = (float)SAMPLING_FREQUENCY / (MAX_SAMPLES / 2.0f);
-        int prevBin = 4;  // Start at bin 4 to skip DC (bin 0), very low freq (bins 1-3)
-#if SPECTRUM_BAND_SCALE_MEL
-        auto hzToMel = [](float f) { return 2595.0f * log10f(1.0f + f / 700.0f); };
-        auto melToHz = [](float m) { return 700.0f * (powf(10.0f, m / 2595.0f) - 1.0f); };
-        float melMin = hzToMel(fMin);
-        float melMax = hzToMel(fMax);
-#endif
-        for (int b = 0; b < NUM_BANDS; b++)
-        {
-            // Shift the effective band index by kBandOffset so logical band 0 starts higher
-            const int logicalIdx = b + kBandOffset;
-            const float fracHi = (float)(logicalIdx + 1) / (float)(NUM_BANDS + kBandOffset);
-#if SPECTRUM_BAND_SCALE_MEL
-            float edgeMel = melMin + (melMax - melMin) * fracHi;
-            float edgeHiFreq = melToHz(edgeMel);
-#else
-            float ratio = fMax / fMin;
-            float edgeHiFreq = fMin * powf(ratio, fracHi);
-#endif
-            int hiBin = (int)lroundf(edgeHiFreq / binWidth);
-            hiBin = std::clamp(hiBin, prevBin + 1, (int)(MAX_SAMPLES / 2 - 1));
-            _bandBinStart[b] = prevBin;
-            _bandBinEnd[b] = hiBin;
-            prevBin = hiBin;
-        }
-        _bandBinEnd[NUM_BANDS - 1] = (MAX_SAMPLES / 2 - 1);
-    }
-
-    PeakData ProcessPeaksEnergy()
-    {
-        // Band offset handled in ComputeBandLayout so index 0 is the lowest VISIBLE band
-         float frameMax = 0.0f;
-         float frameSumRaw = 0.0f;
-         float noiseSum = 0.0f;
-         float noiseMaxAll = 0.0f; // Tracks max noise floor across bands
-         // Display gain and band floor constants
-         const float kDisplayGain = _params.postScale;  // Use postScale from AudioInputParams instead of hardcoded value
-         constexpr float kBandFloorMin = 0.01f;
-         constexpr float kBandFloorScale = 0.05f;
-
-        // Attack rate from mic params (frame-rate independent)
-        const float kLiveAttackPerSec = _params.liveAttackPerSec;
-        // Use reciprocal of AudioFPS for frame-rate independent attack limiting
-        float dt = (_AudioFPS > 0) ? (1.0f / (float)_AudioFPS) : 0.016f;
-        // Fallback to reasonable default if FPS is invalid
-        if (dt <= 0.0f || dt > 0.1f)
-            dt = 0.016f;
-        for (int b = 0; b < NUM_BANDS; b++)
-        {
-            int start = _bandBinStart[b];
-            int end = _bandBinEnd[b];
-            if (end <= start)
-            {
-                _vPeaks[b] = 0.0f;
-                continue;
-            }
-            float sumPower = 0.0f;
-            for (int k = start; k < end; k++)
-            {
-                float mag = _vReal[k];
-                sumPower += mag * mag;
-            }
-            int widthBins = end - start;
-            float avgPower = (widthBins > 0) ? (sumPower / (float)widthBins) : 0.0f;
-            avgPower *= _params.windowPowerCorrection;
-
-            // Apply aggressive logarithmic bass suppression with steeper initial curve
-            float bandRatio = (float)b / (NUM_BANDS - 1);  // 0.0 to 1.0 across all bands
-
-            // Two-stage suppression: moderate suppression on first few bands, then quick recovery
-            float suppression;
-            if (bandRatio < 0.1f) {  // First 10% of bands get moderate suppression
-                // Quadratic suppression for the very first bands (band 0 gets maximum suppression)
-                float localRatio = bandRatio / 0.1f;  // 0.0 to 1.0 over first 10% of spectrum
-                suppression = 0.005f + (0.05f - 0.005f) * (localRatio * localRatio);  // 0.005 to 0.05 (99.5% to 95% attenuation)
-            } else if (bandRatio < 0.4f) {  // Next 30% get moderate suppression with quick recovery
-                // Exponential recovery from 0.05 to bandCompHigh over bands 10-40%
-                float localRatio = (bandRatio - 0.1f) / 0.3f;  // 0.0 to 1.0 over 10-40% of spectrum
-                suppression = 0.05f * expf(localRatio * logf(_params.bandCompHigh / 0.05f));
-            } else {
-                // Full gain for upper 60% of spectrum
-                suppression = _params.bandCompHigh;
-            }
-            avgPower *= suppression;
-
-            // Track pre-subtraction max for SNR gating
-            if (avgPower > frameSumRaw)
-                frameSumRaw = avgPower;
-
-            if (avgPower > _noiseFloor[b])
-                _noiseFloor[b] = _noiseFloor[b] * (1.0f - _params.energyNoiseAdapt) + (float)avgPower * _params.energyNoiseAdapt;
-            else
-                _noiseFloor[b] *= _params.energyNoiseDecay;
-
-            // Accumulate noise stats
-            noiseSum += _noiseFloor[b];
-            if (_noiseFloor[b] > noiseMaxAll)
-                noiseMaxAll = _noiseFloor[b];
-
-            float signal = (float)avgPower - _noiseFloor[b];
-            if (signal < 0.0f)
-                signal = 0.0f;
-
-            #if ENABLE_AUDIO_SMOOTHING
-                // Weighted average: 0.25 * (2 * current + left + right)
-                float left = (b > 0) ? _rawPrev[b - 1] : signal;
-                float right = (b < NUM_BANDS - 1) ? _rawPrev[b + 1] : signal;
-                float smoothed = 0.25f * (2.0f * signal + left + right);
-                _rawPrev[b] = smoothed;
-                _vPeaks[b] = smoothed;
-                if (smoothed > frameMax)
-                    frameMax = smoothed;
-            #else
-                _vPeaks[b] = signal;
-                if (signal > frameMax)
-                    frameMax = signal;
-            #endif
-        }
-
-        // Manually clamp back the bass bands, as they are vastly over-represented
-
-        if (frameMax > _energyMaxEnv)
-            _energyMaxEnv = frameMax;
-        else
-            _energyMaxEnv = std::max(_params.energyMinEnv, _energyMaxEnv * _params.energyEnvDecay);
-
-        // Raw SNR-based frame gate (pre-normalization) to suppress steady HVAC and similar backgrounfd noises
-
-        float snrRaw = frameSumRaw / (noiseMaxAll + 1e-9f);
-        if (snrRaw < _params.frameSNRGate)
-        {
-            for (int b = 0; b < NUM_BANDS; ++b)
-            {
-                _vPeaks[b] = 0.0f;
-                _Peaks[b] = 0.0f;
-            }
-            UpdateVU(0.0f);
-            return _Peaks;
-        }
-
-        // Anchor normalization to noise-derived floor to avoid auto-gain blow-up
-        float noiseMean = noiseSum / (float)NUM_BANDS;
-        float envFloorRaw = noiseMean * _params.envFloorFromNoise; // raw (unclamped) env floor
-        // Quiet environment gate: if the derived env floor is below a configured threshold, suppress the whole frame
-        if (_params.quietEnvFloorGate > 0.0f && envFloorRaw < _params.quietEnvFloorGate)
-        {
-            for (int b = 0; b < NUM_BANDS; ++b)
-            {
-                _vPeaks[b] = 0.0f;
-                _Peaks[b] = 0.0f;
-            }
-            UpdateVU(0.0f);
-            return _Peaks;
-        }
-
-        float envFloor = std::max(_params.energyMinEnv, envFloorRaw);
-        float normDen = std::max(_energyMaxEnv, envFloor);
-        const float invEnv = 1.0f / normDen;
-        float sumNorm = 0.0f;
-
-        // Now that layout skips the lowest bins, emit all NUM_BANDS directly with no reindexing
-        for (int b = 0; b < NUM_BANDS; b++)
-        {
-            float vTarget = _vPeaks[b] * invEnv;
-            vTarget = powf(std::max(0.0f, vTarget), _params.compressGamma);
-            if (vTarget > 1.0f) vTarget = 1.0f;
-            vTarget *= kDisplayGain;
-            if (vTarget > 1.0f) vTarget = 1.0f;
-            const float bandFloor = std::max(kBandFloorMin, kBandFloorScale);
-            if (vTarget < bandFloor) { vTarget = 0.0f; }
-            float vCurr = _livePeaks[b];
-            float vNew = vTarget;
-            if (vTarget > vCurr)
-            {
-                const float maxRise = kLiveAttackPerSec * dt;
-                vNew = vCurr + std::min(vTarget - vCurr, maxRise);
-            }
-            if (vNew > 1.0f) vNew = 1.0f;
-            if (vNew < 0.0f) vNew = 0.0f;
-            _livePeaks[b] = vNew;
-            _vPeaks[b] = vNew;
-            _Peaks[b] = vNew;
-            sumNorm += vNew;
-        }
-        UpdateVU(sumNorm / (float)NUM_BANDS);
-        return _Peaks;
-    }
+    size_t SampleM5();
+    size_t SampleI2S_Modern();
+    size_t SampleI2S_Legacy();
+    size_t SampleADC_Modern();
+    size_t SampleADC_Legacy();
 
   public:
+    // Construct analyzer, allocate buffers (PSRAM-preferred), set initial state.
+    // Throws std::runtime_error on allocation failure. Computes band layout once.
+    SoundAnalyzer();
+
+    // Free any heap/PSRAM buffers allocated by the constructor.
+    // Safe to call at shutdown/reset.
+    ~SoundAnalyzer();
+
     // Current beat/level ratio value used by visual effects.
     // Typically maintained by higher-level audio logic.
     // Range ~[0..something], consumer-specific.
 
-    inline float VURatio() const override
+    float VURatio() const override
     {
         return _VURatio;
     }
@@ -871,7 +395,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Smoothed/decayed version of VURatio for more graceful visuals.
     // Use when you want beat emphasis without sharp jumps.
 
-    inline float VURatioFade() const override
+    float VURatioFade() const override
     {
         return _VURatioFade;
     }
@@ -879,7 +403,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Average normalized energy this frame (0..1 after gating/compression).
     // Updated in ProcessPeaksEnergy()/SetPeakDataFromRemote via UpdateVU().
 
-    inline float VU() const override
+    float VU() const override
     {
         return _VU;
     }
@@ -887,7 +411,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Highest recent VU observed (peak hold with damping).
     // Useful for setting adaptive effect ceilings.
 
-    inline float PeakVU() const override
+    float PeakVU() const override
     {
         return _PeakVU;
     }
@@ -895,7 +419,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Lowest recent VU observed (floor with damping).
     // Useful as denominator clamps for normalized ratios.
 
-    inline float MinVU() const override
+    float MinVU() const override
     {
         return _MinVU;
     }
@@ -903,7 +427,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Measured audio processing frames-per-second.
     // For diagnostics/telemetry; not critical to effects logic.
 
-    inline int AudioFPS() const override
+    int AudioFPS() const override
     {
         return _AudioFPS;
     }
@@ -911,7 +435,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Measured serial streaming FPS (if enabled).
     // For diagnostics; may be zero if not used.
 
-    inline int SerialFPS() const override
+    int SerialFPS() const override
     {
         return _serialFPS;
     }
@@ -925,7 +449,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Returns the latest per-band normalized peaks (0..1).
     // Pointer remains valid until next ProcessPeaksEnergy/SetPeakDataFromRemote.
 
-    inline const PeakData &Peaks() const override
+    const PeakData &Peaks() const override
     {
         return _Peaks;
     }
@@ -933,17 +457,17 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Returns the slower-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
 
-    inline float Peak2Decay(int band) const override
+    float Peak2Decay(int band) const override
     {
         return (band >= 0 && band < NUM_BANDS) ? _peak2Decay[band] : 0.0f;
     }
 
-    inline float Peak1Decay(int band) const override
+    float Peak1Decay(int band) const override
     {
         return (band >= 0 && band < NUM_BANDS) ? _peak1Decay[band] : 0.0f;
     }
 
-    inline unsigned long LastPeak1Time(int band) const override
+    unsigned long LastPeak1Time(int band) const override
     {
         return (band >= 0 && band < NUM_BANDS) ? _lastPeak1Time[band] : 0;
     }
@@ -951,36 +475,7 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Configure how quickly the two decay overlays drop over time.
     // r1 = fast track, r2 = slow track; higher = faster decay.
 
-    inline void SetPeakDecayRates(float r1, float r2) override
-    {
-        _peak1DecayRate = r1;
-        _peak2DecayRate = r2;
-    }
-
-    // Construct analyzer, allocate buffers (PSRAM-preferred), set initial state.
-    // Throws std::runtime_error on allocation failure. Computes band layout once.
-
-    SoundAnalyzer()
-    {
-        ptrSampleBuffer.reset((int16_t *)heap_caps_malloc(MAX_SAMPLES * sizeof(int16_t), MALLOC_CAP_8BIT));
-        if (!ptrSampleBuffer)
-            throw std::runtime_error("Failed to allocate sample buffer");
-        _oldVU = _oldPeakVU = _oldMinVU = 0.0f;
-        ComputeBandLayout();
-        Reset();
-    }
-
-    // Free any heap/PSRAM buffers allocated by the constructor.
-    // Safe to call at shutdown/reset.
-
-    ~SoundAnalyzer()
-    {
-        // Stop I2S if it was started
-        #if !USE_M5 && (ELECROW || USE_I2S_AUDIO || !defined(USE_I2S_AUDIO))
-            i2s_stop(I2S_NUM_0);
-            i2s_driver_uninstall(I2S_NUM_0);
-        #endif
-    }
+    void SetPeakDecayRates(float r1, float r2) override;
 
     // These functions allow access to the last-acquired sample buffer and its size so that
     // effects can draw the waveform or do other things with the raw audio data
@@ -1011,201 +506,29 @@ class SoundAnalyzer : public ISoundAnalyzer
     // Compute a blend factor using VURatioFade to "pulse" visuals.
     // amt in [0..1] controls how strongly the ratio influences the result.
 
-    float BeatEnhance(float amt)
-    {
-        return ((1.0 - amt) + (_VURatioFade / 2.0) * amt);
-    }
+    float BeatEnhance(float amt);
 
-    void SetSimulateBeat(bool enable) { _simulateBeat = enable; }
-    void SetSimulateBPM(int bpm) { _simBPM = bpm; }
-    bool GetSimulateBeat() const { return _simulateBeat; }
-    int GetSimulateBPM() const { return _simBPM; }
+    // --- Public Beat Simulation Interface ---
 
+    void SetSimulateBeat(bool b) override { _simulateBeat = b; }
+    void SetSimulateBPM(int bpm) override { _simBPM = bpm; }
+    bool GetSimulateBeat() const override { return _simulateBeat; }
+    int GetSimulateBPM() const override { return _simBPM; }
 
-    // InitAudioInput
-    //
-    // Configure and start the I2S (or M5) input at SAMPLING_FREQUENCY.
-    // Board-specific branches set pins and ADC/I2S modes as needed.
-    //
-    void InitAudioInput()
-    {
-        // install and start i2s driver
-
-
-        // install and start i2s driver
-
-#if INPUT_PIN < 0
-    debugI("Audio: INPUT_PIN < 0, skipping hardware initialization. SimBeat only.");
-    return;
-#endif
-
-        debugV("Begin SamplerBufferInitI2S...");
-
-#if USE_M5
-        InitM5();
-#else
-        // Digital Microphones
-        InitI2S_Modern();
-        InitI2S_Legacy();
-
-        // Analog Microphones
-        InitADC_Modern();
-        InitADC_Legacy();
-#endif
-        debugV("SamplerBufferInitI2S Complete\n");
-    }
-
-
-
-    // DecayPeaks
-    //
-    // Every so many ms we decay the peaks by a given amount
-
-    // Apply time-based decay to the two peak overlay arrays.
-    // Called once per frame; uses AppTime.LastFrameTime() and configurable rates.
-
-    inline void DecayPeaks()
-    {
-        // Use reciprocal of AudioFPS for frame-rate independent decay timing
-        float audioFrameTime = (_AudioFPS > 0) ? (1.0f / (float)_AudioFPS) : 0.016f;
-        if (audioFrameTime <= 0.0f || audioFrameTime > 0.1f) audioFrameTime = 0.016f;
-
-        float decayAmount1 = std::max(0.0f, audioFrameTime * _peak1DecayRate);
-        float decayAmount2 = std::max(0.0f, audioFrameTime * _peak2DecayRate);
-
-        for (int iBand = 0; iBand < NUM_BANDS; iBand++)
-        {
-            _peak1Decay[iBand] -= min(decayAmount1, _peak1Decay[iBand]);
-            _peak2Decay[iBand] -= min(decayAmount2, _peak2Decay[iBand]);
-        }
-
-        // Removed old smoothing of decay overlays; smoothing now applies to live peaks in ProcessPeaksEnergy()
-    }
-
-    // Update the per-band decay overlays from the latest peaks.
-    // Rises are limited by VU_REACTIVITY_RATIO; records timestamps on new primary peaks.
-
-    inline void UpdatePeakData()
-    {
-        for (int i = 0; i < NUM_BANDS; i++)
-        {
-            if (_Peaks[i] > _peak1Decay[i])
-            {
-                const float maxIncrease =
-                    std::max(0.0, g_Values.AppTime.LastFrameTime() * _peak1DecayRate * VU_REACTIVITY_RATIO);
-                _peak1Decay[i] = std::min(_Peaks[i], _peak1Decay[i] + maxIncrease);
-                _lastPeak1Time[i] = millis();
-            }
-            if (_Peaks[i] > _peak2Decay[i])
-            {
-                const float maxIncrease =
-                    std::max(0.0, g_Values.AppTime.LastFrameTime() * _peak2DecayRate * VU_REACTIVITY_RATIO);
-                _peak2Decay[i] = std::min(_Peaks[i], _peak2Decay[i] + maxIncrease);
-            }
-        }
-    }
-
-    // Accept externally provided peaks (e.g., over WiFi) and update internal state.
-    // Also recomputes VU from the new band values and records source time.
-
-    inline void SetPeakDataFromRemote(const PeakData &peaks)
-    {
-        _msLastRemoteAudio = millis();
-        _Peaks = peaks;
-        _vPeaks = _Peaks;
-        float sum = accumulate(_vPeaks);
-        UpdateVU(sum / NUM_BANDS);
-    }
+    void InitAudioInput();
+    void DecayPeaks();
+    void UpdatePeakData();
+    void SetPeakDataFromRemote(const PeakData &peaks);
+    void RunSamplerPass() override;
+    void SimulateBeatPass() override;
 
 #if ENABLE_AUDIO_DEBUG
-    // Print per-band [start-end] bin ranges over Serial for debugging.
-    // Useful to verify spacing and coverage with current config.
-
-    void DumpBandLayout() const
-    {
-        Serial.println("Band layout (start-end):");
-        for (int b = 0; b < NUM_BANDS; b++)
-        {
-            Serial.print(b);
-            Serial.print(": ");
-            Serial.print(_bandBinStart[b]);
-            Serial.print('-');
-            Serial.println(_bandBinEnd[b]);
-        }
-    }
+    void DumpBandLayout() const;
 #endif
-
-    // SimulateBeatPass
-    //
-    // Generates fake audio data for testing without a microphone/source.
-    // SimulateBeatPass
-    //
-    // Generates fake audio data for testing without a microphone/source.
-    void SimulateBeatPass()
-    {
-        // --- Beat Timing Calculation ---
-        const float beatsPerSecond = _simBPM / 60.0f;
-        const float beatPeriodMillis = (beatsPerSecond > 0) ? (1000.0f / beatsPerSecond) : 1000.0f;
-        const float beatActiveDurationMillis = beatPeriodMillis * 0.15f; // e.g., 15% of the cycle
-
-        unsigned long currentTime = millis();
-        float timeInCycle = fmod(static_cast<float>(currentTime), beatPeriodMillis);
-        bool isOnBeat = (timeInCycle < beatActiveDurationMillis);
-
-        float targetVU = 0.0f;
-        PeakData simulatedPeaks;
-
-        if (isOnBeat)
-        {
-            targetVU = 50.0f; // Arbitrary "loud"
-            for (int i = 0; i < NUM_BANDS; ++i)
-            {
-                // Bass-heavy beat
-                double level = 1.0 * std::max(0.0, 1.0 - (double)i / (NUM_BANDS * 0.75));
-                simulatedPeaks[i] = level * level;
-            }
-        }
-        else
-        {
-            targetVU = 1.0f; // Silence/Noise
-        }
-
-        _Peaks = simulatedPeaks;
-        UpdateVU(targetVU);
-    }
-
-    // RunSamplerPass
-    //
-    // Perform one audio acquisition/processing step.
-    // Uses local mic if no recent remote peaks; otherwise trusts remote and only updates VU.
-    // Simplified - no runtime microphone switching needed
-    inline void RunSamplerPass()
-    {
-        if (_simulateBeat)
-        {
-            SimulateBeatPass();
-            return;
-        }
-
-        if (millis() - _msLastRemoteAudio > AUDIO_PEAK_REMOTE_TIMEOUT)
-        {
-            // Use local microphone - type determined at compile time
-            Reset();
-            SampleAudio();
-            FFT();
-            ProcessPeaksEnergy();
-        }
-        else
-        {
-            // Using remote data - just update VU from existing peaks
-            float sum = accumulate(_Peaks);
-            UpdateVU(sum / NUM_BANDS);
-        }
-    }
 };
+
 #endif
 
-// Project-specific SoundAnalyzer type selection using AudioInputParams directly
 #if ENABLE_AUDIO
     #if M5STICKCPLUS2
     using ProjectSoundAnalyzer = SoundAnalyzer<kParamsM5Plus2>;

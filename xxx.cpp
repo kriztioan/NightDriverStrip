@@ -1,0 +1,693 @@
+//+--------------------------------------------------------------------------
+//
+// File:        main.cpp
+//
+// NightDriverStrip - (c) 2018 Plummer's Software LLC.  All Rights Reserved.
+//
+// This file is part of the NightDriver software project.
+//
+//    NightDriver is free software: you can redistribute it and/or modify
+//    it under the terms of the GNU General Public License as published by
+//    the Free Software Foundation, either version 3 of the License, or
+//    (at your option) any later version.
+//
+//    NightDriver is distributed in the hope that it will be useful,
+//    but WITHOUT ANY WARRANTY; without even the implied warranty of
+//    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//    GNU General Public License for more details.
+//
+//    You should have received a copy of the GNU General Public License
+//    along with Nightdriver.  It is normally found in copying.txt
+//    If not, see <https://www.gnu.org/licenses/>.
+//
+// Description:
+//
+//    Main setup and loop file for the LED Wifi Project, and main.cpp is
+//    the ugliest file because of the conditional compilation, and the
+//    external dependencies.
+//
+//    NightDriver is an LED display project composed of a client app
+//    that runs on the ESP32 and an optional server that can run on
+//    a variety of platforms (anywhere .Net CORE works, like the Pi).
+//    The app controls WS2812B style LEDs.  The number of LEDs in a
+//    row is unbounded but realistically limited to about 1000 which
+//    still allows for about 24 frames per second of updates.  There
+//    can be 8 such channels connected to 8 different pins.
+//    By default, NightDriver draws client effects, and there many
+//    built in, from marquees to fire.  But it can also receive color
+//    data from a server.  So it first checks to see if there is
+//    data coming in, and if so, draws that.  If not it falls back
+//    to internal drawing.  The server sends a simple packet with
+//    an LED count, timestamp, and then the color data for the LEDs.
+//    The ESP32 app has buffer of about 30 frames when 1000 LEDs are
+//    in use.  The server generates frames 1/2 second in the future and
+//    sets the timestamps according.  The client app waits until
+//    the next packet in its buffer is due for drawing and then draws
+//    it and discards it.  A circular queue is used.
+//
+//    Both client and server require reliable access to an SNTP server
+//    to keep their clocks in sync.  The client sets its time every
+//    few hours to combat clock drifts on the ESP32.  Since all the
+//    clients (and the server) have the same clock, they can sync
+//    shows across multiple clients.  Imagine a setup where a dozen
+//    LED matrixes are arranged to form a small "jumbotron".  This
+//    works because the screens would all be in time sync.
+//
+//    The app listens to the microphone and does an FFT and spectral
+//    analysis on a separate thread about 25 times per second.  This
+//    gives effects access to the audio data, and there are a number
+//    of sound-reactive and beat-driven effects built in.
+//
+//    In addition to simple strips, the app handles matrixes as well.
+//    It also handles groups of rings.  In one incarnation, 10 RGB
+//    LED PC fans are connected in a LianLi case plus the 32 or so
+//    on the front of the case.  The fans are grouped into NUM_FANS
+//    fans.  It also supports concentrically nested rings of varying
+//    size, which I use for a Christmas-tree project where each tree
+//    is made up of a "stack" of rings - 32 leds, 18, 10, 4, 1.
+//    It's up to individual effects to take advantage of them but
+//    the drawing code provides APIs for "draw to LED x of RING q on
+//    FAZN number z" and so on for convenience.
+//
+//    Support for features such as sound, web, wifi, etc can be
+//    selectively disabled via #include settings.  There's an optional
+//    web server built in that serves a sample jqueryUI based UI
+//    directly from the chip.  You could add a settings page for
+//    example.  It has the basics of a REST API we well.
+//
+//    A telnet server is also built in for easy debugging access.
+//
+//    An Over-the-air WiFi flash update function is built in, and the
+//    lights will turn purple during a flash update.
+//
+//    MAIN.CPP --------------------------------------------------------
+//
+//    When the ESP32 chip boots it starts here, in the setup() function.
+//    Setup sets pin directions, starts wifi, initialized the LEDs, etc.
+//    Then loop() is called repeatedly until the end of time.  The loop
+//    code (optionally) receives color data over Wifi.  If it hasn't had
+//    any for a bit of time, it falls back to rotating through a table
+//    of internal effects.
+//
+//    A number of worker threads are created which:
+//
+//      1) Draw the TFT and display stats like framerate and IP addr
+//      2) Sync the clock periodically
+//      3) Run a full web server
+//      4) Run a debug monitor accessible via serial and over telnet
+//      5) Listen to room audio, create a spectrum, look for beat
+//      6) Re-connect to WiFi as needed and other networking tasks
+//      7) Run the debug monitor over telnet
+//      8) Receive color data on a socket
+//
+// Most of these features can be individually enabled and disabled via
+// conditional includes.
+//
+// License:
+//
+// NightDriver is an open source embedded application governed by the terms
+// of the General Public License (GPL). This requires that anyone modifying
+// the NightDriver code (for anything other than personal use) or building
+// applications based on NightDriver code must also make their derived
+// product available under the same open source GPL terms. By purchasing
+// a license for NightDriver, you would not then be bound by the GPL and
+// you would gain an extended feature set and various levels of support.
+// Think commas, not zeros, when discussing product volumes and license
+// pricing.
+//
+// Without restricting the author protections found in the GPL, Plummer's
+// Software LLC, its programmers, representatives and agents, etc.,
+// specifically disclaim any liability related to safety or suitability
+// for any purpose whatsoever.  Hypothetical example so we all know what
+// I mean:  If the code that limits LED power consumption has a horribly
+// negligent bug that burns down your village, you have my sympathy but
+// not my liability. It's not that I don't care, there's just no world
+// where I'd casually release code that I was responsible for in that
+// manner without suitable engineering and testing, none of which this
+// code has had.  Not sure?  Turn and flee.  By proceeding, you agree.
+//
+// License Purchases
+//
+// NightDriver is an open source embedded application governed by the
+// terms of the General Public License (GPL).  If you follow that license
+// it's yours at the amazing price of 'completely free'.
+//
+// If, on the other hand, you are building a commercial application for
+// internal use or resale:
+//
+// Anyone building applications based on NightDriver code, or modifying
+// the NightDriver code, must also make their derived product available
+// under the same open source GPL terms. Commercial licenses may be
+// purchased from Plummer's Software LLC if you do not wish to be bound
+// by the GPL terms. These licenses are valid for a specified term.
+//
+// Contact Plummer's Software LLC for volume pricing and support questions.
+//
+// History:     Jul-12-2018         Davepl      Created
+//
+//              [See globals.h for project history]
+//
+//---------------------------------------------------------------------------
+
+#define FASTLED_ALL_PINS_HARDWARE_SPI
+#define FASTLED_ESP32_SPI_BUS HSPI
+
+#include "globals.h"
+
+#include <Arduino.h>
+#include <ArduinoOTA.h>
+#include <algorithm>
+#if ENABLE_ESPNOW
+#include <esp_now.h>
+#endif
+#include <IPAddress.h>
+#if USE_M5
+#include <M5Unified.h>
+#endif
+#include <SPIFFS.h>
+#include <WString.h>
+#include <memory>
+#include <mutex>
+#include <nvs.h>
+#include <nvs_flash.h>
+#include <vector>
+
+#if defined(TOGGLE_BUTTON_0) || defined(TOGGLE_BUTTON_1)
+#include "Bounce2.h"
+#endif
+#include "console.h"
+#include "debug_cli.h"
+#include "deviceconfig.h"
+#include "effectmanager.h"
+#include "gfxbase.h"
+#if USE_HUB75
+#include "hub75gfx.h"
+#endif
+#if ENABLE_WIFI
+#include "improvserial.h"
+#endif
+#include "interfaces.h"
+#include "jsonserializer.h"
+#include "ledbuffer.h"
+#include "ledstripeffect.h"
+#include "logger.h"
+#include "nd_network.h"
+#include "ntptimeclient.h"
+#include "socketserver.h"
+#include "soundanalyzer.h"
+#include "systemcontainer.h"
+#include "taskmgr.h"
+#if INCOMING_WIFI_ENABLED
+extern "C"
+{
+#include "uzlib/src/uzlib.h"
+}
+#endif
+#include "values.h"
+#include "websocketserver.h"
+#if USE_WS281X
+#include "ws281xgfx.h"
+#endif
+
+void ScreenUpdateLoopEntry(void *);
+
+#if ENABLE_ESPNOW
+#include <esp_arduino_version.h>
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+void onReceiveESPNOW(const esp_now_recv_info_t *recvInfo, const uint8_t *data, int dataLen);
+#else
+void onReceiveESPNOW(const uint8_t *macAddr, const uint8_t *data, int dataLen);
+#endif
+#endif
+
+//
+// Global Variables
+//
+
+DRAM_ATTR std::unique_ptr<SystemContainer> g_ptrSystem;
+DRAM_ATTR std::mutex g_buffer_mutex;
+
+// The one and only instance of ImprovSerial.  We instantiate it as the type needed
+// for the serial port on this module.  That's usually HardwareSerial but can be
+// other types on the S2, etc... which is why it's a template class.
+
+#if ENABLE_WIFI
+std::unique_ptr<ImprovSerial<typeof(Serial)>> g_pImprovSerial;
+#endif
+
+// If an insulator or tree or fan has multiple rings, this table defines how those rings are laid out such
+// that they add up to FAN_SIZE pixels total per ring.
+//
+// Imagine a setup of 5 Christmas trees, where each tree was made up of 4 concentric rings of decreasing
+// size, like 16, 12, 8, 4.  You would have NUM_FANS of 5 and MAX_RINGS of 4 and your ring table would be 16, 12, 8 4.
+
+DRAM_ATTR const int g_aRingSizeTable[MAX_RINGS] = {RING_SIZE_0, RING_SIZE_1, RING_SIZE_2, RING_SIZE_3, RING_SIZE_4};
+
+// PrintOutputHeader
+//
+// Displays an info header with info about the system
+
+void PrintOutputHeader()
+{
+    debugI("NightDriverStrip\n");
+    debugI(
+        "------------------------------------------------------------------------------------------------------------");
+    debugI("M5STICKC: %d, USE_M5DISPLAY: %d, USE_TFTSPI: %d, USE_LCD: %d, AUDIO_ENABLED: %d, ENABLE_REMOTE: %d",
+           M5STICKC, USE_M5DISPLAY, USE_TFTSPI, USE_LCD, ENABLE_AUDIO, ENABLE_REMOTE);
+
+#if USE_PSRAM
+    debugI("ESP32 PSRAM Init: %s", psramInit() ? "OK" : "FAIL");
+#endif
+
+    debugI("Version %u: Wifi SSID: \"%s\" - ESP32 Free Memory: %zu, PSRAM:%zu, PSRAM Free: %zu", FLASH_VERSION, cszSSID,
+           (size_t)ESP.getFreeHeap(), (size_t)ESP.getPsramSize(), (size_t)ESP.getFreePsram());
+    debugI("ESP32 Clock Freq : %lu MHz", (unsigned long)ESP.getCpuFreqMHz());
+}
+
+// TerminateHandler
+//
+// Set as the handler for unhandled exceptions, prints some debug info and reboots the chip!
+
+void TerminateHandler()
+{
+    debugE("-------------------------------------------------------------------------------------");
+    debugE("- NightDriverStrip Guru Meditation                              Unhandled Exception -");
+    debugE("-------------------------------------------------------------------------------------");
+
+    PrintOutputHeader();
+
+    try
+    {
+        std::rethrow_exception(std::current_exception());
+    }
+    catch (std::exception &ex)
+    {
+        debugE("Terminated due to exception: %s", ex.what());
+    }
+
+    Serial.flush();
+}
+
+// Buttons are now owned/managed by Screen
+
+// setup
+//
+// Invoked once at boot, does initial chip setup and application initial init, then spins off worker tasks and returns
+// control to the system so it can invoke the main loop() function.
+//
+// Threads (tasks) created here can include:
+//
+// DebugLoopTaskEntry           - Run a little debug console accessible via telnet and serial
+// ScreenUpdateLoopEntry        - Displays stats on the attached OLED/TFT screen about drawing, network, etc.
+// DrawLoopTaskEntry            - Handles drawing from local or wifi data
+// RemoteLoop                   - Handles the remote control loop
+// NetworkHandlingLoopEntry     - Connects to WiFi, handles reconnects, OTA updates, web server
+// SocketServerTaskEntry        - Creates the socket and listens for incoming wifi color data
+// AudioSamplerTaskEntry        - Listens to room audio, creates spectrum analysis, beat detection, etc.
+
+void setup()
+{
+    // Set the unhandled exception handler to be our own special exit function
+    std::set_terminate(TerminateHandler);
+
+    // Initialize Serial output
+    Serial.begin(115200);
+
+    // Route all ESP-IDF log output through ConsoleManager so CRLF translation
+    // and Serial.flush() are applied on every log line.
+    Logger::InstallLogHook();
+
+    // Initialize SPIFFS for file access to non-volatile storage
+    if (!SPIFFS.begin(true))
+        Serial.println("WARNING: SPIFFS could not be initialized!");
+
+    // Enabling PSRAM allows us to use the extra 4MB of RAM on the ESP32-WROVER chip, but it caused
+    // problems with the S3 rebooting when WiFi connected, so for now, I've limited the default
+    // allocator to be PSRAM only on the MESMERIZER project where it's well tested.
+
+#if MESMERIZER
+    heap_caps_malloc_extmem_enable(96);
+#endif
+
+    // Initialize LZ library for decompressing compressed wifi packets
+#if INCOMING_WIFI_ENABLED
+    uzlib_init();
+#endif
+
+    // Create the SystemContainer that holds primary device management objects.
+    g_ptrSystem = make_unique_psram<SystemContainer>();
+
+    // Start the Task Manager which takes over the watchdog role and measures CPU usage
+    auto &taskManager = g_ptrSystem->SetupTaskManager();
+
+    esp_log_level_set("*", ESP_LOG_DEBUG); // set all components to an appropriate logging level
+
+    // Display a simple startup header on the serial port
+    PrintOutputHeader();
+    debugI("Startup!");
+
+    // Initialize Non-Volatile Storage
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        // Looks like NVS is trash, or a future version we can't read.  Erase it.
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+
+    ESP_ERROR_CHECK(err);
+
+#if ENABLE_ESPNOW
+    SetWiFiModeSTA();
+
+    if (esp_now_init() != ESP_OK)
+        throw std::runtime_error("Error initializing ESP-NOW");
+    // Register receive callback function
+    esp_now_register_recv_cb(onReceiveESPNOW);
+    debugI("ESP-NOW initialized with MAC address: %s", GetMacAddressPretty().c_str());
+#endif
+
+#if ENABLE_WIFI
+    String WiFi_ssid;
+    String WiFi_password;
+    bool ct_creds_selected = false;
+
+    // if we have valid compile-time creds and they differ from what was persisted as
+    // compile-time creds, adopt them as the new WiFi creds reality.
+    if (cszSSID && strlen(cszSSID) > 0 && cszPassword)
+    {
+        String ct_ssid;
+        String ct_password;
+        if (!ReadWiFiConfig(WifiCredSource::CompileTimeCreds, ct_ssid, ct_password) || ct_ssid != cszSSID ||
+            ct_password != cszPassword)
+        {
+            debugI("Compile-time WiFi credentials differ from stored credentials, adopting new credentials");
+            ct_creds_selected = true;
+
+            // Clear any Improv creds as they are now stale
+            if (!ClearWiFiConfig(WifiCredSource::ImprovCreds))
+                debugW("Failed clearing Improv WiFi config from NVS");
+        }
+    }
+
+    // If we didn't decide to use current compile-time credentials, then try to fetch Improv creds
+    if (!ct_creds_selected && !ReadWiFiConfig(WifiCredSource::ImprovCreds, WiFi_ssid, WiFi_password))
+    {
+        debugW("Could not read Improv WiFI credentials, falling back to persisted compile-time credentials");
+
+        // We don't have Improv creds, so read presisted compile-time creds instead.
+        if (!ReadWiFiConfig(WifiCredSource::CompileTimeCreds, WiFi_ssid, WiFi_password))
+        {
+            // No persisted compile-time credentials either, so we just go with what we have
+            debugW("Could not read persisted compile-time WiFI credentials either, falling back to what's compiled in");
+            ct_creds_selected = true;
+        }
+    }
+
+    // If we decided to use current compile-time credentials, then make them the current config and write them to NVS
+    if (ct_creds_selected)
+    {
+        WiFi_ssid = cszSSID;
+        WiFi_password = cszPassword;
+        if (!WriteWiFiConfig(WifiCredSource::CompileTimeCreds, WiFi_ssid, WiFi_password))
+            debugW("Failed writing compile-time WiFi config to NVS");
+    }
+
+// This chip alone is special-cased by Improv, so we pull it
+// from build flags. CONFIG_IDF_TARGET will be "esp32s3".
+#if CONFIG_IDF_TARGET_ESP32S3
+    String family = "ESP32-S3";
+#else
+    String family = "ESP32";
+#endif
+
+#if ENABLE_WIFI
+    debugW("Starting ImprovSerial for %s", family.c_str());
+    String name = "NDESP32" + nd_network::GetMacAddress().substring(6);
+    g_pImprovSerial = make_unique_psram<ImprovSerial<typeof(Serial)>>();
+    g_pImprovSerial->setup(PROJECT_NAME, FLASH_VERSION_NAME, family, name.c_str(), &Serial);
+
+    // Improv will feed unknown bytes to the Serial session's CLI processor
+    g_pImprovSerial->set_on_unknown_byte(
+        [](uint8_t byte) { DebugCLI::ProcessCLIByte(byte, ConsoleManager::Instance().GetSerialSession()); });
+#endif
+#endif
+
+    // Setup config objects
+    g_ptrSystem->SetupConfig();
+
+#if ENABLE_WIFI
+    // We create the network reader here, so classes can register their readers from this point onwards.
+    //   Note that the thread that executes the readers is started further down, along with other networking
+    //   threads.
+    auto &networkReader = g_ptrSystem->SetupNetworkReader();
+
+#if ENABLE_NTP
+    // Register a network reader to update the device clock at regular intervals
+    networkReader.RegisterReader(UpdateNTPTime, (NTP_DELAY_ERROR_SECONDS) * 1000UL);
+#endif
+#endif
+
+#if INCOMING_WIFI_ENABLED
+    g_ptrSystem->SetupSocketServer(NetworkPort::IncomingWiFi, NUM_LEDS); // $C000 is free RAM on the C64, fwiw!
+#endif
+
+#if ENABLE_WIFI && ENABLE_WEBSERVER
+    g_ptrSystem->SetupWebServer();
+
+#if WEB_SOCKETS_ANY_ENABLED
+    g_ptrSystem->SetupWebSocketServer(g_ptrSystem->GetWebServer());
+#endif
+#endif
+
+    // If we have a remote control enabled, set the direction on its input pin accordingly
+
+#if ENABLE_REMOTE
+    if (IR_REMOTE_PIN >= 0)
+    {
+        pinMode(IR_REMOTE_PIN, INPUT);
+        g_ptrSystem->SetupRemoteControl();
+    }
+#endif
+
+#if ENABLE_AUDIO
+    {
+#if INPUT_PIN
+        if (INPUT_PIN >= 0)
+            pinMode(INPUT_PIN, INPUT);
+#endif
+#if TTGO
+        pinMode(37, OUTPUT);   // This pin layout allows for mounting a MAX4466 to the backside
+        digitalWrite(37, LOW); //   of a TTGO with the OUT pin on 36, GND on 37, and Vcc on 38
+        pinMode(38, OUTPUT);
+        digitalWrite(38, HIGH);
+#endif
+    }
+#endif
+
+    // TOGGLE_BUTTON_0/1 are configured inside Screen's update loop
+
+#if AMOLED_S3
+    debugW("Creating AMOLED Screen");
+    g_ptrSystem->SetupHardwareDisplay(TFT_HEIGHT, TFT_WIDTH);
+#endif
+
+#if USE_TFTSPI
+    // Height and width get reversed here because the display is actually portrait, not landscape.  Once
+    // we set the rotation, it works as expected in landscape.
+    debugW("Creating TFT Screen");
+    g_ptrSystem->SetupHardwareDisplay(TFT_HEIGHT, TFT_WIDTH);
+
+#elif USE_LCD
+
+    debugW("Creating LCD Screen");
+    g_ptrSystem->SetupHardwareDisplay(TFT_HEIGHT, TFT_WIDTH);
+
+#elif USE_M5
+
+    M5.begin();
+    // M5 specific setup is now inside M5Screen constructor
+    g_ptrSystem->SetupHardwareDisplay(M5.Lcd.width(), M5.Lcd.height());
+
+#elif ELECROW
+
+    debugW("Creating Elecrow Screen");
+    g_ptrSystem->SetupHardwareDisplay(TFT_HEIGHT, TFT_WIDTH);
+
+#elif USE_OLED
+
+#if USE_SSD1306
+    debugW("Creating SSD1306 Screen");
+    g_ptrSystem->SetupHardwareDisplay(128, 64);
+#else
+    debugW("Creating OLED Screen");
+    g_ptrSystem->SetupHardwareDisplay(128, 64);
+#endif
+
+#endif
+
+    // Create the vector with devices (channels)
+    g_ptrSystem->SetupDevices();
+    auto &devices = g_ptrSystem->GetDevices();
+
+    // Initialize the strand controllers depending on how many channels we have
+
+#if USE_HUB75
+    // HUB75GFX is used for HUB75 projects like the Mesmerizer
+    HUB75GFX::InitializeHardware(devices);
+#elif HEXAGON
+    // Hexagon is for a PCB wtih 271 LEDss arranged in the face of a hexagon
+    HexagonGFX::InitializeHardware(devices);
+#elif USE_WS281X
+    // WS281xGFX is used for simple strips or for matrices woven from strips
+    WS281xGFX::InitializeHardware(devices);
+#endif
+
+    // Initialize all the built-in effects
+
+    // Due to the nature of how FastLED compiles, the LED_PINx must be passed as a literal, not a variable (template
+    // stuff) Onboard PWM LED
+
+#if ONBOARD_LED_R
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcAttach(ONBOARD_LED_R, 12000, 8); //
+    ledcAttach(ONBOARD_LED_G, 12000, 8); //
+    ledcAttach(ONBOARD_LED_B, 12000, 8); //
+#else
+    ledcAttachPin(ONBOARD_LED_R, 1); // assign RGB led pins to PWM channels
+    ledcAttachPin(ONBOARD_LED_G, 2);
+    ledcAttachPin(ONBOARD_LED_B, 3);
+    ledcSetup(1, 12000, 8); // 12 kHz PWM, 8-bit resolution
+    ledcSetup(2, 12000, 8);
+    ledcSetup(3, 12000, 8);
+#endif
+#endif
+
+    g_ptrSystem->SetupBufferManagers();
+
+// Show splash effect on matrix
+#if USE_HUB75
+    debugI("Initializing splash effect manager...");
+    InitSplashEffectManager();
+#endif
+
+    InitEffectsManager();
+
+    // Start things that do not depend on the network
+
+    taskManager.StartDrawThread();
+    taskManager.StartScreenThread();
+    taskManager.StartAudioThread();
+    taskManager.StartRemoteThread();
+
+#if ENABLE_WIFI
+    debugI("Making initial attempt to connect to WiFi.");
+    ConnectToWiFi(WiFi_ssid, WiFi_password);
+#endif
+
+    // Start the network-dependent services.  These will be NOPs on a non-wifi build.
+
+    taskManager.StartSerialThread();
+    taskManager.StartNetworkThread();
+    taskManager.StartColorDataThread();
+    taskManager.StartSocketThread();
+    taskManager.StartDebugThread();
+
+    DebugCLI::InitDebugCLI();
+    nd_network::InitNetworkCLI();
+
+    SaveEffectManagerConfig();
+    // Start the main loop
+}
+
+// loop - main execution loop
+//
+// This is where an Arduino app spends most of its life but since we spin off tasks for much of our work, all that
+// remains here is to maintain the WiFi connection, watch for OTA updates, and output logging
+
+void loop()
+{
+    while (true)
+    {
+        // Feed any direct serial bytes to the console manager (if not handled by Improv)
+        while (Serial.available())
+        {
+            ConsoleManager::Instance().FeedSerialByte(Serial.read());
+        }
+
+#if ENABLE_WIFI
+        EVERY_N_MILLIS(20)
+        {
+#if ENABLE_WIFI
+            g_pImprovSerial->loop();
+#endif
+        }
+#endif
+
+#if ENABLE_OTA
+        try
+        {
+            if (nd_network::IsWiFiConnected())
+                ArduinoOTA.handle();
+        }
+        catch (const std::exception &e)
+        {
+            debugW("Exception in OTA code caught");
+        }
+#endif
+
+        EVERY_N_SECONDS(5)
+        {
+            String strOutput;
+
+#if ENABLE_WIFI
+            strOutput += str_sprintf("WiFi: %s, MAC: %s, IP: %s ", nd_network::WLtoString(nd_network::GetWiFiStatus()),
+                                     nd_network::GetMacAddressPretty().c_str(), nd_network::GetWiFiLocalIP().c_str());
+#endif
+
+            strOutput +=
+                str_sprintf("Mem: %zu, LargestBlk: %zu, PSRAM Free: %zu/%zu, ", (size_t)ESP.getFreeHeap(),
+                            (size_t)ESP.getMaxAllocHeap(), (size_t)ESP.getFreePsram(), (size_t)ESP.getPsramSize());
+            strOutput += str_sprintf("LED FPS: %lu ", (unsigned long)g_Values.FPS);
+
+#if USE_WS281X
+            strOutput +=
+                str_sprintf("LED Bright: %3.0lf%%, LED Watts: %lu, ", g_Values.Brite, (unsigned long)g_Values.Watts);
+#endif
+
+#if USE_HUB75
+            strOutput +=
+                str_sprintf("Refresh: %d Hz, Power: %d mW, Brite: %3.0lf%%, ", HUB75GFX::matrix.getRefreshRate(),
+                            g_Values.MatrixPowerMilliwatts, g_Values.MatrixScaledBrightness / 2.55);
+#endif
+
+#if ENABLE_AUDIO
+            strOutput +=
+                str_sprintf("Audio FPS: %d, MinVU: %6.1f, PeakVU: %6.1f, VURatio: %3.1f ", g_Analyzer.AudioFPS(),
+                            g_Analyzer.MinVU(), g_Analyzer.PeakVU(), g_Analyzer.VURatio());
+#endif
+
+#if ENABLE_AUDIOSERIAL
+            strOutput += str_sprintf("Serial FPS: %d, ", g_Analyzer.SerialFPS());
+#endif
+
+#if INCOMING_WIFI_ENABLED
+            auto &bufferManager = g_ptrSystem->GetBufferManagers()[0];
+            strOutput +=
+                str_sprintf("Buffer: %zu/%zu, ", (size_t)bufferManager.Depth(), (size_t)bufferManager.BufferCount());
+#endif
+
+            const auto &taskManager = g_ptrSystem->GetTaskManager();
+            strOutput += str_sprintf("CPU: %03.0f%%, %03.0f%%, FreeDraw: %4.3lf", taskManager.GetCPUUsagePercent(0),
+                                     taskManager.GetCPUUsagePercent(1), g_Values.FreeDrawTime);
+
+            debugI("%s", strOutput.c_str());
+        }
+
+        // Once an update is underway, we loop tightly on ArduinoOTA.handle.  Otherwise, we delay a bit to share the
+        // CPU.
+
+        if (!g_Values.UpdateStarted)
+            delay(1);
+    }
+}

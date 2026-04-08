@@ -29,22 +29,30 @@
 //
 //---------------------------------------------------------------------------
 
-#include <mutex>
-#include <algorithm>
-#include <cmath>
-#include <ArduinoOTA.h> // Over-the-air helper object so we can be flashed via WiFi
 #include "globals.h"
+
+#include <algorithm>
+#include <ArduinoOTA.h>
+#include <cmath>
+#include <mutex>
+
 #include "colordata.h"
-#include "effects/matrix/spectrumeffects.h"
+#include "deviceconfig.h"
+#include "effectmanager.h"
+#include "gfxbase.h"
+#include "jsonserializer.h"
+#include "ledbuffer.h"
+#include "ledstripeffect.h"
+#include "ntptimeclient.h"
 #include "systemcontainer.h"
+
+#include "effects/matrix/spectrumeffects.h"
 
 static DRAM_ATTR CRGB l_SinglePixel = CRGB::Blue;
 static DRAM_ATTR uint64_t l_usLastWifiDraw = 0;
 
 // The g_buffer_mutex is a global mutex used to protect access while adding or removing frames
 // from the led buffer.
-
-extern DRAM_ATTR std::mutex g_buffer_mutex;
 
 std::shared_ptr<LEDStripEffect> GetSpectrumAnalyzer(CRGB color);    // Defined in effectmanager.cpp
 
@@ -57,7 +65,7 @@ uint16_t WiFiDraw()
     std::lock_guard<std::mutex> guard(g_buffer_mutex);
 
     uint16_t pixelsDrawn = 0;
-    for (auto& bufferManager : g_ptrSystem->BufferManagers())
+    for (auto& bufferManager : g_ptrSystem->GetBufferManagers())
     {
 
         timeval tv;
@@ -68,6 +76,7 @@ uint16_t WiFiDraw()
         if (false == bufferManager.IsEmpty())
         {
             std::shared_ptr<LEDBuffer> pBuffer;
+            #if ENABLE_NTP
             if (NTPTimeClient::HasClockBeenSet() == false)
             {
                 pBuffer = bufferManager.GetOldestBuffer();
@@ -81,6 +90,9 @@ uint16_t WiFiDraw()
                 while (!bufferManager.IsEmpty() && bufferManager.PeekOldestBuffer()->IsBufferOlderThan(tv))
                     pBuffer = bufferManager.GetOldestBuffer();
             }
+            #else
+            pBuffer = bufferManager.GetOldestBuffer();
+            #endif
 
             if (pBuffer)
             {
@@ -111,7 +123,7 @@ uint16_t LocalDraw()
     }
     else
     {
-        auto& effectManager = g_ptrSystem->EffectManager();
+        auto& effectManager = g_ptrSystem->GetEffectManager();
 
         if (effectManager.EffectCount() > 0)
         {
@@ -124,7 +136,7 @@ uint16_t LocalDraw()
                     #if ENABLE_AUDIO
                         static auto spectrum = std::static_pointer_cast<SpectrumAnalyzerEffect>(GetSpectrumAnalyzer(0));
                         if (effectManager.IsVUVisible())
-                            spectrum->DrawVUMeter(g_ptrSystem->EffectManager().GetBaseGraphics(), 0, g_Analyzer.IsRemoteAudioActive() ? & vuPaletteBlue : &vuPaletteGreen);
+                            spectrum->DrawVUMeter(g_ptrSystem->GetEffectManager().GetBaseGraphics(), 0, g_Analyzer.IsRemoteAudioActive() ? & vuPaletteBlue : &vuPaletteGreen);
                     #endif
                 #endif
 
@@ -160,7 +172,7 @@ int CalcDelayUntilNextFrame(double frameStartTime, uint16_t localPixelsDrawn, ui
 
     if (localPixelsDrawn > 0)
     {
-        const double fpsRaw = static_cast<double>(g_ptrSystem->EffectManager().GetCurrentEffect().DesiredFramesPerSecond());
+        const double fpsRaw = static_cast<double>(g_ptrSystem->GetEffectManager().GetCurrentEffect().DesiredFramesPerSecond());
         // If FPS is invalid (<= 0 or non-finite), treat as unlimited (0s minimum frame time).
         const double minimumFrameTime = (!std::isfinite(fpsRaw) || fpsRaw <= 0.0) ? 0.0 : (1.0 / fpsRaw);
         // Use a monotonic-like elapsed (never negative) in case wall clock adjustments go backward.
@@ -176,7 +188,7 @@ int CalcDelayUntilNextFrame(double frameStartTime, uint16_t localPixelsDrawn, ui
         double t = std::numeric_limits<double>::max();
         bool bFoundFrame = false;
 
-        for (auto& bufferManager : g_ptrSystem->BufferManagers())
+        for (auto& bufferManager : g_ptrSystem->GetBufferManagers())
         {
             auto pOldest = bufferManager.PeekOldestBuffer();
             if (pOldest)
@@ -262,7 +274,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
 
     // Start the effect
 
-    g_ptrSystem->EffectManager().StartEffect();
+    g_ptrSystem->GetEffectManager().StartEffect();
 
     // Run the draw loop
 
@@ -276,7 +288,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
         uint16_t wifiPixelsDrawn    = 0;
         double frameStartTime       = g_Values.AppTime.FrameStartTime();
 
-        auto graphics = g_ptrSystem->EffectManager().GetBaseGraphics()[0];
+        auto graphics = g_ptrSystem->GetEffectManager().GetBaseGraphics()[0];
 
         graphics->PrepareFrame();
 
@@ -300,7 +312,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
             ShowOnboardRGBLED();
 
             g_Values.FPS = FastLED.getFPS();
-            g_ptrSystem->EffectManager().ReportNewFrameAvailable();
+            g_ptrSystem->GetEffectManager().ReportNewFrameAvailable();
         }
 
         graphics->PostProcessFrame(localPixelsDrawn, wifiPixelsDrawn);

@@ -1,3 +1,5 @@
+#pragma once
+
 //+--------------------------------------------------------------------------
 //
 // File:        PatternMandala.h
@@ -146,7 +148,7 @@ public:
         g()->GetNoise().noise_x += dx * 4;
         g()->GetNoise().noise_z += dz * 4;
 
-        g()->FillGetNoise<NoiseApproach::One>();
+        g()->FillGetNoise();
 
         ShowNoiseLayer(0, 1, 0);
 
