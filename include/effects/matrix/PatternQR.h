@@ -79,7 +79,7 @@ public:
 
     void Draw() override
     {
-        String sIP = IsWiFiConnected() ? "http://" + GetWiFiLocalIP() : "No Wifi";
+        String sIP = nd_network::IsWiFiConnected() ? "http://" + nd_network::GetWiFiLocalIP() : "No Wifi";
         if (sIP != lastData)
         {
             lastData = sIP;

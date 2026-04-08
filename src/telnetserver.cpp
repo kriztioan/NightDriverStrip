@@ -154,7 +154,7 @@ void DebugLoopTaskEntry(void* pvParameters)
         return;
     }
 
-    SetSocketBlockingEnabled(listen_fd, false);
+    nd_network::SetSocketBlockingEnabled(listen_fd, false);
     listen(listen_fd, 1);
 
     while (true)

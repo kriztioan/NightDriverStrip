@@ -286,7 +286,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
 
         graphics->PrepareFrame();
 
-        if (IsWiFiConnected())
+        if (nd_network::IsWiFiConnected())
             wifiPixelsDrawn = WiFiDraw();
 
         // If we didn't draw now, and it's been a while since we did, and we have at least one local effect, then draw the local effect instead

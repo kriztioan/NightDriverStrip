@@ -506,7 +506,7 @@ public:
 
         // Periodically refetch the stock data from the server
 
-        if (IsWiFiConnected())
+        if (nd_network::IsWiFiConnected())
         {
             if (system_clock::now() >= nextFetch)
             {

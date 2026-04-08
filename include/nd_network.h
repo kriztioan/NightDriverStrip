@@ -32,13 +32,15 @@
 #include "esp_mac.h"
 #include "types.h"
 
-// Prototypes that should exist regardless of ENABLE_WIFI to keep callers clean
-void GetMacAddressRaw(uint8_t *mac);
-void InitNetworkCLI();
-bool IsWiFiConnected();
-void NetworkHandlingLoopEntry(void *);
-bool SetSocketBlockingEnabled(int fd, bool blocking);
-
+namespace nd_network {
+    // Prototypes that should exist regardless of ENABLE_WIFI to
+    // keep callers clean.
+    void GetMacAddressRaw(uint8_t *mac);
+    void InitNetworkCLI();
+    bool IsWiFiConnected();
+    void NetworkHandlingLoopEntry(void *);
+    bool SetSocketBlockingEnabled(int fd, bool blocking);
+};
 
 // For now, just a centralized location for the port numbers for our
 // various services. Someday these might be configurable.
@@ -46,44 +48,43 @@ bool SetSocketBlockingEnabled(int fd, bool blocking);
 // callers is ugly.
 enum NetworkPort : int
 {
-  ColorServer  = 12000,
-  IncomingWiFi  = 49152,
-  VICESocketServer = 25232,
-  Telnet = 23,
-  Webserver  = 80
+    ColorServer  = 12000,
+    IncomingWiFi  = 49152,
+    VICESocketServer = 25232,
+    Telnet = 23,
+    Webserver  = 80
 };
 
-#include <Arduino.h>
-#include <IPAddress.h>
-#include <WString.h>
-
-String GetMacAddress();
-String GetMacAddressPretty();
-bool GetWiFiHostByName(const char* hostname, IPAddress& ip);
-String GetWiFiLocalIP();
-int GetWiFiRSSI();
-int GetWiFiStatus();
-void SetWiFiModeSTA();
-const char* WLtoString(int status);
-
 #if ENABLE_WIFI
-#include <atomic>
-#include <functional>
-#include <memory>
-#include <utility>
-#include <vector>
+
+    #include <atomic>
+    #include <functional>
+    #include <memory>
+    #include <utility>
+    #include <vector>
+
+    namespace nd_network {
+        String GetMacAddress();
+        String GetMacAddressPretty();
+        bool GetWiFiHostByName(const char* hostname, IPAddress& ip);
+        String GetWiFiLocalIP();
+        int GetWiFiRSSI();
+        int GetWiFiStatus();
+        void SetWiFiModeSTA();
+        const char* WLtoString(int status);
+    };
 
     enum class WiFiConnectResult
     {
-      Connected,
-      Disconnected,
-      NoCredentials
+        Connected,
+        Disconnected,
+        NoCredentials
     };
 
     enum WifiCredSource
     {
-      ImprovCreds = 0,
-      CompileTimeCreds = 1
+        ImprovCreds = 0,
+        CompileTimeCreds = 1
     };
 
     WiFiConnectResult ConnectToWiFi(const String& ssid, const String& password);
@@ -92,7 +93,6 @@ const char* WLtoString(int status);
     bool ReadWiFiConfig(WifiCredSource source, String& WiFi_ssid, String& WiFi_password);
     bool WriteWiFiConfig(WifiCredSource source, const String& WiFi_ssid, const String& WiFi_password);
     bool ClearWiFiConfig(WifiCredSource source);
-
 
     class NetworkReader
     {
@@ -107,9 +107,9 @@ const char* WLtoString(int status);
 
     public:
 
-      // Add a reader to the collection. Returns the index of the added reader, for use with FlagReader().
-      //   Note that if an interval (in ms) is specified, the reader will run for the first time after
-      //   the interval has passed, unless "true" is passed to the last parameter.
+        // Add a reader to the collection. Returns the index of the added reader, for use with FlagReader().
+        //   Note that if an interval (in ms) is specified, the reader will run for the first time after
+        //   the interval has passed, unless "true" is passed to the last parameter.
       size_t RegisterReader(const std::function<void()>& reader, unsigned long interval = 0, bool flag = false);
 
       // Flag a reader for invocation and wake up the task that calls them
@@ -119,4 +119,3 @@ const char* WLtoString(int status);
       void CancelReader(size_t index);
   };
 #endif
-

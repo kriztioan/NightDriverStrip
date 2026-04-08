@@ -432,7 +432,7 @@ void setup()
 
 #if ENABLE_WIFI
         debugW("Starting ImprovSerial for %s", family.c_str());
-        String name = "NDESP32" + GetMacAddress().substring(6);
+        String name = "NDESP32" + nd_network::GetMacAddress().substring(6);
         g_pImprovSerial = make_unique_psram<ImprovSerial<typeof(Serial)>>();
         g_pImprovSerial->setup(PROJECT_NAME, FLASH_VERSION_NAME, family, name.c_str(), &Serial);
 
@@ -604,7 +604,7 @@ void setup()
     taskManager.StartDebugThread();
 
     DebugCLI::InitDebugCLI();
-    InitNetworkCLI();
+    nd_network::InitNetworkCLI();
 
     SaveEffectManagerConfig();
     // Start the main loop
@@ -637,7 +637,7 @@ void loop()
         #if ENABLE_OTA
             try
             {
-                if (IsWiFiConnected())
+                if (nd_network::IsWiFiConnected())
                     ArduinoOTA.handle();
             }
             catch(const std::exception& e)
@@ -651,7 +651,7 @@ void loop()
             String strOutput;
 
             #if ENABLE_WIFI
-                strOutput += str_sprintf("WiFi: %s, MAC: %s, IP: %s ", WLtoString(GetWiFiStatus()), GetMacAddressPretty().c_str(), GetWiFiLocalIP().c_str());
+                strOutput += str_sprintf("WiFi: %s, MAC: %s, IP: %s ", nd_network::WLtoString(nd_network::GetWiFiStatus()), nd_network::GetMacAddressPretty().c_str(), nd_network::GetWiFiLocalIP().c_str());
             #endif
 
             strOutput += str_sprintf("Mem: %zu, LargestBlk: %zu, PSRAM Free: %zu/%zu, ", (size_t)ESP.getFreeHeap(), (size_t)ESP.getMaxAllocHeap(), (size_t)ESP.getFreePsram(), (size_t)ESP.getPsramSize());

@@ -66,1138 +66,1140 @@
     #include "hub75gfx.h"
 #endif
 #endif
-
-bool IsWiFiConnected()
+namespace nd_network
 {
+
+    bool IsWiFiConnected()
+    {
 #if ENABLE_WIFI
-  return WiFi.isConnected();
+        return WiFi.isConnected();
 #else
-  return false;
+        return false;
 #endif
-}
-
-int GetWiFiStatus()
-{
-#if ENABLE_WIFI
-  return (int)WiFi.status();
-#else
-  return 0; // WL_IDLE_STATUS often is 0
-#endif
-}
-
-void SetWiFiModeSTA()
-{
-#if ENABLE_WIFI || ENABLE_ESPNOW
-  WiFi.mode(WIFI_STA);
-#endif
-}
-
-int GetWiFiRSSI()
-{
-#if ENABLE_WIFI
-  return WiFi.RSSI();
-#else
-  return 0;
-#endif
-}
-
-String GetWiFiLocalIP()
-{
-#if ENABLE_WIFI
-  return WiFi.localIP().toString();
-#else
-  return String("0.0.0.0");
-#endif
-}
-
-bool GetWiFiHostByName(const char* hostname, IPAddress& ip)
-{
-#if ENABLE_WIFI
-  return WiFi.hostByName(hostname, ip) == 1;
-#else
-  return false;
-#endif
-}
-
-void GetMacAddressRaw(uint8_t *mac)
-{
-#if ENABLE_WIFI
-  WiFi.macAddress(mac);
-#else
-  esp_read_mac(mac, ESP_MAC_WIFI_STA);
-#endif
-}
-
-String GetMacAddress()
-{
-  uint8_t mac[6];
-  GetMacAddressRaw(mac);
-  return str_sprintf("%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-String GetMacAddressPretty()
-{
-  uint8_t mac[6];
-  GetMacAddressRaw(mac);
-  return str_sprintf("%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-#if ENABLE_WIFI
-
-// Writer function and flag combo
-struct NetworkReader::ReaderEntry
-{
-    std::function<void()> reader;
-    std::atomic_ulong readInterval;
-    std::atomic_ulong lastReadMs;
-    std::atomic_bool flag = false;
-    std::atomic_bool canceled = false;
-
-    ReaderEntry(std::function<void()> reader, unsigned long interval) :
-        reader(std::move(reader)),
-        lastReadMs(0),
-        readInterval(interval)
-    {}
-
-    ReaderEntry(std::function<void()> reader, unsigned long interval, unsigned long lastReadMs, bool flag, bool canceled) :
-        reader(std::move(reader)),
-        readInterval(interval),
-        lastReadMs(lastReadMs),
-        flag(flag),
-        canceled(canceled)
-    {}
-};
-
-static DRAM_ATTR WiFiUDP l_Udp;              // UDP object used for NNTP, etc
-
-// End of readers and wrappers
-
-
-const char* WLtoString(int status)
-{
-    switch (status) {
-    case 255: return "WL_NO_SHIELD";
-    case 0: return   "WL_IDLE_STATUS";
-    case 1: return   "WL_NO_SSID_AVAIL";
-    case 2: return   "WL_SCAN_COMPLETED";
-    case 3: return   "WL_CONNECTED";
-    case 4: return   "WL_CONNECT_FAILED";
-    case 5: return   "WL_CONNECTION_LOST";
-    case 6: return   "WL_DISCONNECTED";
-    default: return  "WL_UNKNOWN_STATUS";
     }
-}
 
-String urlEncode(const String& str)
-{
-    String encodedString = "";
-    char c;
-    char code0;
-    char code1;
-    for (int i = 0; i < str.length(); i++) {
-        c = str.charAt(i);
-        if (isalnum(c)) {
-            encodedString += c;
-        } else {
-            code1 = (c & 0xf) + '0';
-            if ((c & 0xf) > 9) {
-                code1 = (c & 0xf) - 10 + 'A';
-            }
-            c = (c >> 4) & 0xf;
-            code0 = c + '0';
-            if (c > 9) {
-                code0 = c - 10 + 'A';
-            }
-            encodedString += '%';
-            encodedString += code0;
-            encodedString += code1;
+    int GetWiFiStatus()
+    {
+#if ENABLE_WIFI
+        return (int)WiFi.status();
+#else
+        return 0; // WL_IDLE_STATUS often is 0
+#endif
+    }
+
+    void SetWiFiModeSTA()
+    {
+#if ENABLE_WIFI || ENABLE_ESPNOW
+        WiFi.mode(WIFI_STA);
+#endif
+    }
+
+    int GetWiFiRSSI()
+    {
+#if ENABLE_WIFI
+        return WiFi.RSSI();
+#else
+        return 0;
+#endif
+    }
+
+    String GetWiFiLocalIP()
+    {
+#if ENABLE_WIFI
+        return WiFi.localIP().toString();
+#else
+        return String("0.0.0.0");
+#endif
+    }
+
+    bool GetWiFiHostByName(const char* hostname, IPAddress& ip)
+    {
+#if ENABLE_WIFI
+        return WiFi.hostByName(hostname, ip) == 1;
+#else
+        return false;
+#endif
+    }
+
+    void GetMacAddressRaw(uint8_t *mac)
+    {
+#if ENABLE_WIFI
+        WiFi.macAddress(mac);
+#else
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+#endif
+    }
+
+    String GetMacAddress()
+    {
+        uint8_t mac[6];
+        GetMacAddressRaw(mac);
+        return str_sprintf("%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+
+    String GetMacAddressPretty()
+    {
+        uint8_t mac[6];
+        GetMacAddressRaw(mac);
+        return str_sprintf("%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+};
+#if ENABLE_WIFI
+
+    // Writer function and flag combo
+    struct NetworkReader::ReaderEntry
+    {
+        std::function<void()> reader;
+        std::atomic_ulong readInterval;
+        std::atomic_ulong lastReadMs;
+        std::atomic_bool flag = false;
+        std::atomic_bool canceled = false;
+
+        ReaderEntry(std::function<void()> reader, unsigned long interval) :
+            reader(std::move(reader)),
+            lastReadMs(0),
+            readInterval(interval)
+        {}
+
+        ReaderEntry(std::function<void()> reader, unsigned long interval, unsigned long lastReadMs, bool flag, bool canceled) :
+            reader(std::move(reader)),
+            readInterval(interval),
+            lastReadMs(lastReadMs),
+            flag(flag),
+            canceled(canceled)
+        {}
+    };
+
+    static DRAM_ATTR WiFiUDP l_Udp;              // UDP object used for NNTP, etc
+
+    // End of readers and wrappers
+
+
+    const char* nd_network::WLtoString(int status)
+    {
+        switch (status) {
+        case 255: return "WL_NO_SHIELD";
+        case 0: return   "WL_IDLE_STATUS";
+        case 1: return   "WL_NO_SSID_AVAIL";
+        case 2: return   "WL_SCAN_COMPLETED";
+        case 3: return   "WL_CONNECTED";
+        case 4: return   "WL_CONNECT_FAILED";
+        case 5: return   "WL_CONNECTION_LOST";
+        case 6: return   "WL_DISCONNECTED";
+        default: return  "WL_UNKNOWN_STATUS";
         }
     }
-    return encodedString;
-}
 
-void DoStatsCommand()
-{
-    auto& bufferManager = g_ptrSystem->GetBufferManagers()[0];
+    String urlEncode(const String& str)
+    {
+        String encodedString = "";
+        char c;
+        char code0;
+        char code1;
+        for (int i = 0; i < str.length(); i++) {
+            c = str.charAt(i);
+            if (isalnum(c)) {
+	   encodedString += c;
+            } else {
+	   code1 = (c & 0xf) + '0';
+	   if ((c & 0xf) > 9) {
+	       code1 = (c & 0xf) - 10 + 'A';
+	   }
+	   c = (c >> 4) & 0xf;
+	   code0 = c + '0';
+	   if (c > 9) {
+	       code0 = c - 10 + 'A';
+	   }
+	   encodedString += '%';
+	   encodedString += code0;
+	   encodedString += code1;
+            }
+        }
+        return encodedString;
+    }
 
-    DebugCLI::cli_printf("%s:%zux%d %zuK", FLASH_VERSION_NAME, g_ptrSystem->GetDevices().size(), NUM_LEDS, (size_t)(ESP.getFreeHeap() / 1024));
-    DebugCLI::cli_printf("%ddB:%s", abs(WiFi.RSSI()), WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "None");
-    DebugCLI::cli_printf("BUFR:%02zu/%02zu [%lufps]", (size_t)bufferManager.Depth(), (size_t)bufferManager.BufferCount(), (unsigned long)g_Values.FPS);
-    DebugCLI::cli_printf("DATA:%+04.2lf-%+04.2lf", bufferManager.AgeOfOldestBuffer(), bufferManager.AgeOfNewestBuffer());
+    void DoStatsCommand()
+    {
+        auto& bufferManager = g_ptrSystem->GetBufferManagers()[0];
 
-    #if ENABLE_AUDIO
-    DebugCLI::cli_printf("g_Analyzer._VU: %.2f, g_Analyzer._MinVU: %.2f, g_Analyzer.g_Analyzer._PeakVU: %.2f, g_Analyzer.gVURatio: %.2f", g_Analyzer.VU(), g_Analyzer.MinVU(), g_Analyzer.PeakVU(), g_Analyzer.VURatio());
-    #endif
+        DebugCLI::cli_printf("%s:%zux%d %zuK", FLASH_VERSION_NAME, g_ptrSystem->GetDevices().size(), NUM_LEDS, (size_t)(ESP.getFreeHeap() / 1024));
+        DebugCLI::cli_printf("%ddB:%s", abs(WiFi.RSSI()), WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "None");
+        DebugCLI::cli_printf("BUFR:%02zu/%02zu [%lufps]", (size_t)bufferManager.Depth(), (size_t)bufferManager.BufferCount(), (unsigned long)g_Values.FPS);
+        DebugCLI::cli_printf("DATA:%+04.2lf-%+04.2lf", bufferManager.AgeOfOldestBuffer(), bufferManager.AgeOfNewestBuffer());
 
-    #if INCOMING_WIFI_ENABLED
-    DebugCLI::cli_printf("Socket Buffer _cbReceived: %zu", g_ptrSystem->GetSocketServer()._cbReceived);
-    #endif
-}
+        #if ENABLE_AUDIO
+        DebugCLI::cli_printf("g_Analyzer._VU: %.2f, g_Analyzer._MinVU: %.2f, g_Analyzer.g_Analyzer._PeakVU: %.2f, g_Analyzer.gVURatio: %.2f", g_Analyzer.VU(), g_Analyzer.MinVU(), g_Analyzer.PeakVU(), g_Analyzer.VURatio());
+        #endif
 
-static const DebugCLI::command network_commands[] = {
+        #if INCOMING_WIFI_ENABLED
+        DebugCLI::cli_printf("Socket Buffer _cbReceived: %zu", g_ptrSystem->GetSocketServer()._cbReceived);
+        #endif
+    }
+
+    static const DebugCLI::command network_commands[] = {
 #if ENABLE_NTP
-    { "clock", "Refresh time from server", "Refreshing Time from Server",
-        [](const DebugCLI::cli_argv&) { NTPTimeClient::UpdateClockFromWeb(&l_Udp); } },
+        { "clock", "Refresh time from server", "Refreshing Time from Server",
+            [](const DebugCLI::cli_argv&) { NTPTimeClient::UpdateClockFromWeb(&l_Udp); } },
 #endif
-    { "stats", "Display system statistics", "Displaying statistics",
-        [](const DebugCLI::cli_argv&) { DoStatsCommand(); } },
-};
+        { "stats", "Display system statistics", "Displaying statistics",
+            [](const DebugCLI::cli_argv&) { DoStatsCommand(); } },
+    };
 
-void InitNetworkCLI() {
-    DebugCLI::RegisterCommands(network_commands, sizeof(network_commands)/sizeof(network_commands[0]));
-}
+    void nd_network::InitNetworkCLI() {
+        DebugCLI::RegisterCommands(network_commands, sizeof(network_commands)/sizeof(network_commands[0]));
+    }
 #endif // ENABLE_WIFI
 
 #if ENABLE_ESPNOW
 
-// ESPNOW Support
-//
-// We accept ESPNOW commands to change effects and so on.  This is a simple structure that we'll receive over ESPNOW.
-enum class ESPNowCommand : uint8_t
-{
-    ESPNOW_NEXTEFFECT = 1,
-    ESPNOW_PREVEFFECT,
-    ESPNOW_SETEFFECT,
-    ESPNOW_INVALID = 255    // Followed by a uint32_t argument
-};
-
-// Message class
-//
-// Encapsulates an ESPNOW message, which is a command and an optional argument
-class Message
-{
-public:
-    constexpr Message(ESPNowCommand cmd, uint32_t argument)
-        : cbSize(sizeof(Message)), command(cmd), arg1(argument)
+    // ESPNOW Support
+    //
+    // We accept ESPNOW commands to change effects and so on.  This is a simple structure that we'll receive over ESPNOW.
+    enum class ESPNowCommand : uint8_t
     {
-    }
+        ESPNOW_NEXTEFFECT = 1,
+        ESPNOW_PREVEFFECT,
+        ESPNOW_SETEFFECT,
+        ESPNOW_INVALID = 255    // Followed by a uint32_t argument
+    };
 
-    constexpr Message()
-        : cbSize(sizeof(Message)), command(ESPNowCommand::ESPNOW_INVALID), arg1(0)
+    // Message class
+    //
+    // Encapsulates an ESPNOW message, which is a command and an optional argument
+    class Message
     {
-    }
+    public:
+        constexpr Message(ESPNowCommand cmd, uint32_t argument)
+            : cbSize(sizeof(Message)), command(cmd), arg1(argument)
+        {
+        }
 
-    const uint8_t* data() const
+        constexpr Message()
+            : cbSize(sizeof(Message)), command(ESPNowCommand::ESPNOW_INVALID), arg1(0)
+        {
+        }
+
+        const uint8_t* data() const
+        {
+            return reinterpret_cast<const uint8_t*>(this);
+        }
+
+        constexpr size_t byte_size() const
+        {
+            return sizeof(Message);
+        }
+
+        uint8_t       cbSize;
+        ESPNowCommand command;
+        uint32_t      arg1;
+    } __attribute__((packed));
+
+    // onReceiveESPNOW
+    //
+    // Callback function for ESPNOW that is called when a data packet is received
+
+    void onReceiveESPNOW(const uint8_t *macAddr, const uint8_t *data, int dataLen)
     {
-        return reinterpret_cast<const uint8_t*>(this);
+        Message message;
+
+        memcpy(&message, data, sizeof(message));
+        debugI("ESPNOW Message received.");
+
+        if (message.cbSize != sizeof(message))
+        {
+            debugE("ESPNOW Message received with wrong structure size: %u but should be %zu", message.cbSize, sizeof(message));
+            return;
+        }
+
+        switch(message.command)
+        {
+            case ESPNowCommand::ESPNOW_NEXTEFFECT:
+	   debugI("ESPNOW Next effect");
+	   g_ptrSystem->GetEffectManager().NextEffect();
+	   break;
+
+            case ESPNowCommand::ESPNOW_PREVEFFECT:
+	   debugI("ESPNOW Previous effect");
+	   g_ptrSystem->GetEffectManager().PreviousEffect();
+	   break;
+
+            case ESPNowCommand::ESPNOW_SETEFFECT:
+	   debugI("ESPNOW Setting effect index to %u", message.arg1);
+	   g_ptrSystem->GetEffectManager().SetCurrentEffectIndex(message.arg1);
+	   break;
+
+            default:
+	   debugE("ESPNOW Message received with unknown command: %d", (byte) message.command);
+	   break;
+        }
     }
-
-    constexpr size_t byte_size() const
-    {
-        return sizeof(Message);
-    }
-
-    uint8_t       cbSize;
-    ESPNowCommand command;
-    uint32_t      arg1;
-} __attribute__((packed));
-
-// onReceiveESPNOW
-//
-// Callback function for ESPNOW that is called when a data packet is received
-
-void onReceiveESPNOW(const uint8_t *macAddr, const uint8_t *data, int dataLen)
-{
-    Message message;
-
-    memcpy(&message, data, sizeof(message));
-    debugI("ESPNOW Message received.");
-
-    if (message.cbSize != sizeof(message))
-    {
-        debugE("ESPNOW Message received with wrong structure size: %u but should be %zu", message.cbSize, sizeof(message));
-        return;
-    }
-
-    switch(message.command)
-    {
-        case ESPNowCommand::ESPNOW_NEXTEFFECT:
-            debugI("ESPNOW Next effect");
-            g_ptrSystem->GetEffectManager().NextEffect();
-            break;
-
-        case ESPNowCommand::ESPNOW_PREVEFFECT:
-            debugI("ESPNOW Previous effect");
-            g_ptrSystem->GetEffectManager().PreviousEffect();
-            break;
-
-        case ESPNowCommand::ESPNOW_SETEFFECT:
-            debugI("ESPNOW Setting effect index to %u", message.arg1);
-            g_ptrSystem->GetEffectManager().SetCurrentEffectIndex(message.arg1);
-            break;
-
-        default:
-            debugE("ESPNOW Message received with unknown command: %d", (byte) message.command);
-            break;
-    }
-}
 
 #endif
 
 
-// SetupOTA
-//
-// Set up the over-the-air programming info so that we can be flashed over WiFi
+    // SetupOTA
+    //
+    // Set up the over-the-air programming info so that we can be flashed over WiFi
 
-void SetupOTA(const String & strHostname)
-{
+    void SetupOTA(const String & strHostname)
+    {
 #if ENABLE_OTA
-    ArduinoOTA.setRebootOnSuccess(true);
+        ArduinoOTA.setRebootOnSuccess(true);
 
-    if (strHostname.isEmpty())
-        ArduinoOTA.setMdnsEnabled(false);
-    else
-        ArduinoOTA.setHostname(strHostname.c_str());
+        if (strHostname.isEmpty())
+            ArduinoOTA.setMdnsEnabled(false);
+        else
+            ArduinoOTA.setHostname(strHostname.c_str());
 
-    ArduinoOTA
-        .onStart([]()
-        {
-            g_Values.UpdateStarted = true;
-
-            String type;
-            if (ArduinoOTA.getCommand() == U_FLASH)
-                type = "sketch";
-            else // U_SPIFFS
-                type = "filesystem";
-
-            debugI("Stopping IR remote");
-            #if ENABLE_REMOTE
-            g_ptrSystem->GetRemoteControl().end();
-            #endif
-
-            debugI("Start updating from OTA ");
-            debugI("%s", type.c_str());
-        })
-        .onEnd([]()
-        {
-            debugI("\nEnd OTA");
-            g_Values.UpdateStarted = false;
-        })
-        .onProgress([](unsigned int progress, unsigned int total)
-        {
-            static uint last_time = millis();
-            if (millis() - last_time > 1000)
+        ArduinoOTA
+            .onStart([]()
             {
-                last_time = millis();
-                auto p = (progress / (total / 100));
-                debugI("OTA Progress: %u%%\r", p);
+	   g_Values.UpdateStarted = true;
 
-                #if USE_HUB75
-                    auto pMatrix = std::static_pointer_cast<HUB75GFX>(g_ptrSystem->GetEffectManager().GetBaseGraphics()[0]);
-                    pMatrix->SetCaption(str_sprintf("Update:%d%%", p), CAPTION_TIME);
-                #endif
-            }
-            else
-            {
-                debugV("OTA Progress: %u%%\r", (progress / (total / 100)));
-            }
+	   String type;
+	   if (ArduinoOTA.getCommand() == U_FLASH)
+	       type = "sketch";
+	   else // U_SPIFFS
+	       type = "filesystem";
 
-        })
-        .onError([](ota_error_t error)
-        {
-            g_Values.UpdateStarted = false;
-            debugW("Error[%u]: ", error);
-            if (error == OTA_AUTH_ERROR)
-            {
-                debugW("Auth Failed");
-            }
-            else if (error == OTA_BEGIN_ERROR)
-            {
-                debugW("Begin Failed");
-            }
-            else if (error == OTA_CONNECT_ERROR)
-            {
-                debugW("Connect Failed");
-            }
-            else if (error == OTA_RECEIVE_ERROR)
-            {
-                debugW("Receive Failed");
-            }
-            else if (error == OTA_END_ERROR)
-            {
-                debugW("End Failed");
-            }
-            throw std::runtime_error("OTA Flash update failed.");
-        });
+	   debugI("Stopping IR remote");
+	   #if ENABLE_REMOTE
+	   g_ptrSystem->GetRemoteControl().end();
+	   #endif
 
-    ArduinoOTA.begin();
+	   debugI("Start updating from OTA ");
+	   debugI("%s", type.c_str());
+            })
+            .onEnd([]()
+            {
+	   debugI("\nEnd OTA");
+	   g_Values.UpdateStarted = false;
+            })
+            .onProgress([](unsigned int progress, unsigned int total)
+            {
+	   static uint last_time = millis();
+	   if (millis() - last_time > 1000)
+	   {
+	       last_time = millis();
+	       auto p = (progress / (total / 100));
+	       debugI("OTA Progress: %u%%\r", p);
+
+	       #if USE_HUB75
+	           auto pMatrix = std::static_pointer_cast<HUB75GFX>(g_ptrSystem->GetEffectManager().GetBaseGraphics()[0]);
+	           pMatrix->SetCaption(str_sprintf("Update:%d%%", p), CAPTION_TIME);
+	       #endif
+	   }
+	   else
+	   {
+	       debugV("OTA Progress: %u%%\r", (progress / (total / 100)));
+	   }
+
+            })
+            .onError([](ota_error_t error)
+            {
+	   g_Values.UpdateStarted = false;
+	   debugW("Error[%u]: ", error);
+	   if (error == OTA_AUTH_ERROR)
+	   {
+	       debugW("Auth Failed");
+	   }
+	   else if (error == OTA_BEGIN_ERROR)
+	   {
+	       debugW("Begin Failed");
+	   }
+	   else if (error == OTA_CONNECT_ERROR)
+	   {
+	       debugW("Connect Failed");
+	   }
+	   else if (error == OTA_RECEIVE_ERROR)
+	   {
+	       debugW("Receive Failed");
+	   }
+	   else if (error == OTA_END_ERROR)
+	   {
+	       debugW("End Failed");
+	   }
+	   throw std::runtime_error("OTA Flash update failed.");
+            });
+
+        ArduinoOTA.begin();
 #endif
-}
+    }
 
-// RemoteLoopEntry
-//
-// If enabled, this is the main thread loop for the remote control.  It is initialized and then
-// called once every 20ms to pump its work queue and scan for new remote codes, etc.  If no
-// remote is being used, this code and thread doesn't exist in the build.
+    // RemoteLoopEntry
+    //
+    // If enabled, this is the main thread loop for the remote control.  It is initialized and then
+    // called once every 20ms to pump its work queue and scan for new remote codes, etc.  If no
+    // remote is being used, this code and thread doesn't exist in the build.
 
 #if ENABLE_REMOTE
 
-void IRAM_ATTR RemoteLoopEntry(void *)
-{
-    //debugW(">> RemoteLoopEntry\n");
-
-    auto& remoteControl = g_ptrSystem->GetRemoteControl();
-
-    remoteControl.begin();
-    while (true)
+    void IRAM_ATTR RemoteLoopEntry(void *)
     {
-        remoteControl.handle();
-        delay(20);
+        //debugW(">> RemoteLoopEntry\n");
+
+        auto& remoteControl = g_ptrSystem->GetRemoteControl();
+
+        remoteControl.begin();
+        while (true)
+        {
+            remoteControl.handle();
+            delay(20);
+        }
     }
-}
 #endif
 
 #if ENABLE_WIFI
 
-    #define WIFI_WAIT_BASE      10000   // Initial time to wait for WiFi to come up, in ms
-    #define WIFI_WAIT_INCREASE  0       // No ratcheting per user feedback
-    #define WIFI_WAIT_MAX       60000   // Maximum gap before reboot/timeout, in ms
+        #define WIFI_WAIT_BASE      10000   // Initial time to wait for WiFi to come up, in ms
+        #define WIFI_WAIT_INCREASE  0       // No ratcheting per user feedback
+        #define WIFI_WAIT_MAX       60000   // Maximum gap before reboot/timeout, in ms
 
-    #define WIFI_WAIT_INIT      WIFI_WAIT_BASE
+        #define WIFI_WAIT_INIT      WIFI_WAIT_BASE
 
-    // ConnectToWiFi
-    //
-    // Try to connect to WiFi using the SSID and password passed as arguments
-    WiFiConnectResult ConnectToWiFi(const String& ssid, const String& password)
-    {
-        return ConnectToWiFi(&ssid, &password);
-    }
-
-    // ConnectToWiFi
-    //
-    // Try to connect to WiFi using either the SSID and password pointed to by arguments, or the credentials
-    // that were saved from an earlier call if no/nullptr arguments are passed.
-    WiFiConnectResult ConnectToWiFi(const String* ssid = nullptr, const String* password = nullptr)
-    {
-        static bool bPreviousConnection = false;
-        static bool bReportedDisconnected = false;
-        static unsigned long millisAtLastAttempt = 0;
-        static unsigned long retryDelay = WIFI_WAIT_INIT;
-        static String WiFi_ssid;
-        static String WiFi_password;
-
-        bool haveNewCredentials = (ssid != nullptr && password != nullptr && (WiFi_ssid != *ssid || WiFi_password != *password));
-
-        // If we have new credentials then always reconnect using them
-        if (haveNewCredentials)
+        // ConnectToWiFi
+        //
+        // Try to connect to WiFi using the SSID and password passed as arguments
+        WiFiConnectResult ConnectToWiFi(const String& ssid, const String& password)
         {
-            WiFi_ssid = *ssid;
-            WiFi_password = *password;
-            retryDelay = WIFI_WAIT_INIT;
-            debugI("WiFi credentials passed for SSID \"%s\"", WiFi_ssid.c_str());
-        }
-        // If we're already connected and services are running then go no further
-        else if (bPreviousConnection && WiFi.isConnected())
-        {
-            return WiFiConnectResult::Connected;
+            return ConnectToWiFi(&ssid, &password);
         }
 
-        // (Re)connect if credentials have changed, or our last attempt was long enough ago
-        if (haveNewCredentials || millisAtLastAttempt == 0 || millis() - millisAtLastAttempt >= retryDelay)
+        // ConnectToWiFi
+        //
+        // Try to connect to WiFi using either the SSID and password pointed to by arguments, or the credentials
+        // that were saved from an earlier call if no/nullptr arguments are passed.
+        WiFiConnectResult ConnectToWiFi(const String* ssid = nullptr, const String* password = nullptr)
         {
-            millisAtLastAttempt = millis();
-            retryDelay = std::min<unsigned long>(retryDelay + WIFI_WAIT_INCREASE, WIFI_WAIT_MAX);
+            static bool bPreviousConnection = false;
+            static bool bReportedDisconnected = false;
+            static unsigned long millisAtLastAttempt = 0;
+            static unsigned long retryDelay = WIFI_WAIT_INIT;
+            static String WiFi_ssid;
+            static String WiFi_password;
 
-            if (WiFi_ssid.length() == 0)
+            bool haveNewCredentials = (ssid != nullptr && password != nullptr && (WiFi_ssid != *ssid || WiFi_password != *password));
+
+            // If we have new credentials then always reconnect using them
+            if (haveNewCredentials)
             {
-                debugW("WiFi credentials not set, cannot connect.");
-                return WiFiConnectResult::NoCredentials;
+	   WiFi_ssid = *ssid;
+	   WiFi_password = *password;
+	   retryDelay = WIFI_WAIT_INIT;
+	   debugI("WiFi credentials passed for SSID \"%s\"", WiFi_ssid.c_str());
             }
-            else
+            // If we're already connected and services are running then go no further
+            else if (bPreviousConnection && WiFi.isConnected())
             {
-                static bool bInitialized = false;
-                if (!bInitialized)
-                {
-                    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-                        if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-                            debugW("WiFi Disconnected. Reason: %d", info.wifi_sta_disconnected.reason);
-                        }
-                    });
-
-                    debugV("Wifi.mode");
-                    WiFi.mode(WIFI_STA);
-
-                    // Disable WiFi power saving to improve DHCP reliability
-                    debugV("Wifi.setSleep(false)");
-                    WiFi.setSleep(false);
-
-                    bInitialized = true;
-                }
-
-                const String& hostname = g_ptrSystem->GetDeviceConfig().GetHostname();
-                if (hostname.length() == 0)
-                {
-                    debugI("No hostname configured, so skipping setting it.");
-                }
-                else
-                {
-                    debugI("Setting host name to %s...", hostname.c_str());
-                    WiFi.setHostname(hostname.c_str());
-                }
-
-                // Disconnect if we have new credentials or if the previous attempt failed.
-                // This ensures a clean slate for the next WiFi.begin() call.
-                if (haveNewCredentials || WiFi.status() == WL_CONNECT_FAILED)
-                {
-                    debugV("Wifi.disconnect (resetting status %d)", (int)WiFi.status());
-                    WiFi.disconnect();
-                }
-
-                debugW("Connecting to Wifi SSID: \"%s\" - ESP32 Free Memory: %zu, PSRAM:%zu, PSRAM Free: %zu\n",
-                       WiFi_ssid.c_str(), (size_t)ESP.getFreeHeap(), (size_t)ESP.getPsramSize(), (size_t)ESP.getFreePsram());
-
-                WiFi.begin(WiFi_ssid.c_str(), WiFi_password.c_str());
-
-                debugV("Done Wifi.begin, waiting for connection...");
+	   return WiFiConnectResult::Connected;
             }
-        }
 
-        if (WiFi.isConnected())
-        {
-            bReportedDisconnected = false;
-            debugW("Connected to AP with BSSID: \"%s\", received IP: %s", WiFi.BSSIDstr().c_str(), WiFi.localIP().toString().c_str());
-        }
-        else
-        // Additional services onward are reliant on network so return if WiFi is not up (yet)
-        {
-            if (!bReportedDisconnected)
+            // (Re)connect if credentials have changed, or our last attempt was long enough ago
+            if (haveNewCredentials || millisAtLastAttempt == 0 || millis() - millisAtLastAttempt >= retryDelay)
             {
-                debugW("Not yet connected to WiFi, waiting...");
-                bReportedDisconnected = true;
+	   millisAtLastAttempt = millis();
+	   retryDelay = std::min<unsigned long>(retryDelay + WIFI_WAIT_INCREASE, WIFI_WAIT_MAX);
+
+	   if (WiFi_ssid.length() == 0)
+	   {
+	       debugW("WiFi credentials not set, cannot connect.");
+	       return WiFiConnectResult::NoCredentials;
+	   }
+	   else
+	   {
+	       static bool bInitialized = false;
+	       if (!bInitialized)
+	       {
+	           WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+		  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+		      debugW("WiFi Disconnected. Reason: %d", info.wifi_sta_disconnected.reason);
+		  }
+	           });
+
+	           debugV("Wifi.mode");
+	           WiFi.mode(WIFI_STA);
+
+	           // Disable WiFi power saving to improve DHCP reliability
+	           debugV("Wifi.setSleep(false)");
+	           WiFi.setSleep(false);
+
+	           bInitialized = true;
+	       }
+
+	       const String& hostname = g_ptrSystem->GetDeviceConfig().GetHostname();
+	       if (hostname.length() == 0)
+	       {
+	           debugI("No hostname configured, so skipping setting it.");
+	       }
+	       else
+	       {
+	           debugI("Setting host name to %s...", hostname.c_str());
+	           WiFi.setHostname(hostname.c_str());
+	       }
+
+	       // Disconnect if we have new credentials or if the previous attempt failed.
+	       // This ensures a clean slate for the next WiFi.begin() call.
+	       if (haveNewCredentials || WiFi.status() == WL_CONNECT_FAILED)
+	       {
+	           debugV("Wifi.disconnect (resetting status %d)", (int)WiFi.status());
+	           WiFi.disconnect();
+	       }
+
+	       debugW("Connecting to Wifi SSID: \"%s\" - ESP32 Free Memory: %zu, PSRAM:%zu, PSRAM Free: %zu\n",
+		 WiFi_ssid.c_str(), (size_t)ESP.getFreeHeap(), (size_t)ESP.getPsramSize(), (size_t)ESP.getFreePsram());
+
+	       WiFi.begin(WiFi_ssid.c_str(), WiFi_password.c_str());
+
+	       debugV("Done Wifi.begin, waiting for connection...");
+	   }
             }
-            return WiFiConnectResult::Disconnected;
-        }
-
-        // If we were connected before, network-dependent services will have been started already
-        if (bPreviousConnection)
-            return WiFiConnectResult::Connected;
-
-        bPreviousConnection = true;
-
-        #if INCOMING_WIFI_ENABLED
-            auto& socketServer = g_ptrSystem->GetSocketServer();
-
-            // Start listening for incoming data
-            debugI("Starting/restarting Socket Server...");
-            socketServer.release();
-            if (false == socketServer.begin())
-                throw std::runtime_error("Could not start socket server!");
-
-            debugI("Socket server started.");
-        #endif
-
-        #if ENABLE_OTA
-            debugI("Publishing OTA...");
-            SetupOTA(String(WiFi.getHostname()));
-        #endif
-
-        #if ENABLE_NTP
-            debugI("Setting Clock...");
-            NTPTimeClient::UpdateClockFromWeb(&l_Udp);
-        #endif
-
-        #if ENABLE_WEBSERVER
-            debugI("Starting Web Server...");
-            g_ptrSystem->GetWebServer().begin();
-            debugI("Web Server begin called!");
-        #endif
-
-        return WiFiConnectResult::Connected;
-    }
-
-    #if ENABLE_NTP
-        void UpdateNTPTime()
-        {
-            static unsigned long lastUpdate = 0;
 
             if (WiFi.isConnected())
             {
-                // If we've already retrieved the time successfully, we'll only actually update every NTP_DELAY_SECONDS seconds
-                if (!NTPTimeClient::HasClockBeenSet() || (millis() - lastUpdate) > ((NTP_DELAY_SECONDS) * 1000))
-                {
-                    debugV("Refreshing Time from Server...");
-                    if (NTPTimeClient::UpdateClockFromWeb(&l_Udp))
-                        lastUpdate = millis();
-                }
+	   bReportedDisconnected = false;
+	   debugW("Connected to AP with BSSID: \"%s\", received IP: %s", WiFi.BSSIDstr().c_str(), WiFi.localIP().toString().c_str());
             }
-        }
-    #endif
-
-    // ProcessIncomingData
-    //
-    // Code that actually handles whatever comes in on the socket.  Must be known good data
-    // as this code does not validate!  This is where the commands and pixel data are received
-    // from the server.
-
-    bool ProcessIncomingData(std::unique_ptr<uint8_t []> & payloadData, size_t payloadLength)
-    {
-        #if !INCOMING_WIFI_ENABLED
-            return false;
-        #else
-
-        uint16_t command16 = payloadData[1] << 8 | payloadData[0];
-
-        debugV("payloadLength: %zu, command16: %d", payloadLength, command16);
-
-        switch (command16)
-        {
-            // WIFI_COMMAND_PEAKDATA has a header plus NUM_BANDS floats that will be used to set the audio peaks
-
-            case WIFI_COMMAND_PEAKDATA:
+            else
+            // Additional services onward are reliant on network so return if WiFi is not up (yet)
             {
-                #if ENABLE_AUDIO
-                    uint16_t numbands  = WORDFromMemory(&payloadData[2]);
-                    uint32_t length32  = DWORDFromMemory(&payloadData[4]);
-                    uint64_t seconds   = ULONGFromMemory(&payloadData[8]);
-                    uint64_t micros    = ULONGFromMemory(&payloadData[16]);
+	   if (!bReportedDisconnected)
+	   {
+	       debugW("Not yet connected to WiFi, waiting...");
+	       bReportedDisconnected = true;
+	   }
+	   return WiFiConnectResult::Disconnected;
+            }
 
-                debugV("ProcessIncomingData -- Bands: %u, Length: %lu, Seconds: %llu, Micros: %llu ... ",
-                       (unsigned int)numbands,
-                       (unsigned long)length32,
-                       seconds,
-                       micros);
+            // If we were connected before, network-dependent services will have been started already
+            if (bPreviousConnection)
+	   return WiFiConnectResult::Connected;
 
-                // Data is transmitted as NUM_BANDS floats following the standard header
-                const uint8_t* dataStart = payloadData.get() + STANDARD_DATA_HEADER_SIZE;
-                const size_t availableFloats = (payloadLength > STANDARD_DATA_HEADER_SIZE)
-                                                ? (payloadLength - STANDARD_DATA_HEADER_SIZE) / sizeof(float)
-                                                : 0;
-                const size_t copyCount = std::min<size_t>(NUM_BANDS, std::min<size_t>(numbands, availableFloats));
+            bPreviousConnection = true;
 
-                PeakData peaks{}; // zero-initialized for any bands not provided
-                if (copyCount > 0)
-                {
-                    const float* pFloats = reinterpret_cast<const float*>(dataStart);
-                    std::copy_n(pFloats, copyCount, peaks.begin());
-                }
-                g_Analyzer.SetPeakDataFromRemote(peaks);
+            #if INCOMING_WIFI_ENABLED
+	   auto& socketServer = g_ptrSystem->GetSocketServer();
+
+	   // Start listening for incoming data
+	   debugI("Starting/restarting Socket Server...");
+	   socketServer.release();
+	   if (false == socketServer.begin())
+	       throw std::runtime_error("Could not start socket server!");
+
+	   debugI("Socket server started.");
             #endif
-            return true;
+
+            #if ENABLE_OTA
+	   debugI("Publishing OTA...");
+	   SetupOTA(String(WiFi.getHostname()));
+            #endif
+
+            #if ENABLE_NTP
+	   debugI("Setting Clock...");
+	   NTPTimeClient::UpdateClockFromWeb(&l_Udp);
+            #endif
+
+            #if ENABLE_WEBSERVER
+	   debugI("Starting Web Server...");
+	   g_ptrSystem->GetWebServer().begin();
+	   debugI("Web Server begin called!");
+            #endif
+
+            return WiFiConnectResult::Connected;
         }
 
-            // WIFI_COMMAND_PIXELDATA64 has a header plus length32 CRGBs
-
-            case WIFI_COMMAND_PIXELDATA64:
+        #if ENABLE_NTP
+            void UpdateNTPTime()
             {
-                uint16_t channel16 = WORDFromMemory(&payloadData[2]);
-                uint32_t length32  = DWORDFromMemory(&payloadData[4]);
-                uint64_t seconds   = ULONGFromMemory(&payloadData[8]);
-                uint64_t micros    = ULONGFromMemory(&payloadData[16]);
+	   static unsigned long lastUpdate = 0;
 
-                debugV("ProcessIncomingData -- Channel: %u, Length: %lu, Seconds: %llu, Micros: %llu ... ",
-                    (unsigned int)channel16,
-                    (unsigned long)length32,
-                    seconds,
-                    micros);
-
-                // The very old original implementation used channel numbers, not a mask, and only channel 0 was supported at that time, so if
-                // we see a Channel 0 asked for, it must be very old, and we massage it into the mask for Channel0 instead
-                // Another option here would be to draw on all channels (0xff) instead of just one (0x01) if 0 is specified
-
-                if (channel16 == 0)
-                    channel16 = 1;
-
-                // Go through the channel mask to see which bits are set in the channel16 specifier, and send the data to each and every
-                // channel that matches the mask.  So if the send channel 7, that means the lowest 3 channels will be set.
-
-                std::lock_guard<std::mutex> guard(g_buffer_mutex);
-
-                for (int iChannel = 0, channelMask = 1; iChannel < g_ptrSystem->GetBufferManagers().size(); iChannel++, channelMask <<= 1)
-                {
-                    if ((channelMask & channel16) != 0)
-                    {
-                        debugV("Processing for Channel %d", iChannel);
-
-                        bool bDone = false;
-                        auto& bufferManager = g_ptrSystem->GetBufferManagers()[iChannel];
-
-                        if (!bufferManager.IsEmpty())
-                        {
-                            auto pNewestBuffer = bufferManager.PeekNewestBuffer();
-                            if (micros != 0 && pNewestBuffer->MicroSeconds() == micros && pNewestBuffer->Seconds() == seconds)
-                            {
-                                debugV("Updating existing buffer");
-                                if (!pNewestBuffer->UpdateFromWire(payloadData, payloadLength))
-                                    return false;
-                                bDone = true;
-                            }
-                        }
-                        if (!bDone)
-                        {
-                            debugV("No match so adding new buffer");
-                            auto pNewBuffer = bufferManager.GetNewBuffer();
-                            if (!pNewBuffer->UpdateFromWire(payloadData, payloadLength))
-                                return false;
-                        }
-                    }
-                }
-                return true;
+	   if (WiFi.isConnected())
+	   {
+	       // If we've already retrieved the time successfully, we'll only actually update every NTP_DELAY_SECONDS seconds
+	       if (!NTPTimeClient::HasClockBeenSet() || (millis() - lastUpdate) > ((NTP_DELAY_SECONDS) * 1000))
+	       {
+	           debugV("Refreshing Time from Server...");
+	           if (NTPTimeClient::UpdateClockFromWeb(&l_Udp))
+		  lastUpdate = millis();
+	       }
+	   }
             }
-
-            default:
-            {
-                debugV("ProcessIncomingData -- Unknown command: 0x%x", command16);
-                return false;
-            }
-        }
         #endif
-    }
 
-    // Non-volatile Storage for WiFi Credentials
+        // ProcessIncomingData
+        //
+        // Code that actually handles whatever comes in on the socket.  Must be known good data
+        // as this code does not validate!  This is where the commands and pixel data are received
+        // from the server.
 
-    #define MAX_PASSWORD_LEN 63
-
-    // GetWiFiConfigKey
-    //
-    // Creates a unique key for storing/retrieving WiFi credentials in NVS.
-    // The key is a combination of a base key (like "WiFi_ssid") and the
-    // credential source, ensuring different credential sets don't overwrite
-    // each other.
-
-    inline String GetWiFiConfigKey(WifiCredSource source, const String& key)
-    {
-        return String(key + "_" + source);
-    }
-
-    // ReadWiFiConfig
-    //
-    // Attempts to read the WiFi ssid and password from NVS storage strings.  The keys
-    // for those name-value pairs are made from the variable names (WiFi_ssid, WiFi_Password)
-    // directly.  Limited to 63 characters in both cases, which is the WPA2 ssid limit.
-
-    bool ReadWiFiConfig(WifiCredSource source, String& WiFi_ssid, String& WiFi_password)
-    {
-        char szBuffer[MAX_PASSWORD_LEN+1];
-
-        nvs_handle_t nvsROHandle;
-        esp_err_t err = nvs_open("storage", NVS_READONLY, &nvsROHandle);
-        if (err != ESP_OK)
+        bool ProcessIncomingData(std::unique_ptr<uint8_t []> & payloadData, size_t payloadLength)
         {
-            debugW("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
-            return false;
+            #if !INCOMING_WIFI_ENABLED
+	   return false;
+            #else
+
+            uint16_t command16 = payloadData[1] << 8 | payloadData[0];
+
+            debugV("payloadLength: %zu, command16: %d", payloadLength, command16);
+
+            switch (command16)
+            {
+	   // WIFI_COMMAND_PEAKDATA has a header plus NUM_BANDS floats that will be used to set the audio peaks
+
+	   case WIFI_COMMAND_PEAKDATA:
+	   {
+	       #if ENABLE_AUDIO
+	           uint16_t numbands  = WORDFromMemory(&payloadData[2]);
+	           uint32_t length32  = DWORDFromMemory(&payloadData[4]);
+	           uint64_t seconds   = ULONGFromMemory(&payloadData[8]);
+	           uint64_t micros    = ULONGFromMemory(&payloadData[16]);
+
+	       debugV("ProcessIncomingData -- Bands: %u, Length: %lu, Seconds: %llu, Micros: %llu ... ",
+		 (unsigned int)numbands,
+		 (unsigned long)length32,
+		 seconds,
+		 micros);
+
+	       // Data is transmitted as NUM_BANDS floats following the standard header
+	       const uint8_t* dataStart = payloadData.get() + STANDARD_DATA_HEADER_SIZE;
+	       const size_t availableFloats = (payloadLength > STANDARD_DATA_HEADER_SIZE)
+				? (payloadLength - STANDARD_DATA_HEADER_SIZE) / sizeof(float)
+				: 0;
+	       const size_t copyCount = std::min<size_t>(NUM_BANDS, std::min<size_t>(numbands, availableFloats));
+
+	       PeakData peaks{}; // zero-initialized for any bands not provided
+	       if (copyCount > 0)
+	       {
+	           const float* pFloats = reinterpret_cast<const float*>(dataStart);
+	           std::copy_n(pFloats, copyCount, peaks.begin());
+	       }
+	       g_Analyzer.SetPeakDataFromRemote(peaks);
+	   #endif
+	   return true;
+            }
+
+	   // WIFI_COMMAND_PIXELDATA64 has a header plus length32 CRGBs
+
+	   case WIFI_COMMAND_PIXELDATA64:
+	   {
+	       uint16_t channel16 = WORDFromMemory(&payloadData[2]);
+	       uint32_t length32  = DWORDFromMemory(&payloadData[4]);
+	       uint64_t seconds   = ULONGFromMemory(&payloadData[8]);
+	       uint64_t micros    = ULONGFromMemory(&payloadData[16]);
+
+	       debugV("ProcessIncomingData -- Channel: %u, Length: %lu, Seconds: %llu, Micros: %llu ... ",
+	           (unsigned int)channel16,
+	           (unsigned long)length32,
+	           seconds,
+	           micros);
+
+	       // The very old original implementation used channel numbers, not a mask, and only channel 0 was supported at that time, so if
+	       // we see a Channel 0 asked for, it must be very old, and we massage it into the mask for Channel0 instead
+	       // Another option here would be to draw on all channels (0xff) instead of just one (0x01) if 0 is specified
+
+	       if (channel16 == 0)
+	           channel16 = 1;
+
+	       // Go through the channel mask to see which bits are set in the channel16 specifier, and send the data to each and every
+	       // channel that matches the mask.  So if the send channel 7, that means the lowest 3 channels will be set.
+
+	       std::lock_guard<std::mutex> guard(g_buffer_mutex);
+
+	       for (int iChannel = 0, channelMask = 1; iChannel < g_ptrSystem->GetBufferManagers().size(); iChannel++, channelMask <<= 1)
+	       {
+	           if ((channelMask & channel16) != 0)
+	           {
+		  debugV("Processing for Channel %d", iChannel);
+
+		  bool bDone = false;
+		  auto& bufferManager = g_ptrSystem->GetBufferManagers()[iChannel];
+
+		  if (!bufferManager.IsEmpty())
+		  {
+		      auto pNewestBuffer = bufferManager.PeekNewestBuffer();
+		      if (micros != 0 && pNewestBuffer->MicroSeconds() == micros && pNewestBuffer->Seconds() == seconds)
+		      {
+		          debugV("Updating existing buffer");
+		          if (!pNewestBuffer->UpdateFromWire(payloadData, payloadLength))
+			 return false;
+		          bDone = true;
+		      }
+		  }
+		  if (!bDone)
+		  {
+		      debugV("No match so adding new buffer");
+		      auto pNewBuffer = bufferManager.GetNewBuffer();
+		      if (!pNewBuffer->UpdateFromWire(payloadData, payloadLength))
+		          return false;
+		  }
+	           }
+	       }
+	       return true;
+	   }
+
+	   default:
+	   {
+	       debugV("ProcessIncomingData -- Unknown command: 0x%x", command16);
+	       return false;
+	   }
+            }
+            #endif
         }
-        else
-        {
-            // Read the SSID and Password from the NVS partition name/value keypair set
 
-            auto len = std::size(szBuffer);
-            err = nvs_get_str(nvsROHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_ssid)).c_str(), szBuffer, &len);
+        // Non-volatile Storage for WiFi Credentials
+
+        #define MAX_PASSWORD_LEN 63
+
+        // GetWiFiConfigKey
+        //
+        // Creates a unique key for storing/retrieving WiFi credentials in NVS.
+        // The key is a combination of a base key (like "WiFi_ssid") and the
+        // credential source, ensuring different credential sets don't overwrite
+        // each other.
+
+        inline String GetWiFiConfigKey(WifiCredSource source, const String& key)
+        {
+            return String(key + "_" + source);
+        }
+
+        // ReadWiFiConfig
+        //
+        // Attempts to read the WiFi ssid and password from NVS storage strings.  The keys
+        // for those name-value pairs are made from the variable names (WiFi_ssid, WiFi_Password)
+        // directly.  Limited to 63 characters in both cases, which is the WPA2 ssid limit.
+
+        bool ReadWiFiConfig(WifiCredSource source, String& WiFi_ssid, String& WiFi_password)
+        {
+            char szBuffer[MAX_PASSWORD_LEN+1];
+
+            nvs_handle_t nvsROHandle;
+            esp_err_t err = nvs_open("storage", NVS_READONLY, &nvsROHandle);
+            if (err != ESP_OK)
+            {
+	   debugW("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+	   return false;
+            }
+            else
+            {
+	   // Read the SSID and Password from the NVS partition name/value keypair set
+
+	   auto len = std::size(szBuffer);
+	   err = nvs_get_str(nvsROHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_ssid)).c_str(), szBuffer, &len);
+	   if (ESP_OK != err)
+	   {
+	       debugE("Could not read WiFi_ssid for source %d from NVS", source);
+	       nvs_close(nvsROHandle);
+	       return false;
+	   }
+	   WiFi_ssid = szBuffer;
+
+	   len = std::size(szBuffer);
+	   err = nvs_get_str(nvsROHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_password)).c_str(), szBuffer, &len);
+	   if (ESP_OK != err)
+	   {
+	       debugE("Could not read WiFi_password for SSID \"%s\" and source %d from NVS", WiFi_ssid.c_str(), source);
+	       nvs_close(nvsROHandle);
+	       return false;
+	   }
+	   WiFi_password = szBuffer;
+
+	   // Don't check in changes that would display the password in logs, etc.
+	   debugI("Retrieved SSID and Password for source %d from NVS: \"%s\", \"********\"", source, WiFi_ssid.c_str());
+
+	   nvs_close(nvsROHandle);
+	   return true;
+            }
+        }
+
+        // WriteWiFiConfig
+        //
+        // Attempts to write the WiFi ssid and password to NVS storage strings.  The keys
+        // for those name-value pairs are made from the variable names (WiFi_ssid, WiFi_Password)
+        // directly.  It's not transactional, so it could conceivably succeed at writing
+        // the ssid and not the password (but will still report failure).  Does not
+        // enforce length limits on values given, so conceivable you could write longer
+        // pairs than you could read, but they wouldn't work on WiFi anyway.
+
+        bool WriteWiFiConfig(WifiCredSource source, const String& WiFi_ssid, const String& WiFi_password)
+        {
+            nvs_handle_t nvsRWHandle;
+
+            // The "storage" string must match NVS partition name in partition table
+
+            esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvsRWHandle);
+            if (err != ESP_OK)
+            {
+	   debugW("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+	   return false;
+            }
+
+            bool success = true;
+
+            err = nvs_set_str(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_ssid)).c_str(), WiFi_ssid.c_str());
             if (ESP_OK != err)
             {
-                debugE("Could not read WiFi_ssid for source %d from NVS", source);
-                nvs_close(nvsROHandle);
-                return false;
+	   debugW("Error (%s) storing ssid for source %d!\n", esp_err_to_name(err), source);
+	   success = false;
             }
-            WiFi_ssid = szBuffer;
 
-            len = std::size(szBuffer);
-            err = nvs_get_str(nvsROHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_password)).c_str(), szBuffer, &len);
+            err = nvs_set_str(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_password)).c_str(), WiFi_password.c_str());
             if (ESP_OK != err)
             {
-                debugE("Could not read WiFi_password for SSID \"%s\" and source %d from NVS", WiFi_ssid.c_str(), source);
-                nvs_close(nvsROHandle);
-                return false;
+	   debugW("Error (%s) storing password for source %d!\n", esp_err_to_name(err), source);
+	   success = false;
             }
-            WiFi_password = szBuffer;
 
-            // Don't check in changes that would display the password in logs, etc.
-            debugI("Retrieved SSID and Password for source %d from NVS: \"%s\", \"********\"", source, WiFi_ssid.c_str());
+            if (success)
+	   // Do not check in code that displays the password in logs, etc.
+	   debugI("Stored SSID and Password for source %d to NVS: %s, *******", source, WiFi_ssid.c_str());
 
-            nvs_close(nvsROHandle);
-            return true;
+            nvs_commit(nvsRWHandle);
+            nvs_close(nvsRWHandle);
+
+            return success;
         }
-    }
 
-    // WriteWiFiConfig
-    //
-    // Attempts to write the WiFi ssid and password to NVS storage strings.  The keys
-    // for those name-value pairs are made from the variable names (WiFi_ssid, WiFi_Password)
-    // directly.  It's not transactional, so it could conceivably succeed at writing
-    // the ssid and not the password (but will still report failure).  Does not
-    // enforce length limits on values given, so conceivable you could write longer
-    // pairs than you could read, but they wouldn't work on WiFi anyway.
+        // ClearWiFiConfig
+        //
+        // Attempts to erase the WiFi ssid and password for a given source from NVS
+        // storage. The keys for the name-value pairs are constructed based on the
+        // source. This operation is not transactional; it's possible for one key
+        // to be erased successfully while the other fails.
 
-    bool WriteWiFiConfig(WifiCredSource source, const String& WiFi_ssid, const String& WiFi_password)
-    {
-        nvs_handle_t nvsRWHandle;
-
-        // The "storage" string must match NVS partition name in partition table
-
-        esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvsRWHandle);
-        if (err != ESP_OK)
+        bool ClearWiFiConfig(WifiCredSource source)
         {
-            debugW("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
-            return false;
+            nvs_handle_t nvsRWHandle;
+
+            // The "storage" string must match NVS partition name in partition table
+
+            esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvsRWHandle);
+            if (err != ESP_OK)
+            {
+	   debugW("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+	   return false;
+            }
+
+            bool success = true;
+
+            err = nvs_erase_key(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_ssid)).c_str());
+            if (ESP_OK != err && err != ESP_ERR_NVS_NOT_FOUND)
+            {
+	   debugW("Error (%s) erasing ssid for source %d!\n", esp_err_to_name(err), source);
+	   success = false;
+            }
+
+            err = nvs_erase_key(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_password)).c_str());
+            if (ESP_OK != err && err != ESP_ERR_NVS_NOT_FOUND)
+            {
+	   debugW("Error (%s) erasing password for source %d!\n", esp_err_to_name(err), source);
+	   success = false;
+            }
+
+            if (success)
+	   debugI("Erased SSID and Password for source %d from NVS", source);
+
+            nvs_commit(nvsRWHandle);
+            nvs_close(nvsRWHandle);
+
+            return success;
         }
-
-        bool success = true;
-
-        err = nvs_set_str(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_ssid)).c_str(), WiFi_ssid.c_str());
-        if (ESP_OK != err)
-        {
-            debugW("Error (%s) storing ssid for source %d!\n", esp_err_to_name(err), source);
-            success = false;
-        }
-
-        err = nvs_set_str(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_password)).c_str(), WiFi_password.c_str());
-        if (ESP_OK != err)
-        {
-            debugW("Error (%s) storing password for source %d!\n", esp_err_to_name(err), source);
-            success = false;
-        }
-
-        if (success)
-            // Do not check in code that displays the password in logs, etc.
-            debugI("Stored SSID and Password for source %d to NVS: %s, *******", source, WiFi_ssid.c_str());
-
-        nvs_commit(nvsRWHandle);
-        nvs_close(nvsRWHandle);
-
-        return success;
-    }
-
-    // ClearWiFiConfig
-    //
-    // Attempts to erase the WiFi ssid and password for a given source from NVS
-    // storage. The keys for the name-value pairs are constructed based on the
-    // source. This operation is not transactional; it's possible for one key
-    // to be erased successfully while the other fails.
-
-    bool ClearWiFiConfig(WifiCredSource source)
-    {
-        nvs_handle_t nvsRWHandle;
-
-        // The "storage" string must match NVS partition name in partition table
-
-        esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvsRWHandle);
-        if (err != ESP_OK)
-        {
-            debugW("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
-            return false;
-        }
-
-        bool success = true;
-
-        err = nvs_erase_key(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_ssid)).c_str());
-        if (ESP_OK != err && err != ESP_ERR_NVS_NOT_FOUND)
-        {
-            debugW("Error (%s) erasing ssid for source %d!\n", esp_err_to_name(err), source);
-            success = false;
-        }
-
-        err = nvs_erase_key(nvsRWHandle, GetWiFiConfigKey(source, NAME_OF(WiFi_password)).c_str());
-        if (ESP_OK != err && err != ESP_ERR_NVS_NOT_FOUND)
-        {
-            debugW("Error (%s) erasing password for source %d!\n", esp_err_to_name(err), source);
-            success = false;
-        }
-
-        if (success)
-            debugI("Erased SSID and Password for source %d from NVS", source);
-
-        nvs_commit(nvsRWHandle);
-        nvs_close(nvsRWHandle);
-
-        return success;
-    }
 
 
 #if INCOMING_WIFI_ENABLED
 
-    // SocketServerTaskEntry
-    //
-    // Repeatedly calls the code to open up a socket and receive new connections
+        // SocketServerTaskEntry
+        //
+        // Repeatedly calls the code to open up a socket and receive new connections
 
-    void IRAM_ATTR SocketServerTaskEntry(void *)
-    {
-        for (;;)
+        void IRAM_ATTR SocketServerTaskEntry(void *)
         {
-            if (WiFi.isConnected())
+            for (;;)
             {
-                auto& socketServer = g_ptrSystem->GetSocketServer();
+	   if (WiFi.isConnected())
+	   {
+	       auto& socketServer = g_ptrSystem->GetSocketServer();
 
-                socketServer.release();
-                socketServer.begin();
-                socketServer.ProcessIncomingConnectionsLoop();
-                debugV("Socket connection closed.  Retrying...");
+	       socketServer.release();
+	       socketServer.begin();
+	       socketServer.ProcessIncomingConnectionsLoop();
+	       debugV("Socket connection closed.  Retrying...");
+	   }
+	   delay(500);
             }
-            delay(500);
         }
-    }
 #endif
 
 #if COLORDATA_SERVER_ENABLED
-    // ColorDataTaskEntry
-    //
-    // The thread which serves requests for color data.
+        // ColorDataTaskEntry
+        //
+        // The thread which serves requests for color data.
 
-    void IRAM_ATTR ColorDataTaskEntry(void *)
-    {
-        LEDViewer _viewer(NetworkPort::ColorServer);
-        int socket = -1;
-        bool wsListenersPresent = false;
-        BaseFrameEventListener frameEventListener;
-
-        auto& effectManager = g_ptrSystem->GetEffectManager();
-        #if COLORDATA_WEB_SOCKET_ENABLED
-            auto& webSocketServer = g_ptrSystem->GetWebSocketServer();
-        #endif
-
-        effectManager.AddFrameEventListener(frameEventListener);
-
-        for(;;)
+        void IRAM_ATTR ColorDataTaskEntry(void *)
         {
-            while (!WiFi.isConnected())
-                delay(250);
+            LEDViewer _viewer(NetworkPort::ColorServer);
+            int socket = -1;
+            bool wsListenersPresent = false;
+            BaseFrameEventListener frameEventListener;
 
-            if (!_viewer.begin())
-            {
-                debugE("Unable to start color data server!");
-                delay(1000);
-                continue;
-            }
-            else
-            {
-                debugW("Started color data server!");
-                break;
-            }
-        }
-
-        for (;;)
-        {
-            if (socket < 0)
-                socket = _viewer.CheckForConnection();
-
-            auto leds = effectManager.g()->leds;
-
-            if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
-            {
-                if (socket >= 0)
-                {
-                    debugV("Sending color data packet");
-                    // Potentially too large for the stack, so we allocate it on the heap instead
-                    std::unique_ptr<ColorDataPacket> pPacket = std::make_unique<ColorDataPacket>();
-                    pPacket->header = COLOR_DATA_PACKET_HEADER;
-                    pPacket->width  = effectManager.g()->width();
-                    pPacket->height = effectManager.g()->height();
-                    memcpy(pPacket->colors, leds, sizeof(CRGB) * NUM_LEDS);
-
-                    if (!_viewer.SendPacket(socket, pPacket.get(), sizeof(ColorDataPacket)))
-                    {
-                        // If anything goes wrong, we close the socket so it can accept new incoming attempts
-                        debugW("Error on color data socket, so closing");
-                        close(socket);
-                        socket = -1;
-                    }
-                }
-
-                #if COLORDATA_WEB_SOCKET_ENABLED
-                    webSocketServer.SendColorData(leds, NUM_LEDS);
-                #endif
-            }
-
+            auto& effectManager = g_ptrSystem->GetEffectManager();
             #if COLORDATA_WEB_SOCKET_ENABLED
-                wsListenersPresent = webSocketServer.HaveColorDataClients();
+	   auto& webSocketServer = g_ptrSystem->GetWebSocketServer();
             #endif
 
-            if (socket >= 0 || wsListenersPresent)
-                delay(10);
-            else
-                delay(1000);
+            effectManager.AddFrameEventListener(frameEventListener);
+
+            for(;;)
+            {
+	   while (!WiFi.isConnected())
+	       delay(250);
+
+	   if (!_viewer.begin())
+	   {
+	       debugE("Unable to start color data server!");
+	       delay(1000);
+	       continue;
+	   }
+	   else
+	   {
+	       debugW("Started color data server!");
+	       break;
+	   }
+            }
+
+            for (;;)
+            {
+	   if (socket < 0)
+	       socket = _viewer.CheckForConnection();
+
+	   auto leds = effectManager.g()->leds;
+
+	   if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
+	   {
+	       if (socket >= 0)
+	       {
+	           debugV("Sending color data packet");
+	           // Potentially too large for the stack, so we allocate it on the heap instead
+	           std::unique_ptr<ColorDataPacket> pPacket = std::make_unique<ColorDataPacket>();
+	           pPacket->header = COLOR_DATA_PACKET_HEADER;
+	           pPacket->width  = effectManager.g()->width();
+	           pPacket->height = effectManager.g()->height();
+	           memcpy(pPacket->colors, leds, sizeof(CRGB) * NUM_LEDS);
+
+	           if (!_viewer.SendPacket(socket, pPacket.get(), sizeof(ColorDataPacket)))
+	           {
+		  // If anything goes wrong, we close the socket so it can accept new incoming attempts
+		  debugW("Error on color data socket, so closing");
+		  close(socket);
+		  socket = -1;
+	           }
+	       }
+
+	       #if COLORDATA_WEB_SOCKET_ENABLED
+	           webSocketServer.SendColorData(leds, NUM_LEDS);
+	       #endif
+	   }
+
+	   #if COLORDATA_WEB_SOCKET_ENABLED
+	       wsListenersPresent = webSocketServer.HaveColorDataClients();
+	   #endif
+
+	   if (socket >= 0 || wsListenersPresent)
+	       delay(10);
+	   else
+	       delay(1000);
+            }
         }
-    }
 #endif // COLORDATA_SERVER_ENABLED
 
-    // NetworkReader
-    //
-    // Allows functions to be registered that are called at regular intervals and/or on request, in the
-    // background. As the name of the class implies, this is intended to be used to execute network
-    // requests, like for effects that require data from RESTful APIs.
+        // NetworkReader
+        //
+        // Allows functions to be registered that are called at regular intervals and/or on request, in the
+        // background. As the name of the class implies, this is intended to be used to execute network
+        // requests, like for effects that require data from RESTful APIs.
 
-    // NetworkHandlingLoopEntry
-    //
-    // Thead entry point for the Networking task
-    // Pumps the various network loops and sets the time periodically, as well as reconnecting
-    // to WiFi if the connection drops.  Also pumps the OTA (Over the air updates) loop.
+        // NetworkHandlingLoopEntry
+        //
+        // Thead entry point for the Networking task
+        // Pumps the various network loops and sets the time periodically, as well as reconnecting
+        // to WiFi if the connection drops.  Also pumps the OTA (Over the air updates) loop.
 
-    void NetworkHandlingLoopEntry(void *)
-    {
-        static unsigned long millisAtLastConnected = millis();
-
-        //debugI(">> NetworkHandlingLoopEntry\n");
-        if(!MDNS.begin("esp32")) {
-            Serial.println("Error starting mDNS");
-        }
-
-        TickType_t notifyWait = 0;
-
-        for (;;)
+        void NetworkHandlingLoopEntry(void *)
         {
-            // Wait until we're woken up by a reader being flagged, or until we've reached the hold point
-            ulTaskNotifyTake(pdTRUE, notifyWait);
+            static unsigned long millisAtLastConnected = millis();
 
-            // Every second we check WiFi, and reconnect if we've lost the connection. If we are unable to restart
-            // it for any reason, we reboot the chip in cases where its required, which we assume from WAIT_FOR_WIFI.
-
-            EVERY_N_SECONDS(1)
-            {
-                auto connectResult = ConnectToWiFi();
-
-                if (connectResult == WiFiConnectResult::Connected)
-                {
-                    millisAtLastConnected = millis();
-
-                    #if WEB_SOCKETS_ANY_ENABLED
-                        // It's recommended to clean up any stale web socket clients every second or so
-                        g_ptrSystem->GetWebSocketServer().CleanupClients();
-                    #endif
-                }
-                else
-                {
-                    debugV("Still waiting for WiFi to connect.");
-                    #if WAIT_FOR_WIFI
-                        // Reboot if we've been waiting for a connection for more than the maximum delay between
-                        // connection retries and we _do_ have credentials
-                        if (connectResult != WiFiConnectResult::NoCredentials && millis() - millisAtLastConnected > WIFI_WAIT_MAX)
-                        {
-                            debugE("Rebooting in 5 seconds due to no Wifi available.");
-                            delay(5000);
-                            throw new std::runtime_error("Rebooting due to no Wifi available.");
-                        }
-                    #endif
-                }
+            //debugI(">> NetworkHandlingLoopEntry\n");
+            if(!MDNS.begin("esp32")) {
+	   Serial.println("Error starting mDNS");
             }
 
-            // If the reader container isn't available yet or WiFi isn't up yet, we'll sleep for a second before we check again
-            if (!g_ptrSystem->HasNetworkReader() || !WiFi.isConnected())
+            TickType_t notifyWait = 0;
+
+            for (;;)
             {
-                notifyWait = pdMS_TO_TICKS(1000);
-                continue;
+	   // Wait until we're woken up by a reader being flagged, or until we've reached the hold point
+	   ulTaskNotifyTake(pdTRUE, notifyWait);
+
+	   // Every second we check WiFi, and reconnect if we've lost the connection. If we are unable to restart
+	   // it for any reason, we reboot the chip in cases where its required, which we assume from WAIT_FOR_WIFI.
+
+	   EVERY_N_SECONDS(1)
+	   {
+	       auto connectResult = ConnectToWiFi();
+
+	       if (connectResult == WiFiConnectResult::Connected)
+	       {
+	           millisAtLastConnected = millis();
+
+	           #if WEB_SOCKETS_ANY_ENABLED
+		  // It's recommended to clean up any stale web socket clients every second or so
+		  g_ptrSystem->GetWebSocketServer().CleanupClients();
+	           #endif
+	       }
+	       else
+	       {
+	           debugV("Still waiting for WiFi to connect.");
+	           #if WAIT_FOR_WIFI
+		  // Reboot if we've been waiting for a connection for more than the maximum delay between
+		  // connection retries and we _do_ have credentials
+		  if (connectResult != WiFiConnectResult::NoCredentials && millis() - millisAtLastConnected > WIFI_WAIT_MAX)
+		  {
+		      debugE("Rebooting in 5 seconds due to no Wifi available.");
+		      delay(5000);
+		      throw new std::runtime_error("Rebooting due to no Wifi available.");
+		  }
+	           #endif
+	       }
+	   }
+
+	   // If the reader container isn't available yet or WiFi isn't up yet, we'll sleep for a second before we check again
+	   if (!g_ptrSystem->HasNetworkReader() || !WiFi.isConnected())
+	   {
+	       notifyWait = pdMS_TO_TICKS(1000);
+	       continue;
+	   }
+
+	   auto& networkReader = g_ptrSystem->GetNetworkReader();
+	   unsigned long now = millis();
+
+	   // Flag entries of which the read interval has passed
+	   for (auto& entryPtr : networkReader.readers)
+	   {
+	       auto& entry = *entryPtr;
+	       if (entry.canceled.load())
+	           continue;
+
+	       auto interval = entry.readInterval.load();
+	       unsigned long targetMs = entry.lastReadMs.load() + interval;
+
+	       // The last check captures cases where millis() returns bogus data; if the delta between now and lastReadMs is greater
+	       //   than the interval then something's up with our timekeeping, so we trigger the reader just to be sure
+	       if (interval && (targetMs <= now || (std::max(now, targetMs) - std::min(now, targetMs)) > interval))
+	           entry.flag.store(true);
+
+	       // Unset flag before we do the actual read. This makes that we don't miss another flag raise if it happens while reading
+	       if (entry.flag.exchange(false))
+	       {
+	           entry.reader();
+	           entry.lastReadMs.store(millis());
+	       }
+	   }
+
+	   // We wake up at least once every second
+	   unsigned long holdMs = 1000;
+	   now = millis();
+
+	   // Calculate how long we can sleep. This is determined by the reader that is closest to its interval passing.
+	   for (auto& entryPtr : networkReader.readers)
+	   {
+	       auto& entry = *entryPtr;
+	       if (entry.canceled.load())
+	           continue;
+
+	       auto interval = entry.readInterval.load();
+	       auto lastReadMs = entry.lastReadMs.load();
+
+	       if (!interval)
+	           continue;
+
+	       // If one of the reader intervals passed then we're up for another read cycle right away, so we can stop looking further
+	       if (lastReadMs + interval <= now)
+	       {
+	           holdMs = 0;
+	           break;
+	       }
+	       else
+	       {
+	           unsigned long entryHoldMs = std::min(interval, interval - (now - lastReadMs));
+	           if (entryHoldMs < holdMs)
+		  holdMs = entryHoldMs;
+	       }
+	   }
+
+	   notifyWait = pdMS_TO_TICKS(holdMs);
             }
-
-            auto& networkReader = g_ptrSystem->GetNetworkReader();
-            unsigned long now = millis();
-
-            // Flag entries of which the read interval has passed
-            for (auto& entryPtr : networkReader.readers)
-            {
-                auto& entry = *entryPtr;
-                if (entry.canceled.load())
-                    continue;
-
-                auto interval = entry.readInterval.load();
-                unsigned long targetMs = entry.lastReadMs.load() + interval;
-
-                // The last check captures cases where millis() returns bogus data; if the delta between now and lastReadMs is greater
-                //   than the interval then something's up with our timekeeping, so we trigger the reader just to be sure
-                if (interval && (targetMs <= now || (std::max(now, targetMs) - std::min(now, targetMs)) > interval))
-                    entry.flag.store(true);
-
-                // Unset flag before we do the actual read. This makes that we don't miss another flag raise if it happens while reading
-                if (entry.flag.exchange(false))
-                {
-                    entry.reader();
-                    entry.lastReadMs.store(millis());
-                }
-            }
-
-            // We wake up at least once every second
-            unsigned long holdMs = 1000;
-            now = millis();
-
-            // Calculate how long we can sleep. This is determined by the reader that is closest to its interval passing.
-            for (auto& entryPtr : networkReader.readers)
-            {
-                auto& entry = *entryPtr;
-                if (entry.canceled.load())
-                    continue;
-
-                auto interval = entry.readInterval.load();
-                auto lastReadMs = entry.lastReadMs.load();
-
-                if (!interval)
-                    continue;
-
-                // If one of the reader intervals passed then we're up for another read cycle right away, so we can stop looking further
-                if (lastReadMs + interval <= now)
-                {
-                    holdMs = 0;
-                    break;
-                }
-                else
-                {
-                    unsigned long entryHoldMs = std::min(interval, interval - (now - lastReadMs));
-                    if (entryHoldMs < holdMs)
-                        holdMs = entryHoldMs;
-                }
-            }
-
-            notifyWait = pdMS_TO_TICKS(holdMs);
         }
-    }
 
-    size_t NetworkReader::RegisterReader(const std::function<void()>& reader, unsigned long interval, bool flag)
-    {
-        // Add the reader with its flag unset
-        auto readerEntry = std::make_shared<ReaderEntry>(reader, interval);
-        readers.push_back(readerEntry);
+        size_t NetworkReader::RegisterReader(const std::function<void()>& reader, unsigned long interval, bool flag)
+        {
+            // Add the reader with its flag unset
+            auto readerEntry = std::make_shared<ReaderEntry>(reader, interval);
+            readers.push_back(readerEntry);
 
-        // If an interval is specified, start the interval timer now.
-        if (interval)
-            readerEntry->lastReadMs.store(millis());
+            // If an interval is specified, start the interval timer now.
+            if (interval)
+	   readerEntry->lastReadMs.store(millis());
 
-        size_t index = readers.size() - 1;
+            size_t index = readers.size() - 1;
 
-        if (flag)
-            FlagReader(index);
+            if (flag)
+	   FlagReader(index);
 
-        return index;
-    }
+            return index;
+        }
 
-    void NetworkReader::FlagReader(size_t index)
-    {
-        // Check if we received a valid reader index
-        if (index >= readers.size())
-            return;
+        void NetworkReader::FlagReader(size_t index)
+        {
+            // Check if we received a valid reader index
+            if (index >= readers.size())
+	   return;
 
-        readers[index]->flag.store(true);
+            readers[index]->flag.store(true);
 
-        g_ptrSystem->GetTaskManager().NotifyNetworkThread();
-    }
+            g_ptrSystem->GetTaskManager().NotifyNetworkThread();
+        }
 
-    // Cancel a reader. After this, it will no longer be invoked.
-    void NetworkReader::CancelReader(size_t index)
-    {
-        // Check if we received a valid reader index
-        if (index >= readers.size())
-            return;
+        // Cancel a reader. After this, it will no longer be invoked.
+        void NetworkReader::CancelReader(size_t index)
+        {
+            // Check if we received a valid reader index
+            if (index >= readers.size())
+	   return;
 
-        auto& entry = *readers[index];
-        entry.canceled.store(true);
-        entry.readInterval.store(0);
-        entry.reader = nullptr;
-    }
+            auto& entry = *readers[index];
+            entry.canceled.store(true);
+            entry.readInterval.store(0);
+            entry.reader = nullptr;
+        }
 
 #else
 
-    void InitNetworkCLI() {
+    void nd_network::InitNetworkCLI() {
     }
 
 #endif // ENABLE_WIFI
 
-bool SetSocketBlockingEnabled(int fd, bool blocking)
-{
-    if (fd < 0)
-        return false;
+    bool nd_network::SetSocketBlockingEnabled(int fd, bool blocking)
+    {
+        if (fd < 0)
+            return false;
 
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0)
-        return false;
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags < 0)
+            return false;
 
-    if (blocking)
-        flags &= ~O_NONBLOCK;
-    else
-        flags |= O_NONBLOCK;
+        if (blocking)
+            flags &= ~O_NONBLOCK;
+        else
+            flags |= O_NONBLOCK;
 
-    return fcntl(fd, F_SETFL, flags) == 0;
-}
+        return fcntl(fd, F_SETFL, flags) == 0;
+    }

@@ -225,6 +225,7 @@ extern std::mutex g_buffer_mutex;
     #include "custom_globals.h"
 
 #endif
+
 // This is a simple demo configuration used when no other project is defined; it's only purpose is
 // to serve as a build to be run for [all-deps]
 
@@ -246,8 +247,6 @@ extern std::mutex g_buffer_mutex;
 #ifndef RING_SIZE_0
     #define RING_SIZE_0             MATRIX_WIDTH
 #endif
-
-#include "logger.h"
 
 // Once you have a working project, selectively enable various additional features by setting
 // them to 1 in the list below.  This DEMO config assumes no audio (mic), or screen, etc.
@@ -747,6 +746,7 @@ extern const int g_aRingSizeTable[];
 // Headers that are only included when certain features are enabled
 
 #include "interfaces.h"
+#include "logger.h"
 #include "types.h"
 
 // 16-bit (5:6:5) color definitions for common colors

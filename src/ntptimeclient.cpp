@@ -95,8 +95,10 @@ bool NTPTimeClient::UpdateClockFromWeb(WiFiUDP * pUDP)
     chNtpPacket[0] = 0b00011011;
 
     IPAddress ipNtpServer;
-    if (!GetWiFiHostByName(g_ptrSystem->GetDeviceConfig().GetNTPServer().c_str(), ipNtpServer))
-        ipNtpServer.fromString("216.239.35.12"); // Use Google Time as default. The pool.ntp.org servers (IPs) don't necessarily last very long.
+    if (!nd_network::GetWiFiHostByName(g_ptrSystem->GetDeviceConfig().GetNTPServer().c_str(), ipNtpServer))
+        // Use Google Time (time.google.com) as default. The pool.ntp.org
+        // servers (IPs) don't necessarily last very long.
+        ipNtpServer.fromString("216.239.35.12");
 
     // Send the ntp packet.
     while (pUDP->parsePacket() != 0)

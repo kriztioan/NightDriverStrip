@@ -396,7 +396,7 @@ class StatusEffect : public EffectWithId<StatusEffect>
 
         if (g_Values.UpdateStarted)
           color = CRGB::Purple;
-        else if (!IsWiFiConnected())
+        else if (!nd_network::IsWiFiConnected())
           color = CRGB::Red;
 #if ENABLE_NTP
         else if (!NTPTimeClient::HasClockBeenSet())

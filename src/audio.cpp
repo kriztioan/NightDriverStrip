@@ -52,31 +52,12 @@ void IRAM_ATTR AudioSamplerTaskEntry(void *)
     debugI(">>> Sampler Task Started");
 
     // Enable microphone input
-#if INPUT_PIN
-    if (INPUT_PIN >= 0)
-        pinMode(INPUT_PIN, INPUT);
-#endif
+    pinMode(INPUT_PIN, INPUT);
 
     g_Analyzer.SampleBufferInitI2S();
 
     for (;;)
     {
-        // If we have no valid local input pin and we're not on an M5 (which manages its own mic),
-        // we can't do local sampling. We still loop to allow for remote audio data, but
-        // we yield heavily to save CPU/heat if no remote audio is active.
-        #if !USE_M5 && !USE_I2S_AUDIO
-        #if INPUT_PIN
-        const bool bNoLocalMic = (INPUT_PIN < 0);
-        #else
-        const bool bNoLocalMic = true;
-        #endif
-        if (bNoLocalMic && (millis() - g_Analyzer._msLastRemoteAudio > AUDIO_PEAK_REMOTE_TIMEOUT))
-        {
-            delay(1000);
-            continue;
-        }
-        #endif
-
         auto lastFrame = millis();
 
         g_Analyzer.RunSamplerPass();
@@ -179,9 +160,9 @@ public:
 
         // Creating socket file descriptor
 
-        if ((_server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        if ((_server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
         {
-            debugE("socket error\n");
+            debugW("socket error\n");
             release();
             return false;
         }
@@ -194,13 +175,13 @@ public:
 
         if (bind(_server_fd, (struct sockaddr *)&_address, sizeof(_address)) < 0) // Bind socket to port
         {
-            debugE("bind failed\n");
+            debugW("bind failed\n");
             release();
             return false;
         }
         if (listen(_server_fd, 6) < 0) // Start listening for connections
         {
-            debugE("listen failed\n");
+            debugW("listen failed\n");
             release();
             return false;
         }
@@ -217,22 +198,19 @@ public:
         to.tv_usec = 0;
         if ((new_socket = accept(_server_fd, (struct sockaddr *)&_address, (socklen_t *)&addrlen)) < 0)
         {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-                return -1;
-            debugE("Error accepting VICE connection: %s", strerror(errno));
             return -1;
         }
         if (setsockopt(new_socket, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof(to)) < 0)
         {
-            debugE("Unable to set send timeout on socket!");
+            debugW("Unable to set send timeout on socket!");
             close(new_socket);
-            return -1;
+            return false;
         }
         if (setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to)) < 0)
         {
-            debugE("Unable to set receive timeout on socket!");
+            debugW("Unable to set receive timeout on socket!");
             close(new_socket);
-            return -1;
+            return false;
         }
         Serial.println("Accepted new VICE Client!");
         return new_socket;
@@ -244,7 +222,7 @@ public:
 
         if (cbSize != write(socket, pData, cbSize))
         {
-            debugE("Could not write to socket\n");
+            debugW("Could not write to socket\n");
             return false;
         }
         return true;

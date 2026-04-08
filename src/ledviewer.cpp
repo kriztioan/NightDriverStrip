@@ -67,7 +67,7 @@ bool LEDViewer::begin()
         release();
         return false;
     }
-    SetSocketBlockingEnabled(_server_fd, false);
+    nd_network::SetSocketBlockingEnabled(_server_fd, false);
 
     // When an error occurs and we close and reopen the port, we need to specify reuse flags
     // or it might be too soon to use the port again, since close doesn't actually close it

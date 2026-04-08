@@ -91,7 +91,7 @@ bool SocketServer::begin()
         return false;
     }
 
-    SetSocketBlockingEnabled(_server_fd, false);
+    nd_network::SetSocketBlockingEnabled(_server_fd, false);
 
     // When an error occurs, and we close and reopen the port, we need to specify reuse flags
     // or it might be too soon to use the port again, since close doesn't actually close it
@@ -480,7 +480,7 @@ bool SocketServer::ProcessIncomingConnectionsLoop()
                                         .oldestPacket = bufferManager.AgeOfOldestBuffer(),
                                         .newestPacket = bufferManager.AgeOfNewestBuffer(),
                                         .brightness   = g_Values.Brite,
-                                        .wifiSignal   = (float) GetWiFiRSSI(),
+                                        .wifiSignal   = (float) nd_network::GetWiFiRSSI(),
                                         .bufferSize   = bufferManager.BufferCount(),
                                         .bufferPos    = bufferManager.Depth(),
                                         .fpsDrawing   = g_Values.FPS,
