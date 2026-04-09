@@ -265,7 +265,8 @@ namespace nd_network
 
         #if INCOMING_WIFI_ENABLED
             g_ptrSystem->GetSocketServer().release();
-            g_ptrSystem->GetSocketServer().begin();
+            if (false == g_ptrSystem->GetSocketServer().begin())
+                throw std::runtime_error("Could not start socket server!");
         #endif
         #if ENABLE_OTA
             SetupOTA(String(WiFi.getHostname()));
