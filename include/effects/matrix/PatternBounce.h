@@ -129,7 +129,7 @@ public:
 
             if (boid.location.x < 0) boid.location.x = 0;
             if (boid.location.x >= MATRIX_WIDTH) boid.location.x = MATRIX_WIDTH - 1;
-            
+
             if (boid.location.y < 0) {
                 boid.location.y = 0;
                 boid.velocity.y *= -1.0;

@@ -159,7 +159,3 @@ void SetupOTA(const String &strHostname);
 void IRAM_ATTR RemoteLoopEntry(void *);
 String urlEncode(const String &str);
 
-// Legacy compatibility wrappers (Shims for main.cpp)
-inline String GetMacAddressPretty() { return nd_network::GetMacAddress(":"); }
-inline String GetMacAddress()       { return nd_network::GetMacAddress(""); }
-inline void   GetMacAddressRaw(uint8_t *mac) { esp_efuse_mac_get_default(mac); }
