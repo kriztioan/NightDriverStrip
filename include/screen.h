@@ -146,13 +146,13 @@ class Screen : public GFXBase
   public:
 
     inline float GetScreenFPS() const { return _screenFPS; }
-    
+
     inline void SetScreenFPS(float fps)
     {
         _screenFPS = fps;
         _fpsTouchedThisFrame = true;
     }
-    
+
     // TouchFPS
     // Marks the FPS value as intentionally managed this frame without changing it.
     // This prevents the fallback loop-based FPS from overwriting an effect-driven FPS
@@ -164,7 +164,7 @@ class Screen : public GFXBase
 
     inline void UpdateScreenFPSFromDelta(uint32_t dtMs)
     {
-        if (dtMs == 0) 
+        if (dtMs == 0)
             return;
         const float inst = 1000.0f / (float)dtMs;
         // Light smoothing to avoid flicker
@@ -173,7 +173,7 @@ class Screen : public GFXBase
     }
 
   private:
-  
+
   // Page registry and page count helpers
     static std::vector<std::unique_ptr<class Page>>& Pages();
     static int ActivePageCount();

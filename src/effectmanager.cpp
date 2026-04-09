@@ -927,7 +927,7 @@ void EffectManager::CheckEffectTimerExpired()
     if (IsIntervalEternal() && !GetCurrentEffect().HasMaximumEffectTime())
         return;
 
-    if (GetTimeUsedByCurrentEffect() >= GetEffectiveInterval()) 
+    if (GetTimeUsedByCurrentEffect() >= GetEffectiveInterval())
     {
         if (_clearTempEffectWhenExpired)
         {

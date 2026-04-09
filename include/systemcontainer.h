@@ -53,7 +53,8 @@ class Screen;
 class SocketServer;
 class WebSocketServer;
 class CWebServer;
-class NetworkReader;
+namespace nd_network { class NetworkReader; }
+using nd_network::NetworkReader;
 
 enum NetworkPort : int;
 
