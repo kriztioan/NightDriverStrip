@@ -54,7 +54,7 @@ void IRAM_ATTR AudioSamplerTaskEntry(void *)
     // Enable microphone input
     pinMode(INPUT_PIN, INPUT);
 
-    g_Analyzer.SampleBufferInitI2S();
+    g_Analyzer.InitAudioInput();
 
     for (;;)
     {

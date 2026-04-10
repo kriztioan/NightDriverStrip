@@ -36,9 +36,21 @@
 
 #include "globals.h"
 
+#include <Arduino.h>
 #include <arduinoFFT.h>
 #include <array>
 #include <memory>
+
+#include <esp_idf_version.h>
+#define IS_IDF5 (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0))
+
+#if IS_IDF5
+    #include <driver/i2s_std.h>
+    #include <esp_adc/adc_continuous.h>
+#else
+    #include <driver/adc.h>
+    #include <driver/i2s.h>
+#endif
 
 #ifndef SPECTRUM_BAND_SCALE_MEL
 #define SPECTRUM_BAND_SCALE_MEL 1
@@ -53,7 +65,8 @@
 // Defaults below start with Mesmerizer values; others can diverge over time.
 
 // You can adjust the amount of compression (which makes the bar)
-struct AudioInputParams {
+struct AudioInputParams
+{
     float windowPowerCorrection;  // Windowing power correction (Hann ~4.0)
     float energyNoiseAdapt;       // Noise floor rise rate when signal present
     float energyNoiseDecay;       // Noise floor decay factor when below floor
@@ -69,7 +82,8 @@ struct AudioInputParams {
 };
 
 // Mesmerizer (default) tuning
-inline constexpr AudioInputParams kParamsMesmerizer{
+inline constexpr AudioInputParams kParamsMesmerizer
+{
     4.0f,      // windowPowerCorrection
     0.02f,     // energyNoiseAdapt
     0.98f,     // energyNoiseDecay
@@ -88,7 +102,8 @@ inline constexpr AudioInputParams kParamsMesmerizer{
 inline constexpr AudioInputParams kParamsPCRemote = kParamsMesmerizer;
 
 // M5 variants use a higher postScale by default
-inline constexpr AudioInputParams kParamsM5{
+inline constexpr AudioInputParams kParamsM5
+{
     4.0f,      // windowPowerCorrection
     0.02f,     // energyNoiseAdapt
     0.98f,     // energyNoiseDecay
@@ -102,7 +117,8 @@ inline constexpr AudioInputParams kParamsM5{
     1000000,   // quietEnvFloorGate (cutoff gates all ssound when below this level)
     1000.0f    // liveAttackPerSec
 };
-inline constexpr AudioInputParams kParamsM5Plus2{
+inline constexpr AudioInputParams kParamsM5Plus2
+{
     4.0f,      // windowPowerCorrection
     0.02f,     // energyNoiseAdapt
     0.98f,     // energyNoiseDecay
@@ -118,7 +134,8 @@ inline constexpr AudioInputParams kParamsM5Plus2{
 };
 
 // I2S External microphones (INMP441, etc.) use higher postScale and less aggressive gating
-inline constexpr AudioInputParams kParamsI2SExternal{
+inline constexpr AudioInputParams kParamsI2SExternal
+{
     4.0f,           // windowPowerCorrection (increased from 4.0f for more gain)
     0.02f,          // energyNoiseAdapt (slower noise adaptation)
     0.98f,          // energyNoiseDecay (slower noise floor decay)
@@ -171,19 +188,35 @@ class ISoundAnalyzer
 {
   public:
     virtual ~ISoundAnalyzer() = default;
-    virtual float VURatio() const = 0;
-    virtual float VURatioFade() const = 0;
-    virtual float VU() const = 0;
-    virtual float PeakVU() const = 0;
-    virtual float MinVU() const = 0;
+
+    // --- Core Processing ---
+    virtual void RunSamplerPass() = 0;
+    virtual void SimulateBeatPass() = 0;
+    virtual void SetPeakDecayRates(float r1, float r2) = 0;
+
+    // --- Telemetry & Status ---
     virtual int AudioFPS() const = 0;
     virtual int SerialFPS() const = 0;
     virtual bool IsRemoteAudioActive() const = 0;
+
+    // --- VU Metrics ---
+    virtual float VU() const = 0;
+    virtual float VURatio() const = 0;
+    virtual float VURatioFade() const = 0;
+    virtual float PeakVU() const = 0;
+    virtual float MinVU() const = 0;
+
+    // --- Spectral Data (Bands) ---
     virtual const PeakData & Peaks() const = 0;
-    virtual float Peak2Decay(int band) const = 0;
     virtual float Peak1Decay(int band) const = 0;
+    virtual float Peak2Decay(int band) const = 0;
     virtual unsigned long LastPeak1Time(int band) const = 0;
-    virtual void SetPeakDecayRates(float r1, float r2) = 0;
+
+    // --- Simulation & Testing ---
+    virtual void SetSimulateBeat(bool) = 0;
+    virtual void SetSimulateBPM(int) = 0;
+    virtual bool GetSimulateBeat() const = 0;
+    virtual int GetSimulateBPM() const = 0;
 };
 
 #if !ENABLE_AUDIO
@@ -200,50 +233,81 @@ class SoundAnalyzer : public ISoundAnalyzer // Non-audio case stub
     {
         return 0.0f;
     }
+
     float VURatioFade() const override
     {
         return 0.0f;
     }
+
     float VU() const override
     {
         return 0.0f;
     }
+
     float PeakVU() const override
     {
         return 0.0f;
     }
+
     float MinVU() const override
     {
         return 0.0f;
     }
+
     int AudioFPS() const override
     {
         return 0;
     }
+
     int SerialFPS() const override
     {
         return 0;
     }
-    bool IsRemoteAudioActive() const override { return false; }
+
+    bool IsRemoteAudioActive() const override
+    {
+        return false;
+    }
+
     const PeakData &Peaks() const override
     {
         return _emptyPeaks;
     }
+
     float Peak2Decay(int) const override
     {
         return 0.0f;
     }
+
     float Peak1Decay(int) const override
     {
         return 0.0f;
     }
+
     unsigned long LastPeak1Time(int) const override
     {
         return 0;
     }
+
     void SetPeakDecayRates(float, float) override
     {
     }
+
+    bool GetSimulateBeat() const override
+    {
+		return false;
+	}
+
+    int GetSimulateBPM() const override
+	{
+		return 0;
+	}
+
+    void SetSimulateBeat(bool) override {}
+    void SetSimulateBPM(int) override {}
+    void RunSamplerPass() override {}
+    void SimulateBeatPass() override {}
+
 };
 
 #else // Audio case
@@ -251,20 +315,14 @@ class SoundAnalyzer : public ISoundAnalyzer // Non-audio case stub
 void AudioSamplerTaskEntry(void *);
 void AudioSerialTaskEntry(void *);
 
-// SoundAnalyzer
+// SoundAnalyzerBase
 //
-// The SoundAnalyzer class uses I2S to read samples from the microphone and then runs an FFT on the
-// results to generate the peaks in each band, as well as tracking an overall VU and VU ratio, the
-// latter being the ratio of the current VU to the trailing min and max VU.
+// Non-template base class containing hardware-specific logic and shared state
+// that does not depend on AudioInputParams tuning.
 
-template<const AudioInputParams& Params>
-class SoundAnalyzer : public ISoundAnalyzer
+class SoundAnalyzerBase : public ISoundAnalyzer
 {
   public:
-    // Give internal audio task functions access to private members
-    friend void AudioSamplerTaskEntry(void *);
-    friend void AudioSerialTaskEntry(void *);
-
     // I'm old enough I can only hear up to about 12000Hz, but feel free to adjust.  Remember from
     // school that you need to sample at double the frequency you want to process, so 24000 samples is 12000Hz
 
@@ -272,112 +330,16 @@ class SoundAnalyzer : public ISoundAnalyzer
     static constexpr size_t LOWEST_FREQ = 100;
     static constexpr size_t HIGHEST_FREQ = SAMPLING_FREQUENCY / 2;
 
-    float   _oldVU;                     // Old VU value for damping
-    float   _oldPeakVU;                 // Old peak VU value for damping
-    float   _oldMinVU;                  // Old min VU value for damping
-    PeakData _vPeaks{};    // Normalized band energies 0..1
-    PeakData _livePeaks{}; // Attack-limited display peaks per band
-    std::array<int, NUM_BANDS> _bandBinStart{};
-    std::array<int, NUM_BANDS> _bandBinEnd{};
-    float   _energyMaxEnv = 0.01f;        // adaptive envelope for autoscaling (start low for fast adaptation)
-    std::array<float, NUM_BANDS> _noiseFloor{}; // adaptive per-band noise floor
-    std::array<float, NUM_BANDS> _rawPrev{};    // previous raw (noise-subtracted) power for smoothing
+    SoundAnalyzerBase();
+    virtual ~SoundAnalyzerBase();
 
-    // Peak decay internals (private)
-    std::array<unsigned long, NUM_BANDS> _lastPeak1Time{};
-    std::array<float, NUM_BANDS> _peak1Decay{};
-    std::array<float, NUM_BANDS> _peak2Decay{};
-    float _peak1DecayRate = 1.25f;
-    float _peak2DecayRate = 1.25f;
-
-    // Compile-time microphone parameters - bind to template param by reference
-    static constexpr const AudioInputParams& _params = Params;
-
-    // Energy spectrum processing (implemented inline below)
-    //
-    // Calculate a logarithmic scale for the bands like you would find on a graphic equalizer display
-    //
-
-  private:
-    float _VURatio = 1.0f;
-    float _VURatioFade = 1.0f;
-    float _VU = 0.0f;
-    float _PeakVU = 0.0f;
-    float _MinVU = 0.0f;
-    int _AudioFPS = 0;
-    int _serialFPS = 0;
-    uint _msLastRemoteAudio = 0;
-
-    static constexpr int kBandOffset = 2; // number of lowest source bands to skip in layout (skip bins 0,1,2)
-    std::array<float, MAX_SAMPLES> _vReal{};
-    std::array<float, MAX_SAMPLES> _vImaginary{};
-    std::unique_ptr<int16_t[]> ptrSampleBuffer; // sample buffer storage
-    PeakData _Peaks; // cached last normalized peaks (moved earlier for inline method visibility)
-
-    // The FFT object is now a member variable to avoid ctor/dtor overhead per frame.
-    // Declaration order ensures _vReal and _vImaginary address are stable when _FFT is initialized.
-    ArduinoFFT<float> _FFT;
-
-    void Reset();
-    void FFT();
-    void SampleAudio();
-    void UpdateVU(float newval);
-    void ComputeBandLayout();
-    const PeakData & ProcessPeaksEnergy();
-
-  public:
-    // Construct analyzer, allocate buffers (PSRAM-preferred), set initial state.
-    // Throws std::runtime_error on allocation failure. Computes band layout once.
-    SoundAnalyzer();
-
-    // Free any heap/PSRAM buffers allocated by the constructor.
-    // Safe to call at shutdown/reset.
-    ~SoundAnalyzer();
-
-    // Current beat/level ratio value used by visual effects.
-    // Typically maintained by higher-level audio logic.
-    // Range ~[0..something], consumer-specific.
-
-    float VURatio() const override
-    {
-        return _VURatio;
-    }
-
-    // Smoothed/decayed version of VURatio for more graceful visuals.
-    // Use when you want beat emphasis without sharp jumps.
-
-    float VURatioFade() const override
-    {
-        return _VURatioFade;
-    }
-
-    // Average normalized energy this frame (0..1 after gating/compression).
-    // Updated in ProcessPeaksEnergy()/SetPeakDataFromRemote via UpdateVU().
-
-    float VU() const override
-    {
-        return _VU;
-    }
-
-    // Highest recent VU observed (peak hold with damping).
-    // Useful for setting adaptive effect ceilings.
-
-    float PeakVU() const override
-    {
-        return _PeakVU;
-    }
-
-    // Lowest recent VU observed (floor with damping).
-    // Useful as denominator clamps for normalized ratios.
-
-    float MinVU() const override
-    {
-        return _MinVU;
-    }
+    void InitAudioInput();
+    void RunSamplerPass() override;
+    void SimulateBeatPass() override;
+    void SetPeakDecayRates(float r1, float r2) override;
 
     // Measured audio processing frames-per-second.
     // For diagnostics/telemetry; not critical to effects logic.
-
     int AudioFPS() const override
     {
         return _AudioFPS;
@@ -385,7 +347,6 @@ class SoundAnalyzer : public ISoundAnalyzer
 
     // Measured serial streaming FPS (if enabled).
     // For diagnostics; may be zero if not used.
-
     int SerialFPS() const override
     {
         return _serialFPS;
@@ -393,47 +354,98 @@ class SoundAnalyzer : public ISoundAnalyzer
 
     // Indicates whether peaks came from local mic or remote source.
     // Effects may choose to show status based on this.
-
     // True if we used remote peaks recently
-    inline bool IsRemoteAudioActive() const override { return millis() - _msLastRemoteAudio <= AUDIO_PEAK_REMOTE_TIMEOUT; }
+    bool IsRemoteAudioActive() const override
+    {
+        return millis() - _msLastRemoteAudio <= AUDIO_PEAK_REMOTE_TIMEOUT;
+    }
+
+    // Average normalized energy this frame (0..1 after gating/compression).
+    // Updated in ProcessPeaksEnergy()/SetPeakDataFromRemote via UpdateVU().
+    float VU() const override
+    {
+        return _VU;
+    }
+
+    // Current beat/level ratio value used by visual effects.
+    // Typically maintained by higher-level audio logic.
+    // Range ~[0..something], consumer-specific.
+    float VURatio() const override
+    {
+        return _VURatio;
+    }
+
+    // Smoothed/decayed version of VURatio for more graceful visuals.
+    // Use when you want beat emphasis without sharp jumps.
+    float VURatioFade() const override
+    {
+        return _VURatioFade;
+    }
+
+    // Highest recent VU observed (peak hold with damping).
+    // Useful for setting adaptive effect ceilings.
+    float PeakVU() const override
+    {
+        return _PeakVU;
+    }
+
+    // Lowest recent VU observed (floor with damping).
+    // Useful as denominator clamps for normalized ratios.
+    float MinVU() const override
+    {
+        return _MinVU;
+    }
 
     // Returns the latest per-band normalized peaks (0..1).
     // Pointer remains valid until next ProcessPeaksEnergy/SetPeakDataFromRemote.
-
-    const PeakData &Peaks() const override
+    const PeakData & Peaks() const override
     {
         return _Peaks;
     }
 
-    // Returns the slower-decay overlay level for the given band (0..1).
+    // Returns the faster-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
-
-    float Peak2Decay(int band) const override
-    {
-        return (band >= 0 && band < NUM_BANDS) ? _peak2Decay[band] : 0.0f;
-    }
-
     float Peak1Decay(int band) const override
     {
         return (band >= 0 && band < NUM_BANDS) ? _peak1Decay[band] : 0.0f;
     }
 
+    // Returns the slower-decay overlay level for the given band (0..1).
+    // Used by some visuals to draw trailing bars/dots.
+    float Peak2Decay(int band) const override
+    {
+        return (band >= 0 && band < NUM_BANDS) ? _peak2Decay[band] : 0.0f;
+    }
+
+    // Returns the timestamp of the last time the primary peak for this band was updated.
     unsigned long LastPeak1Time(int band) const override
     {
         return (band >= 0 && band < NUM_BANDS) ? _lastPeak1Time[band] : 0;
     }
 
-    // Configure how quickly the two decay overlays drop over time.
-    // r1 = fast track, r2 = slow track; higher = faster decay.
+    void SetSimulateBeat(bool b) override
+    {
+        _simulateBeat = b;
+    }
+    void SetSimulateBPM(int bpm) override
+    {
+        _simBPM = bpm;
+    }
+    bool GetSimulateBeat() const override
+    {
+        return _simulateBeat;
+    }
+    int GetSimulateBPM() const override
+    {
+        return _simBPM;
+    }
 
-    void SetPeakDecayRates(float r1, float r2) override;
-
-    // These functions allow access to the last-acquired sample buffer and its size so that
-    // effects can draw the waveform or do other things with the raw audio data
+    void DecayPeaks();
+    void UpdatePeakData();
+    void SetPeakDataFromRemote(const PeakData &peaks);
 
     // Return pointer to last captured raw samples (int16).
     // Valid until the next FillBufferI2S() call.
-
     const int16_t *GetSampleBuffer() const
     {
         return ptrSampleBuffer.get();
@@ -441,8 +453,7 @@ class SoundAnalyzer : public ISoundAnalyzer
 
     // Return count of samples in the sample buffer (MAX_SAMPLES).
     // Pairs with GetSampleBuffer() when drawing waveforms.
-
-    const size_t GetSampleBufferSize() const
+    size_t GetSampleBufferSize() const
     {
         return MAX_SAMPLES;
     }
@@ -453,21 +464,114 @@ class SoundAnalyzer : public ISoundAnalyzer
     // by the current VURatioFade amount.  The amt amount is the amount of your factor that should be
     // made up of the VURatioFade multiplier. So passing a 0.75 is a lot of beat enhancement, whereas
     // 0.25 is a little bit.
-
+    //
     // Compute a blend factor using VURatioFade to "pulse" visuals.
     // amt in [0..1] controls how strongly the ratio influences the result.
-
     float BeatEnhance(float amt);
 
-    void SampleBufferInitI2S();
-    void DecayPeaks();
-    void UpdatePeakData();
-    void SetPeakDataFromRemote(const PeakData &peaks);
-    void RunSamplerPass();
+  protected:
+    // Give internal audio task functions access to private members
+    friend void AudioSamplerTaskEntry(void *);
+    friend void AudioSerialTaskEntry(void *);
 
-#if ENABLE_AUDIO_DEBUG
-    void DumpBandLayout() const;
+    float _VURatio = 1.0f;
+    float _VURatioFade = 1.0f;
+    float _VU = 0.0f;
+    float _PeakVU = 0.0f;
+    float _MinVU = 0.0f;
+    int _AudioFPS = 0;
+    int _serialFPS = 0;
+    uint _msLastRemoteAudio = 0;
+
+    float _oldVU = 0.0f;               // Old VU value for damping
+    float _oldPeakVU = 0.0f;           // Old peak VU value for damping
+    float _oldMinVU = 0.0f;            // Old min VU value for damping
+
+    PeakData _vPeaks{};                // Normalized band energies 0..1
+    PeakData _livePeaks{};             // Attack-limited display peaks per band
+    PeakData _Peaks{};                 // cached last normalized peaks
+    std::array<int, NUM_BANDS> _bandBinStart{};
+    std::array<int, NUM_BANDS> _bandBinEnd{};
+    float _energyMaxEnv = 0.01f;       // adaptive envelope for autoscaling (start low for fast adaptation)
+    std::array<float, NUM_BANDS> _noiseFloor{}; // adaptive per-band noise floor
+    std::array<float, NUM_BANDS> _rawPrev{};    // previous raw (noise-subtracted) power for smoothing
+
+    // --- Beat Simulation State ---
+    bool _simulateBeat = false;
+    int _simBPM = 120;
+
+    // --- Peak Decay State ---
+    // These track peaks over time with decay for visual effects
+    std::array<unsigned long, NUM_BANDS> _lastPeak1Time{};
+    std::array<float, NUM_BANDS> _peak1Decay{};
+    std::array<float, NUM_BANDS> _peak2Decay{};
+    float _peak1DecayRate = 1.25f;
+    float _peak2DecayRate = 1.25f;
+
+    static constexpr int kBandOffset = 2; // number of lowest source bands to skip in layout (skip bins 0,1,2)
+    std::array<float, MAX_SAMPLES> _vReal{};
+    std::array<float, MAX_SAMPLES> _vImaginary{};
+    std::unique_ptr<int16_t[]> ptrSampleBuffer; // sample buffer storage
+
+#if IS_IDF5
+    i2s_chan_handle_t _rx_handle = nullptr;
+    adc_continuous_handle_t _adc_handle = nullptr;
 #endif
+
+    // The FFT object is now a member variable to avoid ctor/dtor overhead per frame.
+    // Declaration order ensures _vReal and _vImaginary address are stable when _FFT is initialized.
+    ArduinoFFT<float> _FFT;
+
+    void Reset();
+    void FFT();
+    void SampleAudio();
+    void UpdateVU(float newval);
+    void ComputeBandLayout();
+
+    // Energy spectrum processing (implemented inline or in template)
+    //
+    // Calculate a logarithmic scale for the bands like you would find on a graphic equalizer display
+    virtual const PeakData & ProcessPeaksEnergy() = 0;
+
+    void InitM5();
+    void InitI2S_Modern();
+    void InitI2S_Legacy();
+    void InitADC_Modern();
+    void InitADC_Legacy();
+
+    size_t SampleM5();
+    size_t SampleI2S_Modern();
+    size_t SampleI2S_Legacy();
+    size_t SampleADC_Modern();
+    size_t SampleADC_Legacy();
+};
+
+// SoundAnalyzer
+//
+// The SoundAnalyzer class uses I2S to read samples from the microphone and then runs an FFT on the
+// results to generate the peaks in each band, as well as tracking an overall VU and VU ratio, the
+// latter being the ratio of the current VU to the trailing min and max VU.
+//
+// The template class handles the parameter-specific energy processing logic.
+
+template<const AudioInputParams& Params>
+class SoundAnalyzer : public SoundAnalyzerBase
+{
+  public:
+    // Compile-time microphone parameters - bind to template param by reference
+    static constexpr const AudioInputParams& _params = Params;
+
+    // Construct analyzer, allocate buffers (PSRAM-preferred), set initial state.
+    // Throws std::runtime_error on allocation failure. Computes band layout once.
+    SoundAnalyzer() : SoundAnalyzerBase()
+    {
+    }
+
+  protected:
+    // Energy spectrum processing (implemented in soundanalyzer.cpp)
+    //
+    // Processes the FFT results and extracts energy per frequency band, applying scaling and normalization.
+    const PeakData & ProcessPeaksEnergy() override;
 };
 
 #endif

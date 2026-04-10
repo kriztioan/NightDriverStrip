@@ -48,6 +48,7 @@
 #include "deviceconfig.h"
 #include "effectmanager.h"
 #include "ledstripeffect.h"
+#include "soundanalyzer.h"
 #include "systemcontainer.h"
 
 namespace DebugCLI
@@ -628,6 +629,18 @@ static const command core_commands[] = {
      }},
     {"ls", "Show filesytem directory", "NAME", DoDirectoryListing},                    // Function pointer
     {"effect", "[next|prev|name|index] Show/change current effect", "Effects.", DoEffectCommand}, // Function pointer
+    {"simbeat", "[on|off] [bpm] Simulate audio beat", "Simulate Beat:",
+     [](const cli_argv &argv) {
+        if (argv.size() > 1) {
+            if (StringCompareInsensitive(argv[1], "on")) g_Analyzer.SetSimulateBeat(true);
+            else if (StringCompareInsensitive(argv[1], "off")) g_Analyzer.SetSimulateBeat(false);
+            else if (isdigit(argv[1][0])) g_Analyzer.SetSimulateBPM(atoi(std::string(argv[1]).c_str()));
+        }
+        if (argv.size() > 2) {
+             g_Analyzer.SetSimulateBPM(atoi(std::string(argv[2]).c_str()));
+        }
+        cli_printf("SimBeat: %s  BPM: %d\n", g_Analyzer.GetSimulateBeat() ? "ON" : "OFF", g_Analyzer.GetSimulateBPM());
+     }},
     {"+", "Nudge brightness up", "Brightness +10", [](const cli_argv &) {
         int val = std::min(255, g_ptrSystem->GetDeviceConfig().GetBrightness() + 10);
         g_ptrSystem->GetDeviceConfig().SetBrightness(val);

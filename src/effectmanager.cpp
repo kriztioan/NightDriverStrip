@@ -27,13 +27,14 @@
 // History:     Sep-26-2023         Rbergen     Extracted from effects.cpp
 //---------------------------------------------------------------------------
 
+#include "globals.h"
+
 #include <algorithm>
 #include <FS.h>
 #include <limits>
 #include <set>
 #include <SPIFFS.h>
 
-#include "globals.h"
 #include "deviceconfig.h"
 #include "effectfactories.h"
 #include "effectmanager.h"
