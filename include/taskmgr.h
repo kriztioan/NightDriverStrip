@@ -152,7 +152,6 @@ void ScreenUpdateLoopEntry(void *);
 void AudioSerialTaskEntry(void *);
 void DrawLoopTaskEntry(void *);
 void AudioSamplerTaskEntry(void *);
-void NetworkHandlingLoopEntry(void *);
 void DebugLoopTaskEntry(void *);
 void SocketServerTaskEntry(void *);
 void RemoteLoopEntry(void *);

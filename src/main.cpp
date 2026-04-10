@@ -373,7 +373,7 @@ void setup()
             throw std::runtime_error("Error initializing ESP-NOW");
         // Register receive callback function
         esp_now_register_recv_cb(onReceiveESPNOW);
-        debugI("ESP-NOW initialized with MAC address: %s", nd_network::GetMacAddressPretty().c_str());
+        debugI("ESP-NOW initialized with MAC address: %s", nd_network::GetMacAddress(":").c_str());
     #endif
 
     #if ENABLE_WIFI
@@ -454,7 +454,7 @@ void setup()
 
         #if ENABLE_NTP
             // Register a network reader to update the device clock at regular intervals
-            networkReader.RegisterReader(UpdateNTPTime, (NTP_DELAY_ERROR_SECONDS) * 1000UL);
+            networkReader.RegisterReader(nd_network::UpdateNTPTime, (NTP_DELAY_ERROR_SECONDS) * 1000UL);
         #endif
     #endif
 
@@ -592,7 +592,7 @@ void setup()
 
     #if ENABLE_WIFI
         debugI("Making initial attempt to connect to WiFi.");
-        ConnectToWiFi(WiFi_ssid, WiFi_password);
+        nd_network::ConnectToWiFi(WiFi_ssid, WiFi_password);
     #endif
 
     // Start the network-dependent services.  These will be NOPs on a non-wifi build.
@@ -651,7 +651,7 @@ void loop()
             String strOutput;
 
             #if ENABLE_WIFI
-                strOutput += str_sprintf("WiFi: %s, MAC: %s, IP: %s ", nd_network::WLtoString(nd_network::GetWiFiStatus()), nd_network::GetMacAddressPretty().c_str(), nd_network::GetWiFiLocalIP().c_str());
+                strOutput += str_sprintf("WiFi: %s, MAC: %s, IP: %s ", nd_network::WLtoString(nd_network::GetWiFiStatus()), nd_network::GetMacAddress(":").c_str(), nd_network::GetWiFiLocalIP().c_str());
             #endif
 
             strOutput += str_sprintf("Mem: %zu, LargestBlk: %zu, PSRAM Free: %zu/%zu, ", (size_t)ESP.getFreeHeap(), (size_t)ESP.getMaxAllocHeap(), (size_t)ESP.getFreePsram(), (size_t)ESP.getPsramSize());

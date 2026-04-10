@@ -76,10 +76,10 @@ public:
         int retries = 0;
         while (total_sent < len) {
             // Write directly with MSG_DONTWAIT. This avoids the use of select() and FD_SET(),
-            // which can corrupt the stack in ESP-IDF if _fd >= FD_SETSIZE (default 64) due to 
+            // which can corrupt the stack in ESP-IDF if _fd >= FD_SETSIZE (default 64) due to
             // numerous open file/socket handles.
             int sent = send(_fd, data + total_sent, len - total_sent, MSG_DONTWAIT);
-            
+
             if (sent > 0) {
                 total_sent += sent;
                 retries = 0; // Reset retries on successful progress
@@ -96,7 +96,7 @@ public:
                 } else {
                     // Fatal socket error (broken pipe, reset, etc.). Stop writing.
                     // The main read loop will detect this on its next recv().
-                    return; 
+                    return;
                 }
             } else {
                 return; // sent == 0, peer closed

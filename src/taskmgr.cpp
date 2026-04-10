@@ -14,6 +14,7 @@
 
 #include "globals.h"
 #include "ledstripeffect.h"
+#include "nd_network.h"
 #include "taskmgr.h"
 
 #include <esp_task_wdt.h>

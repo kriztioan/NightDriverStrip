@@ -99,7 +99,7 @@ public:
 
         int startX = leftMargin < 0 ? -leftMargin : 0;
         int endX = std::min((int)qrcode.size, MATRIX_WIDTH - leftMargin);
-        
+
         int startY = topMargin < 0 ? -topMargin : 0;
         int endY = std::min((int)qrcode.size, MATRIX_HEIGHT - topMargin);
 
