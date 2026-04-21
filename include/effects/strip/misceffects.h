@@ -725,7 +725,7 @@ class OuterHexRingEffect : public EffectWithId<OuterHexRingEffect>
         fadeAllChannelsToBlackBy(75);
 
         CRGB color = ColorFromPalette(RainbowColors_p, indent*32 + colorOffset);
-        hg().fillHexRing(indent, color);
+        hg()->fillHexRing(indent, color);
     }
 };
 #endif // HEXAGON
