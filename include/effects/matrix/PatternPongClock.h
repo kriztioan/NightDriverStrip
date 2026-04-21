@@ -134,24 +134,24 @@ class PatternPongClock : public EffectWithId<PatternPongClock>
         const time_t ttime = time(0);
         const tm *local_time = localtime(&ttime);
 
-        g()->Clear();
+        g().Clear();
 
         // draw pitch centre line
         for (uint16_t y = 0; y < MATRIX_HEIGHT; y += 2)
-            g()->setPixel(MATRIX_WIDTH / 2, y, 0x6666);
+            g().setPixel(MATRIX_WIDTH / 2, y, 0x6666);
 
         // draw hh:mm separator colon that blinks once per second
 
         if (local_time->tm_sec % 2 == 0)
         {
-            g()->setPixel(MATRIX_WIDTH / 2, 4, RED16);
-            g()->setPixel(MATRIX_WIDTH / 2, 6, RED16);
+            g().setPixel(MATRIX_WIDTH / 2, 4, RED16);
+            g().setPixel(MATRIX_WIDTH / 2, 6, RED16);
         }
 
         // Render HH:MM using Adafruit_GFX font via GFXBase
-        g()->setFont(&Apple5x7);
-        g()->setTextWrap(false);
-        g()->setTextColor(WHITE16);
+        g().setFont(&Apple5x7);
+        g().setTextWrap(false);
+        g().setTextColor(WHITE16);
 
         // The compiler warns that with a nul terminator, 4 bytes could be needed; allocate 4
         char buffer[4];
@@ -161,18 +161,18 @@ class PatternPongClock : public EffectWithId<PatternPongClock>
 
         // Hours (left side)
         sprintf(buffer, "%2d", hours);
-        g()->getTextBounds(buffer, 0, 0, &bx, &by, &bw, &bh);
+        g().getTextBounds(buffer, 0, 0, &bx, &by, &bw, &bh);
         int16_t hoursX = (MATRIX_WIDTH / 2) - 2 - bw;
         int16_t baselineY = bh+2; // draw so the text's top is near y=0
-        g()->setCursor(hoursX, baselineY);
-        g()->print(buffer);
+        g().setCursor(hoursX, baselineY);
+        g().print(buffer);
 
         // Minutes (right side)
         sprintf(buffer, "%02d", mins);
-        g()->getTextBounds(buffer, 0, 0, &bx, &by, &bw, &bh);
+        g().getTextBounds(buffer, 0, 0, &bx, &by, &bw, &bh);
         int16_t minsX = (MATRIX_WIDTH / 2) + 2;
-        g()->setCursor(minsX, baselineY);
-        g()->print(buffer);
+        g().setCursor(minsX, baselineY);
+        g().print(buffer);
 
         // if restart flag is 1, set up a new game
         if (restart)
@@ -319,7 +319,7 @@ class PatternPongClock : public EffectWithId<PatternPongClock>
         }
 
         // draw bat 1
-        g()->fillRectangle(BAT1_X - 1, bat1_y, BAT1_X + 1, bat1_y + BAT_HEIGHT, CRGB::White);
+        g().fillRectangle(BAT1_X - 1, bat1_y, BAT1_X + 1, bat1_y + BAT_HEIGHT, CRGB::White);
 
         // move bat 2 towards target (don't go any further or bat will move off screen)
         // if bat y greater than target y move down until hit 0
@@ -336,7 +336,7 @@ class PatternPongClock : public EffectWithId<PatternPongClock>
             bat2_update = 1;
         }
 
-        g()->fillRectangle(BAT2_X + 1, bat2_y, BAT2_X + 3, bat2_y + BAT_HEIGHT, CRGB::White);
+        g().fillRectangle(BAT2_X + 1, bat2_y, BAT2_X + 3, bat2_y + BAT_HEIGHT, CRGB::White);
 
         // update the ball position using the velocity
         ballpos_x = ballpos_x + ballvel_x;
@@ -472,8 +472,8 @@ class PatternPongClock : public EffectWithId<PatternPongClock>
         uint8_t plot_x = (int)(ballpos_x + 0.5f);
         uint8_t plot_y = (int)(ballpos_y + 0.5f);
 
-        if (g()->isValidPixel(plot_x, plot_y))
-            g()->setPixel(plot_x, plot_y, WHITE16);
+        if (g().isValidPixel(plot_x, plot_y))
+            g().setPixel(plot_x, plot_y, WHITE16);
 
         // check if a bat missed the ball. if it did, reset the game.
         if (ballpos_x < 0 || ballpos_x > MATRIX_WIDTH)

@@ -221,18 +221,18 @@ class PatternSubscribers : public EffectWithId<PatternSubscribers>
 
     void Draw() override
     {
-        g()->Clear(backgroundColor);
+        g().Clear(backgroundColor);
 
         // Draw a border around the edge of the panel
-        g()->drawRect(0, 1, MATRIX_WIDTH - 1, MATRIX_HEIGHT - 2, g()->to16bit(borderColor));
+        g().drawRect(0, 1, MATRIX_WIDTH - 1, MATRIX_HEIGHT - 2, g().to16bit(borderColor));
 
         // Use the centralized Apple5x7 Adafruit font
-        g()->setFont(&Apple5x7);
+        g().setFont(&Apple5x7);
 
         // Draw the channel name
-        g()->setTextColor(g()->to16bit(CRGB::White));
-        g()->setCursor(2, 10);
-        g()->print(youtubeChannelName.c_str());
+        g().setTextColor(g().to16bit(CRGB::White));
+        g().setCursor(2, 10);
+        g().print(youtubeChannelName.c_str());
 
         // Start in the middle of the panel and then back up a half a row to center vertically,
         // then back up left one half a char for every 10s digit in the subscriber count.  This
@@ -245,7 +245,7 @@ class PatternSubscribers : public EffectWithId<PatternSubscribers>
         // Use getTextBounds to get the actual dimensions of the subscriber text
         int16_t x1, y1;
         uint16_t textWidth, textHeight;
-        g()->getTextBounds(pszText, 0, 0, &x1, &y1, &textWidth, &textHeight);
+        g().getTextBounds(pszText, 0, 0, &x1, &y1, &textWidth, &textHeight);
 
         // Center the text horizontally and vertically on the screen
         // Note: y1 is typically negative (above baseline), so we need to account for that
@@ -253,15 +253,15 @@ class PatternSubscribers : public EffectWithId<PatternSubscribers>
         int y = (MATRIX_HEIGHT / 2) - (textHeight / 2) - y1;  // Properly center vertically
 
         // Draw shadow effect by printing in black at offset positions, then white on top
-        g()->setTextColor(g()->to16bit(CRGB::Black));
-        g()->setCursor(x-1, y);   g()->print(pszText);
-        g()->setCursor(x+1, y);   g()->print(pszText);
-        g()->setCursor(x, y-1);   g()->print(pszText);
-        g()->setCursor(x, y+1);   g()->print(pszText);
+        g().setTextColor(g().to16bit(CRGB::Black));
+        g().setCursor(x-1, y);   g().print(pszText);
+        g().setCursor(x+1, y);   g().print(pszText);
+        g().setCursor(x, y-1);   g().print(pszText);
+        g().setCursor(x, y+1);   g().print(pszText);
 
-        g()->setTextColor(g()->to16bit(CRGB::White));
-        g()->setCursor(x, y);
-        g()->print(pszText);
+        g().setTextColor(g().to16bit(CRGB::White));
+        g().setCursor(x, y);
+        g().print(pszText);
     }
 
     // Extension override to serialize our settings on top of those from LEDStripEffect

@@ -32,7 +32,7 @@ class PatternSMMetaBalls : public EffectWithId<PatternSMMetaBalls>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
@@ -52,11 +52,11 @@ class PatternSMMetaBalls : public EffectWithId<PatternSMMetaBalls>
                     sum = qadd8(sum, dist(i, j, bx[a], by[a]));
                 }
                 // HeatColors2_p peaks with blue instead of white and looks nicer for this effect
-                g()->leds[XY(i, j)] = ColorFromPalette(HeatColors2_p, sum + 220, 254, LINEARBLEND);
+                g().leds[XY(i, j)] = ColorFromPalette(HeatColors2_p, sum + 220, 254, LINEARBLEND);
             }
         }
 
-        g()->blur2d(g()->leds, MATRIX_WIDTH - 1, 0, MATRIX_HEIGHT - 1, 0, 32);
+        g().blur2d(g().leds, MATRIX_WIDTH - 1, 0, MATRIX_HEIGHT - 1, 0, 32);
         fadeAllChannelsToBlackBy(10);
     }
 };

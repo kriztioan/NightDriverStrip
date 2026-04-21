@@ -132,9 +132,14 @@ bool LEDStripEffect::Init(std::vector<std::shared_ptr<GFXBase>>& gfx)
 }
 
 // Must provide at least one drawing instance, like the first matrix or strip we are drawing on
-std::shared_ptr<GFXBase> LEDStripEffect::g(size_t channel) const
+GFXBase& LEDStripEffect::g(size_t channel)
 {
-    return _GFX[channel];
+    return *_GFX[channel];
+}
+
+const GFXBase& LEDStripEffect::g(size_t channel) const
+{
+    return *_GFX[channel];
 }
 
 #if HEXAGON

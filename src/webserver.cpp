@@ -565,7 +565,7 @@ void CWebServer::SetSettings(AsyncWebServerRequest * pRequest)
 
 bool CWebServer::CheckAndGetSettingsEffect(AsyncWebServerRequest * pRequest, std::shared_ptr<LEDStripEffect> & effect, bool post)
 {
-    auto effectsList = g_ptrSystem->GetEffectManager().EffectsList();
+    const auto& effectsList = g_ptrSystem->GetEffectManager().EffectsList();
     auto effectIndex = GetEffectIndexFromParam(pRequest, post);
 
     if (effectIndex < 0 || effectIndex >= effectsList.size())

@@ -101,7 +101,7 @@ public:
 
     void Draw() override
     {
-        auto graphics = g();
+        auto& graphics = g();
 
         int n = 0;
 
@@ -111,9 +111,9 @@ public:
                     n = quadwave8(x * 2 + theta) / scale;
                     if (n < MATRIX_HEIGHT)
                     {
-                        graphics->setPixel(x, n, graphics->ColorFromCurrentPalette(x + hue));
+                        graphics.setPixel(x, n, graphics.ColorFromCurrentPalette(x + hue));
                         if (waveCount == 2)
-                            graphics->setPixel(x, maxY - n, graphics->ColorFromCurrentPalette(x + hue));
+                            graphics.setPixel(x, maxY - n, graphics.ColorFromCurrentPalette(x + hue));
                     }
                 }
                 break;
@@ -123,9 +123,9 @@ public:
                     n = quadwave8(y * 2 + theta) / scale;
                     if (n < MATRIX_WIDTH)
                     {
-                        graphics->setPixel(n, y, graphics->ColorFromCurrentPalette(y + hue));
+                        graphics.setPixel(n, y, graphics.ColorFromCurrentPalette(y + hue));
                         if (waveCount == 2)
-                            graphics->setPixel(maxX - n, y, graphics->ColorFromCurrentPalette(y + hue));
+                            graphics.setPixel(maxX - n, y, graphics.ColorFromCurrentPalette(y + hue));
                     }
                 }
                 break;
@@ -135,9 +135,9 @@ public:
                     n = quadwave8(x * 2 - theta) / scale;
                     if (n < MATRIX_HEIGHT)
                     {
-                        graphics->setPixel(x, n, graphics->ColorFromCurrentPalette(x + hue));
+                        graphics.setPixel(x, n, graphics.ColorFromCurrentPalette(x + hue));
                         if (waveCount == 2)
-                            graphics->setPixel(x, maxY - n, graphics->ColorFromCurrentPalette(x + hue));
+                            graphics.setPixel(x, maxY - n, graphics.ColorFromCurrentPalette(x + hue));
                     }
                 }
                 break;
@@ -147,15 +147,15 @@ public:
                     n = quadwave8(y * 2 - theta) / scale;
                     if (n < MATRIX_WIDTH)
                     {
-                        graphics->setPixel(n, y, graphics->ColorFromCurrentPalette(y + hue));
+                        graphics.setPixel(n, y, graphics.ColorFromCurrentPalette(y + hue));
                         if (waveCount == 2)
-                            graphics->setPixel(maxX - n, y, graphics->ColorFromCurrentPalette(y + hue));
+                            graphics.setPixel(maxX - n, y, graphics.ColorFromCurrentPalette(y + hue));
                     }
                 }
                 break;
         }
 
-        graphics->DimAll(254);
+        graphics.DimAll(254);
 
         if (thetaUpdate >= thetaUpdateFrequency) {
             thetaUpdate = 0;

@@ -70,17 +70,17 @@ public:
 
   void Draw() override
   {
-    auto graphics = (GFXBase *)_GFX[0].get();
-    graphics->DimAll(254);
+    auto& graphics = g();
+    graphics.DimAll(254);
 
     for (int offset = 0; offset < MATRIX_CENTER_X; offset++)
     {
       uint8_t hue = 255 - (offset * 16 + hueoffset);
-      CRGB color = graphics->ColorFromCurrentPalette(hue);
-      uint8_t x = graphics->mapcos8(theta, offset, (MATRIX_WIDTH - 1) - offset);
-      uint8_t y = graphics->mapsin8(theta, offset, (MATRIX_HEIGHT - 1) - offset);
-      uint16_t xzy = graphics->xy(x, y);
-      graphics->leds[xzy] = color;
+      CRGB color = graphics.ColorFromCurrentPalette(hue);
+      uint8_t x = graphics.mapcos8(theta, offset, (MATRIX_WIDTH - 1) - offset);
+      uint8_t y = graphics.mapsin8(theta, offset, (MATRIX_HEIGHT - 1) - offset);
+      uint16_t xzy = graphics.xy(x, y);
+      graphics.leds[xzy] = color;
 
       EVERY_N_MILLIS(25)
       {

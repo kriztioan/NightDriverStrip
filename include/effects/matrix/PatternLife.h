@@ -259,9 +259,9 @@ public:
         for (int i = 0; i < MATRIX_WIDTH; i++) {
             for (int j = 0; j < MATRIX_HEIGHT; j++) {
                 if (world[i][j].brightness > 0)
-                    g()->leds[XY(i, j)] += g()->ColorFromCurrentPalette(world[i][j].hue * 4, world[i][j].brightness);
+                    g().leds[XY(i, j)] += g().ColorFromCurrentPalette(world[i][j].hue * 4, world[i][j].brightness);
                 else
-                    g()->leds[XY(i, j)] = CRGB::Black;
+                    g().leds[XY(i, j)] = CRGB::Black;
             }
         }
 
@@ -293,9 +293,9 @@ public:
             if (elapsed < flashTime)
             {
                 auto whiteColor = CRGB(0x60, 0x00, 0x00);
-                g()->fillRectangle(0, 0, MATRIX_WIDTH, MATRIX_HEIGHT, whiteColor);
+                g().fillRectangle(0, 0, MATRIX_WIDTH, MATRIX_HEIGHT, whiteColor);
             }
-            g()->DimAll(255 - 255*elapsed/resetTime);
+            g().DimAll(255 - 255*elapsed/resetTime);
 
             for (int x = 0; x < MATRIX_WIDTH; x++)
                 for (int y = 0; y < MATRIX_HEIGHT; y++)

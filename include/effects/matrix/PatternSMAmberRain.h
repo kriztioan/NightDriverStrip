@@ -77,8 +77,8 @@ class PatternSMAmberRain : public EffectWithId<PatternSMAmberRain>
                     brightness = 255.0 * fraction;
                 }
 
-                if (g()->isValidPixel(index))
-                    g()->leds[index] += CHSV(hue, 255, brightness);
+                if (g().isValidPixel(index))
+                    g().leds[index] += CHSV(hue, 255, brightness);
             }
         }
     }
@@ -90,7 +90,7 @@ class PatternSMAmberRain : public EffectWithId<PatternSMAmberRain>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
         for (int i = 0; i < NUMBER_OF_CIRCLES; i++)
         {
             circles[i].reset();

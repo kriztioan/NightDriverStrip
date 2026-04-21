@@ -185,7 +185,12 @@ public:
     virtual ~GFXBase() override;
 
     #if USE_NOISE
-    Noise &GetNoise() const
+    Noise &GetNoise()
+    {
+        return *_ptrNoise;
+    }
+
+    const Noise &GetNoise() const
     {
         return *_ptrNoise;
     }

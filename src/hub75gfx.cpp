@@ -73,7 +73,7 @@ void HUB75GFX::InitializeHardware(std::vector<std::shared_ptr<GFXBase>>& devices
     backgroundLayer.enableColorCorrection(true);
 
     // Starting an effect might need to draw, so we need to set the leds up before doing so
-    std::static_pointer_cast<HUB75GFX>(devices[0])->setLeds(GetMatrixBackBuffer());
+    static_cast<HUB75GFX&>(*devices[0]).setLeds(GetMatrixBackBuffer());
 }
 
 void HUB75GFX::SetBrightness(byte amount)
@@ -241,22 +241,22 @@ void HUB75GFX::PrepareFrame()
 
     EVERY_N_MILLIS(MILLIS_PER_FRAME)
     {
-        auto graphics = g_ptrSystem->GetEffectManager().g();
+        auto& graphics = g_ptrSystem->GetEffectManager().g();
 
         matrix.setCalcRefreshRateDivider(MATRIX_CALC_DIVIDER);
         matrix.setRefreshRate(MATRIX_REFRESH_RATE);
 
-        auto pMatrix = std::static_pointer_cast<HUB75GFX>(g_ptrSystem->GetEffectManager().GetBaseGraphics()[0]);
-        pMatrix->setLeds(GetMatrixBackBuffer());
+        auto& pMatrix = static_cast<HUB75GFX&>(graphics);
+        pMatrix.setLeds(GetMatrixBackBuffer());
 
         // We set ourselves to the lower of the fader value or the brightness value,
         // so that we can fade between effects without having to change the brightness
         // setting.
 
-        if (g_ptrSystem->GetEffectManager().GetCurrentEffect().ShouldShowTitle() && pMatrix->GetCaptionTransparency() > 0.00)
+        if (g_ptrSystem->GetEffectManager().GetCurrentEffect().ShouldShowTitle() && pMatrix.GetCaptionTransparency() > 0.00)
         {
             titleLayer.setFont(font3x5);
-            uint8_t brite = (uint8_t)(pMatrix->GetCaptionTransparency() * 255.0);
+            uint8_t brite = (uint8_t)(pMatrix.GetCaptionTransparency() * 255.0);
             debugV("Caption: %d", brite);
 
             rgb24 chromaKeyColor = rgb24(255, 0, 255);
@@ -269,7 +269,7 @@ void HUB75GFX::PrepareFrame()
             const size_t kCharWidth = 6;
             const size_t kCharHeight = 10;
 
-            const auto caption = pMatrix->GetCaption();
+            const auto caption = pMatrix.GetCaption();
 
             int y = MATRIX_HEIGHT - 2 - kCharHeight;
             int w = caption.length() * kCharWidth;
@@ -328,12 +328,12 @@ void HUB75GFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsDr
     if ((localPixelsDrawn + wifiPixelsDrawn) == 0)
         return;
 
-    auto pMatrix = std::static_pointer_cast<HUB75GFX>(g_ptrSystem->GetEffectManager().g());
+    auto& pMatrix = static_cast<HUB75GFX&>(g_ptrSystem->GetEffectManager().g());
 
     constexpr auto kCaptionPower = 500;                                                 // A guess as the power the caption will consume
-    g_Values.MatrixPowerMilliwatts = pMatrix->EstimatePowerDraw();                             // What our drawn pixels will consume
+    g_Values.MatrixPowerMilliwatts = pMatrix.EstimatePowerDraw();                             // What our drawn pixels will consume
 
-    if (pMatrix->GetCaptionTransparency() > 0)
+    if (pMatrix.GetCaptionTransparency() > 0)
         g_Values.MatrixPowerMilliwatts += kCaptionPower;
 
     const double kMaxPower = g_ptrSystem->GetDeviceConfig().GetPowerLimit();
@@ -356,7 +356,7 @@ void HUB75GFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsDr
     auto targetBrightness = min({ g_ptrSystem->GetDeviceConfig().GetBrightness(), g_Values.Fader, g_Values.MatrixScaledBrightness });
 
     debugV("MW: %lu, Setting Scaled Brightness to: %lu", (unsigned long)g_Values.MatrixPowerMilliwatts, (unsigned long)targetBrightness);
-    pMatrix->SetBrightness(targetBrightness);
+    pMatrix.SetBrightness(targetBrightness);
 
     #if SHOW_FPS_ON_MATRIX
         // Display status on bottom of matrix in format FPS: 00 CPU0: 000 CPU1: 000 Aud: 00
@@ -368,7 +368,7 @@ void HUB75GFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsDr
         backgroundLayer.drawString(2, MATRIX_HEIGHT  - 6, rgb24(255, 255, 255), rgb24(0, 0, 0), output.c_str());
     #endif
 
-    MatrixSwapBuffers((wifiPixelsDrawn > 0) || g_ptrSystem->GetEffectManager().GetCurrentEffect().RequiresDoubleBuffering() || pMatrix->GetCaptionTransparency() > 0.0);
+    MatrixSwapBuffers((wifiPixelsDrawn > 0) || g_ptrSystem->GetEffectManager().GetCurrentEffect().RequiresDoubleBuffering() || pMatrix.GetCaptionTransparency() > 0.0);
 
     FastLED.countFPS();
 }

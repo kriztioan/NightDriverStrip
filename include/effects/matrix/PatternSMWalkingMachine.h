@@ -31,12 +31,12 @@ class PatternSMWalkingMachine : public EffectWithId<PatternSMWalkingMachine>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
     {
-        g()->Clear();
+        g().Clear();
 
         for (uint8_t i = 0; i < 7; i++)
         {
@@ -45,8 +45,8 @@ class PatternSMWalkingMachine : public EffectWithId<PatternSMWalkingMachine>
         }
         for (uint8_t i = 0; i < 7; i++)
         {
-            g()->drawSafeFilledCircleF(dot[i].posX, dot[i].posY, 4, CHSV(i * 32, 255, 255));
-            g()->drawLineF(dot[i].posX, dot[i].posY, dot[(i + 1) % 7].posX, dot[(i + 1) % 7].posY, CHSV(i * 32, 255, 255),
+            g().drawSafeFilledCircleF(dot[i].posX, dot[i].posY, 4, CHSV(i * 32, 255, 255));
+            g().drawLineF(dot[i].posX, dot[i].posY, dot[(i + 1) % 7].posX, dot[(i + 1) % 7].posY, CHSV(i * 32, 255, 255),
                       CHSV(((i + 1) % 7) * 32, 255, 255));
         }
     }

@@ -93,15 +93,15 @@ public:
   {
       x = leftMargin;
       y = topMargin;
-      g()->Clear();
+      g().Clear();
       debugW("Starting AlienText...");
   }
 
   void Draw() override
   {
-    std::shared_ptr<GFXBase> graphics = _GFX[0];
+    auto& graphics = g();
 
-    graphics->DimAll(245);
+    graphics.DimAll(245);
 
     CRGB color1 = RandomSaturatedColor();
 
@@ -120,11 +120,11 @@ public:
         if (random(0, 2) == 1)
           color = color1;
 
-        graphics->setPixel(x + i, y + j, color);
+        graphics.setPixel(x + i, y + j, color);
 
         if (drawMirror)
         {
-          graphics->setPixel(mirrorX, y + j, color);
+          graphics.setPixel(mirrorX, y + j, color);
         }
       }
     }

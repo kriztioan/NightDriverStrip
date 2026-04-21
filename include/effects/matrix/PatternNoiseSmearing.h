@@ -74,7 +74,7 @@ class PatternRainbowFlag : public EffectWithId<PatternRainbowFlag>
 
     void Draw() override
     {
-        g()->DimAll(10);
+        g().DimAll(10);
 
         CRGB rainbow[7] = {CRGB::Red, CRGB::Orange, CRGB::Yellow, CRGB::Green, CRGB::Blue, CRGB::Violet};
 
@@ -86,7 +86,7 @@ class PatternRainbowFlag : public EffectWithId<PatternRainbowFlag>
             {
                 for (uint16_t x = 0; x < MATRIX_WIDTH; x++)
                 {
-                    g()->leds[XY(x, y)] += rainbow[c];
+                    g().leds[XY(x, y)] += rainbow[c];
                 }
 
                 y++;
@@ -96,14 +96,14 @@ class PatternRainbowFlag : public EffectWithId<PatternRainbowFlag>
         }
 
         // Noise
-        g()->SetNoise(1000, 1000, 0, 4000, 4000);
-        g()->FillGetNoise();
+        g().SetNoise(1000, 1000, 0, 4000, 4000);
+        g().FillGetNoise();
 
-        g()->MoveX(8);
-        // g()->MoveFractionalNoiseY<NoiseApproach::One>(8);
+        g().MoveX(8);
+        // g().MoveFractionalNoiseY<NoiseApproach::One>(8);
 
-        g()->MoveY(3);
-        g()->MoveFractionalNoiseX<NoiseApproach::MRI>(4);
+        g().MoveY(3);
+        g().MoveFractionalNoiseX<NoiseApproach::MRI>(4);
     }
 };
 #endif

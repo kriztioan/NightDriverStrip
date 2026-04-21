@@ -75,22 +75,22 @@ class PatternSunburst : public EffectWithId<PatternSunburst>
     void Draw() override
     {
         uint8_t dim = beatsin8(2, 210, 250);
-        g()->DimAll(dim);
+        g().DimAll(dim);
 
         for (int i = 2; i <= MATRIX_WIDTH / 2; i++)
         {
-            CRGB color = g()->ColorFromCurrentPalette((i - 2) * (240 / (MATRIX_WIDTH / 2)));
+            CRGB color = g().ColorFromCurrentPalette((i - 2) * (240 / (MATRIX_WIDTH / 2)));
 
             // The LIB8TION library defines beatsin8, but this needed beatcos8 which did not exist, so I
             // added it to the graphics interface rathe than adding it to a custom version of lib8tion
 
-            uint8_t x = g()->beatcos8((17 - i) * 2, MATRIX_CENTER_X - i, MATRIX_CENTER_X + i);
+            uint8_t x = g().beatcos8((17 - i) * 2, MATRIX_CENTER_X - i, MATRIX_CENTER_X + i);
             uint8_t y = beatsin8((17 - i) * 2, MATRIX_CENTER_Y - i, MATRIX_CENTER_Y + i);
 
             if (color.r != 0 || color.g != 0 || color.b != 0)
             {
-                if (g()->isValidPixel(x,y))
-                    g()->setPixel(x, y, color);
+                if (g().isValidPixel(x,y))
+                    g().setPixel(x, y, color);
             }
         }
     }
@@ -116,7 +116,7 @@ class PatternRose : public EffectWithId<PatternRose>
     void Draw() override
     {
         uint8_t dim = beatsin8(2, 170, 250);
-        g()->DimAll(dim);
+        g().DimAll(dim);
 
 
         for (uint16_t i = 0; i < MATRIX_HEIGHT; i++)
@@ -128,19 +128,19 @@ class PatternRose : public EffectWithId<PatternRose>
 
             if (i < 16)
             {
-                x = g()->beatcos8((i + 1) * 2, i, MATRIX_HEIGHT - i) + 16;
+                x = g().beatcos8((i + 1) * 2, i, MATRIX_HEIGHT - i) + 16;
                 y = beatsin8((i + 1) * 2, i, MATRIX_HEIGHT - i);
-                color = g()->ColorFromCurrentPalette(i * 14);
+                color = g().ColorFromCurrentPalette(i * 14);
             }
             else
             {
                 x = beatsin8((32 - i) * 2, MATRIX_WIDTH - i, i + 1) + 16;
-                y = g()->beatcos8((32 - i) * 2, MATRIX_WIDTH - i, i + 1);
-                color = g()->ColorFromCurrentPalette((31 - i) * 14);
+                y = g().beatcos8((32 - i) * 2, MATRIX_WIDTH - i, i + 1);
+                color = g().ColorFromCurrentPalette((31 - i) * 14);
             }
 
-            if (g()->isValidPixel(x, y))
-                g()->setPixel(x, y, color);
+            if (g().isValidPixel(x, y))
+                g().setPixel(x, y, color);
         }
     }
 };
@@ -155,7 +155,7 @@ class PatternPinwheel : public EffectWithId<PatternPinwheel>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     virtual size_t DesiredFramesPerSecond() const override
@@ -176,11 +176,11 @@ class PatternPinwheel : public EffectWithId<PatternPinwheel>
             uint8_t y = 0;
 
             x = beatsin8((64 - i) * 2, MATRIX_HEIGHT - i, i + 1) + 16;
-            y = g()->beatcos8((64 - i) * 2, MATRIX_HEIGHT - i, i + 1);
-            color = g()->ColorFromCurrentPalette((64 - i) * 14);
+            y = g().beatcos8((64 - i) * 2, MATRIX_HEIGHT - i, i + 1);
+            color = g().ColorFromCurrentPalette((64 - i) * 14);
 
-            if (g()->isValidPixel(x, y))
-                g()->setPixel(x, y, color);
+            if (g().isValidPixel(x, y))
+                g().setPixel(x, y, color);
         }
     }
 };
@@ -204,24 +204,24 @@ public:
     {
         // dim all pixels on the display slightly
         // to 250/255 (98%) of their current brightness
-        g()->DimAll(250);
+        g().DimAll(250);
 
         // the Effects class has some sample oscillators
         // that move from 0 to 255 at different speeds
-        g()->MoveOscillators();
+        g().MoveOscillators();
 
         // the horizontal position of the head of the infinity sign
         // oscillates from 0 to the maximum horizontal and back
-        int x = (MATRIX_WIDTH - 1) - g()->p[1];
+        int x = (MATRIX_WIDTH - 1) - g().p[1];
 
         // the vertical position of the head oscillates up and down
 
         const int ymargin = 6;
-        int y = map8(sin8(g()->osci[3]), ymargin, MATRIX_HEIGHT - ymargin);
+        int y = map8(sin8(g().osci[3]), ymargin, MATRIX_HEIGHT - ymargin);
 
         // the hue oscillates from 0 to 255, overflowing back to 0
 
-        uint8_t hue = sin8(g()->osci[5]);
+        uint8_t hue = sin8(g().osci[5]);
 
         // draw a pixel at x,y using a color from the current palette
         if (_lastX == -1)
@@ -230,11 +230,11 @@ public:
             _lastY = y;
         }
 
-        g()->drawLine(_lastX, _lastY, x, y, g()->ColorFromCurrentPalette(hue));
+        g().drawLine(_lastX, _lastY, x, y, g().ColorFromCurrentPalette(hue));
         _lastX = x;
         _lastY = y;
 
-        //g()->setPixel(x, y, g()->ColorFromCurrentPalette(hue));
+        //g().setPixel(x, y, g().ColorFromCurrentPalette(hue));
 
     }
 };
@@ -270,8 +270,8 @@ public:
         {
             for (uint16_t y = 0; y < MATRIX_HEIGHT; y++)
             {
-                g()->leds[XY(x, y)] = (x ^ y ^ flip) < count
-                    ? g()->ColorFromCurrentPalette(((x ^ y) << 2) + generation)
+                g().leds[XY(x, y)] = (x ^ y ^ flip) < count
+                    ? g().ColorFromCurrentPalette(((x ^ y) << 2) + generation)
                     : CRGB::Black;
             }
         }

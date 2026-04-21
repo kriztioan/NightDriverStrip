@@ -109,14 +109,14 @@ class PatternSMPicasso3in1 : public EffectWithId<PatternSMPicasso3in1>
 
         for (uint8_t i = 0; i < enlargedObjectNUM - 2U; i += 2)
         {
-            g()->drawLine(trackingObjects[i].posX, trackingObjects[i].posY, trackingObjects[i + 1U].posX,
+            g().drawLine(trackingObjects[i].posX, trackingObjects[i].posY, trackingObjects[i + 1U].posX,
                      trackingObjects[i + 1U].posY, CHSV(trackingObjects[i].hue, 255U, 255U));
             // DrawLine(trackingObjectPosX[i], trackingObjectPosY[i],
             // trackingObjectPosX[i+1U], trackingObjectPosY[i+1U],
             // ColorFromPalette(*curPalette, trackingObjectHue[i]));
         }
 
-        g()->BlurFrame(80);
+        g().BlurFrame(80);
     }
 
     void PicassoRoutine2()
@@ -124,27 +124,27 @@ class PatternSMPicasso3in1 : public EffectWithId<PatternSMPicasso3in1>
         PicassoGenerate(false);
         PicassoPosition();
 
-        g()->DimAll(180);
+        g().DimAll(180);
 
         for (uint8_t i = 0; i < enlargedObjectNUM - 1U; i++)
-            g()->drawLine(trackingObjects[i].posX, trackingObjects[i].posY, trackingObjects[i + 1U].posX,
+            g().drawLine(trackingObjects[i].posX, trackingObjects[i].posY, trackingObjects[i + 1U].posX,
                       trackingObjects[i + 1U].posY, CHSV(trackingObjects[i].hue, 255U, 255U));
 
         EVERY_N_MILLIS(20000)
         {
             PicassoGenerate(true);
         }
-        g()->BlurFrame(80);
+        g().BlurFrame(80);
     }
 
     void PicassoRoutine3()
     {
         PicassoGenerate(false);
         PicassoPosition();
-        g()->DimAll(180);
+        g().DimAll(180);
 
         for (uint8_t i = 0; i < enlargedObjectNUM - 2U; i += 2)
-            g()->DrawSafeCircle(fabs(trackingObjects[i].posX - trackingObjects[i + 1U].posX),
+            g().DrawSafeCircle(fabs(trackingObjects[i].posX - trackingObjects[i + 1U].posX),
                        fabs(trackingObjects[i].posY - trackingObjects[i + 1U].posX),
                        fabs(trackingObjects[i].posX - trackingObjects[i].posY), CHSV(trackingObjects[i].hue, 255U, 255U));
 
@@ -152,7 +152,7 @@ class PatternSMPicasso3in1 : public EffectWithId<PatternSMPicasso3in1>
         {
             PicassoGenerate(true);
         }
-        g()->BlurFrame(80);
+        g().BlurFrame(80);
     }
 
   public:
@@ -207,7 +207,7 @@ class PatternSMPicasso3in1 : public EffectWithId<PatternSMPicasso3in1>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
 	    Scale = _scale;
         RecalibrateDrawnObjects();
     }

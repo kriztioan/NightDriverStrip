@@ -153,7 +153,7 @@ void WS281xGFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsD
 
     for (int i = 0; i < NUM_CHANNELS; i++)
     {
-        FastLED[i].setLeds(effectManager.g(i)->leds, pixelsDrawn);
+        FastLED[i].setLeds(effectManager.g(i).leds, pixelsDrawn);
         fadeLightBy(FastLED[i].leds(), FastLED[i].size(), 255 - g_ptrSystem->GetDeviceConfig().GetBrightness());
     }
     FastLED.show(g_Values.Fader); //Shows the pixels
@@ -164,7 +164,7 @@ void WS281xGFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsD
     #else
         g_Values.Brite = 100.0 * g_ptrSystem->GetDeviceConfig().GetBrightness() / 255;
     #endif
-    g_Values.Watts = calculate_unscaled_power_mW(effectManager.g()->leds, pixelsDrawn) / 1000; // 1000 for mw->W
+    g_Values.Watts = calculate_unscaled_power_mW(effectManager.g().leds, pixelsDrawn) / 1000; // 1000 for mw->W
 }
 
 #if HEXAGON

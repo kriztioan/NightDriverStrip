@@ -72,24 +72,24 @@ class PatternSwirl : public EffectWithId<PatternSwirl>
 
     void drawAt(int i, int j, CRGB color)
     {
-        g()->leds[XY(i, j - 1)] += color;
-        g()->leds[XY(i, j + 1)] += color;
-        g()->leds[XY(i - 1, j)] += color;
-        g()->leds[XY(i + 1, j)] += color;
+        g().leds[XY(i, j - 1)] += color;
+        g().leds[XY(i, j + 1)] += color;
+        g().leds[XY(i - 1, j)] += color;
+        g().leds[XY(i + 1, j)] += color;
         color.maximizeBrightness();
-        g()->leds[XY(i, j)] += color;
+        g().leds[XY(i, j)] += color;
     }
 
     void Draw() override
     {
-        auto graphics = g();
+        auto& graphics = g();
         // Apply some blurring to whatever's already on the matrix
         // Note that we never actually clear the matrix, we just constantly
         // blur it repeatedly.  Since the blurring is 'lossy', there's
         // an automatic trend toward black -- by design.
 
         uint8_t blurAmount = beatsin8(2, 15, 255);
-        graphics->BlurFrame(blurAmount);
+        graphics.BlurFrame(blurAmount);
 
         // Use two out-of-sync sine waves
         uint8_t i = beatsin8(27, borderWidth, MATRIX_WIDTH - 1 - borderWidth);
@@ -101,13 +101,13 @@ class PatternSwirl : public EffectWithId<PatternSwirl>
         // The color of each point shifts over time, each at a different speed.
         uint16_t ms = millis();
 
-        drawAt(i, j, graphics->ColorFromCurrentPalette(ms / 11));
-        drawAt(i, j, graphics->ColorFromCurrentPalette(ms / 11));
-        drawAt(j * 2, i / 2, graphics->ColorFromCurrentPalette(ms / 13));
-        drawAt(nj * 2, ni / 2, graphics->ColorFromCurrentPalette(ms / 29));
-        drawAt(ni, nj, graphics->ColorFromCurrentPalette(ms / 17));
-        drawAt(i, nj, graphics->ColorFromCurrentPalette(ms / 37));
-        drawAt(ni, j, graphics->ColorFromCurrentPalette(ms / 41));
+        drawAt(i, j, graphics.ColorFromCurrentPalette(ms / 11));
+        drawAt(i, j, graphics.ColorFromCurrentPalette(ms / 11));
+        drawAt(j * 2, i / 2, graphics.ColorFromCurrentPalette(ms / 13));
+        drawAt(nj * 2, ni / 2, graphics.ColorFromCurrentPalette(ms / 29));
+        drawAt(ni, nj, graphics.ColorFromCurrentPalette(ms / 17));
+        drawAt(i, nj, graphics.ColorFromCurrentPalette(ms / 37));
+        drawAt(ni, j, graphics.ColorFromCurrentPalette(ms / 41));
     }
 };
 

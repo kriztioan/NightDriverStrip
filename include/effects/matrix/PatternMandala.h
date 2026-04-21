@@ -109,19 +109,21 @@ public:
 
     void Start() override
     {
+        auto& noise = g().GetNoise();
+
         // set to reasonable values to avoid a black out
-        g()->GetNoise().noisesmoothing = 100;
+        noise.noisesmoothing = 100;
 
         // just any free input pin
         // random16_add_entropy(analogRead(18));
 
         // fill coordinates with random values
         // set zoom levels
-        g()->GetNoise().noise_x = random16();
-        g()->GetNoise().noise_y = random16();
-        g()->GetNoise().noise_z = random16();
-        g()->GetNoise().noise_scale_x = 6000;
-        g()->GetNoise().noise_scale_y = 6000;
+        noise.noise_x = random16();
+        noise.noise_y = random16();
+        noise.noise_z = random16();
+        noise.noise_scale_x = 6000;
+        noise.noise_scale_y = 6000;
 
         // for the random movement
         dx = random8();
@@ -133,6 +135,9 @@ public:
 
     void Draw() override
     {
+        auto& graphics = g();
+        auto& noise = graphics.GetNoise();
+
         // a new parameter set every 30 seconds
         EVERY_N_SECONDS(30)
         {
@@ -140,38 +145,42 @@ public:
             dy = random16(500) - 250; // random16(2000) - 1000 is pretty fast but works fine, too
             dx = random16(500) - 250;
             dz = random16(500) - 250;
-            g()->GetNoise().noise_scale_x = random16(10000) + 2000;
-            g()->GetNoise().noise_scale_y = random16(10000) + 2000;
+            noise.noise_scale_x = random16(10000) + 2000;
+            noise.noise_scale_y = random16(10000) + 2000;
         }
 
-        g()->GetNoise().noise_y += dy * 4;
-        g()->GetNoise().noise_x += dx * 4;
-        g()->GetNoise().noise_z += dz * 4;
+        noise.noise_y += dy * 4;
+        noise.noise_x += dx * 4;
+        noise.noise_z += dz * 4;
 
-        g()->FillGetNoise();
+        graphics.FillGetNoise();
 
         ShowNoiseLayer(0, 1, 0);
 
-        g()->Caleidoscope3();
-        g()->Caleidoscope1();
+        graphics.Caleidoscope3();
+        graphics.Caleidoscope1();
     }
 
     // show just one layer
     void ShowNoiseLayer(uint8_t layer, uint8_t colorrepeat, uint8_t colorshift)
     {
+        auto& graphics = g();
+        const auto& noise = graphics.GetNoise();
+        const auto& palette = graphics.GetCurrentPalette();
+
         for (uint16_t i = 0; i < MATRIX_WIDTH; i++)
         {
             for (uint16_t j = 0; j < MATRIX_HEIGHT; j++)
             {
 
-                uint8_t color = g()->GetNoise().noise[i][j];
+                uint8_t color = noise.noise[i][j];
 
                 uint8_t bri = color;
 
                 // assign a color depending on the actual palette
-                CRGB pixel = ColorFromPalette(g()->GetCurrentPalette(), colorrepeat * (color + colorshift), bri);
+                CRGB pixel = ColorFromPalette(palette, colorrepeat * (color + colorshift), bri);
 
-                g()->leds[XY(i, j)] = pixel;
+                graphics.leds[XY(i, j)] = pixel;
             }
         }
     }

@@ -16,7 +16,7 @@ class PatternSMGamma : public EffectWithId<PatternSMGamma>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
@@ -44,9 +44,9 @@ class PatternSMGamma : public EffectWithId<PatternSMGamma>
             for (uint y = 0; y < MATRIX_HEIGHT; y++)
             {
                 int index = XY(x, y);
-                g()->leds[index].b = exp_gamma[sin8((x - 8) * cos8((y + 20) * 4) / 4 + a)];
-                g()->leds[index].g = exp_gamma[(sin8(x * 16 + a / 3) + cos8(y * 8 + a / 2)) / 2];
-                g()->leds[index].r = exp_gamma[sin8(cos8(x * 8 + a / 3) + sin8(y * 8 + a / 4) + a)];
+                g().leds[index].b = exp_gamma[sin8((x - 8) * cos8((y + 20) * 4) / 4 + a)];
+                g().leds[index].g = exp_gamma[(sin8(x * 16 + a / 3) + cos8(y * 8 + a / 2)) / 2];
+                g().leds[index].r = exp_gamma[sin8(cos8(x * 8 + a / 3) + sin8(y * 8 + a / 4) + a)];
             }
         }
     }

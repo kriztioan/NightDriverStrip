@@ -226,9 +226,10 @@ void ShowOnboardRGBLED()
             ledcWrite(3, 255 - c.b);
         #else
             int iLed = NUM_LEDS / 2;
-            ledcWrite(1, 255 - graphics->leds[iLed].r); // write red component to channel 1, etc.
-            ledcWrite(2, 255 - graphics->leds[iLed].g);
-            ledcWrite(3, 255 - graphics->leds[iLed].b);
+            const auto& graphics = g_ptrSystem->GetEffectManager().g();
+            ledcWrite(1, 255 - graphics.leds[iLed].r); // write red component to channel 1, etc.
+            ledcWrite(2, 255 - graphics.leds[iLed].g);
+            ledcWrite(3, 255 - graphics.leds[iLed].b);
         #endif
     #endif
 }
@@ -284,9 +285,9 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
         uint16_t wifiPixelsDrawn    = 0;
         double frameStartTime       = g_Values.AppTime.FrameStartTime();
 
-        auto graphics = g_ptrSystem->GetEffectManager().GetBaseGraphics()[0];
+        auto& graphics = g_ptrSystem->GetEffectManager().g();
 
-        graphics->PrepareFrame();
+        graphics.PrepareFrame();
 
         if (nd_network::IsWiFiConnected())
             wifiPixelsDrawn = WiFiDraw();
@@ -311,7 +312,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
             g_ptrSystem->GetEffectManager().ReportNewFrameAvailable();
         }
 
-        graphics->PostProcessFrame(localPixelsDrawn, wifiPixelsDrawn);
+        graphics.PostProcessFrame(localPixelsDrawn, wifiPixelsDrawn);
 
         // Delay at least 2ms and not more than 1s until next frame is due
 

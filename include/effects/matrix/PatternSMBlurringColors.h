@@ -154,7 +154,7 @@ class PatternSMBlurringColors : public EffectWithId<PatternSMBlurringColors>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
 
         enlargedObjectNUM = (Scale + 5U); // / 99.0 * (AVAILABLE_BOID_COUNT) ;
         if (enlargedObjectNUM > AVAILABLE_BOID_COUNT)
@@ -182,7 +182,7 @@ class PatternSMBlurringColors : public EffectWithId<PatternSMBlurringColors>
     {
         step = deltaValue; // counter of the number of particles in the
                            // queue for nucleation in this loop
-        g()->blur2d(g()->leds, MATRIX_WIDTH, 0, MATRIX_HEIGHT, 0, 27);
+        g().blur2d(g().leds, MATRIX_WIDTH, 0, MATRIX_HEIGHT, 0, 27);
 
         // go over particles and update matrix cells on the way
         for (auto& powder_item : _powder_items)
@@ -199,7 +199,7 @@ class PatternSMBlurringColors : public EffectWithId<PatternSMBlurringColors>
                 CRGB baseRGB = CHSV(powder_item._hue, 255, 255);
 
                 baseRGB.nscale8(powder_item._state); // equivalent
-                g()->drawPixelXYF_Wu(powder_item._position_x, MATRIX_HEIGHT - 1 - powder_item._position_y, baseRGB);
+                g().drawPixelXYF_Wu(powder_item._position_x, MATRIX_HEIGHT - 1 - powder_item._position_y, baseRGB);
             }
         }
     }

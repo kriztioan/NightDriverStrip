@@ -396,7 +396,7 @@ class PatternSMNoise : public EffectWithId<PatternSMNoise>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
         noisex = random16();
         noisey = random16();
         noisez = random16();
@@ -593,7 +593,7 @@ class PatternSMNoise : public EffectWithId<PatternSMNoise>
                 CRGB color = ColorFromPalette(palette, index, bri);
                 uint16_t n = XY(i, j);
 
-                g()->leds[n] = color;
+                g().leds[n] = color;
             }
         }
         ihue += 1;
