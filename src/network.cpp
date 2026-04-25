@@ -29,6 +29,7 @@
 //---------------------------------------------------------------------------
 
 #include "globals.h"
+#include <esp_ota_ops.h>
 #include <fcntl.h>
 
 #if ENABLE_WIFI
@@ -662,6 +663,13 @@ void SetupOTA(const String &strHostname)
         throw std::runtime_error("OTA Flash update failed.");
     });
     ArduinoOTA.begin();
+#endif
+}
+
+void ConfirmUpdate()
+{
+#if ENABLE_OTA
+    esp_ota_mark_app_valid_cancel_rollback();
 #endif
 }
 
