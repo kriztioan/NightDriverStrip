@@ -29,6 +29,7 @@
 //---------------------------------------------------------------------------
 
 #include "globals.h"
+#include <esp_ota_ops.h>
 #include <fcntl.h>
 
 #if ENABLE_WIFI
@@ -592,6 +593,11 @@ void SetupOTA(const String &strHostname)
     });
     ArduinoOTA.begin();
 #endif
+}
+
+void ConfirmUpdate()
+{
+    esp_ota_mark_app_valid_cancel_rollback();
 }
 
 #if ENABLE_WIFI
