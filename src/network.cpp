@@ -597,7 +597,9 @@ void SetupOTA(const String &strHostname)
 
 void ConfirmUpdate()
 {
+#if ENABLE_OTA
     esp_ota_mark_app_valid_cancel_rollback();
+#endif
 }
 
 #if ENABLE_WIFI

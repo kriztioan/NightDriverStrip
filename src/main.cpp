@@ -615,7 +615,9 @@ void setup()
     nd_network::InitNetworkCLI();
 
     SaveEffectManagerConfig();
+#if ENABLE_OTA
     ConfirmUpdate();
+#endif
     // Start the main loop
 }
 
