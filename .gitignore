@@ -18,9 +18,7 @@ lib/*
 NightDriverStrip.code-workspace
 site/dist
 site/favicon.ico
-site/index.html
 site/local/**
-site/main.jsx
 site/node_modules
 site/yarn-error.log
 src/-defines-.cpp

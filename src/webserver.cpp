@@ -249,21 +249,21 @@ void CWebServer::begin()
 {
     [[maybe_unused]] extern const uint8_t html_start[] asm("_binary_site_dist_index_html_gz_start");
     [[maybe_unused]] extern const uint8_t html_end[] asm("_binary_site_dist_index_html_gz_end");
-    [[maybe_unused]] extern const uint8_t js_start[] asm("_binary_site_dist_index_js_gz_start");
-    [[maybe_unused]] extern const uint8_t js_end[] asm("_binary_site_dist_index_js_gz_end");
-    [[maybe_unused]] extern const uint8_t ico_start[] asm("_binary_site_dist_favicon_ico_gz_start");
-    [[maybe_unused]] extern const uint8_t ico_end[] asm("_binary_site_dist_favicon_ico_gz_end");
+    [[maybe_unused]] extern const uint8_t css_start[] asm("_binary_site_dist_styles_css_gz_start");
+    [[maybe_unused]] extern const uint8_t css_end[] asm("_binary_site_dist_styles_css_gz_end");
+    [[maybe_unused]] extern const uint8_t js_start[] asm("_binary_site_dist_app_js_gz_start");
+    [[maybe_unused]] extern const uint8_t js_end[] asm("_binary_site_dist_app_js_gz_end");
     [[maybe_unused]] extern const uint8_t timezones_start[] asm("_binary_config_timezones_json_start");
     [[maybe_unused]] extern const uint8_t timezones_end[] asm("_binary_config_timezones_json_end");
 
     EmbeddedWebFile html_file(html_start, html_end, "text/html", "gzip");
+    EmbeddedWebFile css_file(css_start, css_end, "text/css", "gzip");
     EmbeddedWebFile js_file(js_start, js_end, "application/javascript", "gzip");
-    EmbeddedWebFile ico_file(ico_start, ico_end, "image/vnd.microsoft.icon", "gzip");
     EmbeddedWebFile timezones_file(timezones_start, timezones_end - 1, "text/json"); // end - 1 because of zero-termination
 
     debugI("Embedded html file size: %zu", (size_t)html_file.length);
-    debugI("Embedded jsx file size: %zu", (size_t)js_file.length);
-    debugI("Embedded ico file size: %zu", (size_t)ico_file.length);
+    debugI("Embedded css file size: %zu", (size_t)css_file.length);
+    debugI("Embedded js file size: %zu", (size_t)js_file.length);
     debugI("Embedded timezones file size: %zu", (size_t)timezones_file.length);
 
     _staticStats.HeapSize = ESP.getHeapSize();
@@ -340,8 +340,8 @@ void CWebServer::begin()
 
         ServeEmbeddedFile("/", html_file);
         ServeEmbeddedFile("/index.html", html_file);
-        ServeEmbeddedFile("/index.js", js_file);
-        ServeEmbeddedFile("/favicon.ico", ico_file);
+        ServeEmbeddedFile("/styles.css", css_file);
+        ServeEmbeddedFile("/app.js", js_file);
     #endif
 
     // Not found handler

@@ -1,21 +1,25 @@
-# NightDriverStrip Web Site
+# NightDriverStrip Web UI
 
-<!-- markdownlint-disable MD036 /no-emphasis-as-heading -->
-_Louisr, 1/24/2023_
+The firmware now embeds a static `HTML/CSS/JS` administration UI from:
 
-## Setup
-In order to locally develop this site, you need to have the following requirements:
-- Linux/WSL or Git Bash for windows
-- nodejs v16+
-- npm latest
+- [site/index.html](/Users/dave/source/repos/NightDriverStrip/site/index.html)
+- [site/styles.css](/Users/dave/source/repos/NightDriverStrip/site/styles.css)
+- [site/app.js](/Users/dave/source/repos/NightDriverStrip/site/app.js)
 
-With the requirements filled, open a bash terminal, go to the site folder and type `npm install`.
+There is no Node, React, Vite, or external frontend build dependency anymore.
 
-In order to test locally, you need to put the ip address in [site/src/espaddr.jsx](https://github.com/Louis-Riel/NightDriverStrip/blob/main/site/src/espaddr.jsx)
+## Build
 
-Once this is done, please run `npm run start`, open a browser tab and paste the address that running this command put on your clipboard.
+The PlatformIO pre-build hook runs:
 
-Once local testing is done, flash the ESP and point your browser to it.
+- [tools/bake_site.py](/Users/dave/source/repos/NightDriverStrip/tools/bake_site.py)
 
-![](../assets/dark.PNG)  
-![](../assets/light.PNG)
+That script gzips the static assets into `site/dist/` for embedding in flash.
+
+## Runtime contract
+
+The web UI is intentionally thin. It talks directly to the device APIs exposed in:
+
+- [src/webserver.cpp](/Users/dave/source/repos/NightDriverStrip/src/webserver.cpp)
+
+This means frontend changes should prefer preserving the existing API shape unless there is a clear firmware-side reason to change it.
