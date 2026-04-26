@@ -441,23 +441,14 @@ class SoundAnalyzerBase : public ISoundAnalyzer
 
     // Returns the faster-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
-    float Peak1Decay(int band) const override
-    {
-        return (band >= 0 && band < NUM_BANDS) ? _peak1Decay[band] : 0.0f;
-    }
+    float Peak1Decay(int band) const override;
 
     // Returns the slower-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
-    float Peak2Decay(int band) const override
-    {
-        return (band >= 0 && band < NUM_BANDS) ? _peak2Decay[band] : 0.0f;
-    }
+    float Peak2Decay(int band) const override;
 
     // Returns the timestamp of the last time the primary peak for this band was updated.
-    unsigned long LastPeak1Time(int band) const override
-    {
-        return (band >= 0 && band < NUM_BANDS) ? _lastPeak1Time[band] : 0;
-    }
+    unsigned long LastPeak1Time(int band) const override;
 
     const BeatInfo & LastBeat() const override
     {

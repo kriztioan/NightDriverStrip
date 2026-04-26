@@ -371,6 +371,30 @@ void SoundAnalyzerBase::SetPeakDecayRates(float r1, float r2)
     _peak2DecayRate = r2;
 }
 
+float SoundAnalyzerBase::Peak1Decay(int band) const
+{
+    if (band < 0 || band >= NUM_BANDS)
+        return 0.0f;
+
+    return _peak1Decay[band];
+}
+
+float SoundAnalyzerBase::Peak2Decay(int band) const
+{
+    if (band < 0 || band >= NUM_BANDS)
+        return 0.0f;
+
+    return _peak2Decay[band];
+}
+
+unsigned long SoundAnalyzerBase::LastPeak1Time(int band) const
+{
+    if (band < 0 || band >= NUM_BANDS)
+        return 0;
+
+    return _lastPeak1Time[band];
+}
+
 // SetPeakDataFromRemote
 //
 // Accept externally provided peaks (e.g., over WiFi) and update internal state.
