@@ -265,15 +265,16 @@ namespace nd_network
         bPreviousConnection = true;
         bReportedDisconnected = false;
 
-        #if INCOMING_WIFI_ENABLED
-            g_ptrSystem->GetSocketServer().release();
-            if (false == g_ptrSystem->GetSocketServer().begin())
-                throw std::runtime_error("Could not start socket server!");
-        #endif
         #if ENABLE_OTA
             SetupOTA(String(WiFi.getHostname()));
         #endif
         #if ENABLE_NTP
+            static bool bUdpInitialized = false;
+            if (!bUdpInitialized)
+            {
+                l_Udp.begin(1234);     // Use a fixed local port for NTP responses
+                bUdpInitialized = true;
+            }
             NTPTimeClient::UpdateClockFromWeb(&l_Udp);
         #endif
         #if ENABLE_WEBSERVER
@@ -796,9 +797,16 @@ void IRAM_ATTR SocketServerTaskEntry(void *)
             auto &socketServer = g_ptrSystem->GetSocketServer();
 
             socketServer.release();
-            socketServer.begin();
-            socketServer.ProcessIncomingConnectionsLoop();
-            debugV("Socket connection closed.  Retrying...");
+            if (socketServer.begin())
+            {
+                socketServer.ProcessIncomingConnectionsLoop();
+                debugV("Socket connection closed.  Retrying...");
+            }
+            else
+            {
+                debugE("Failed to start socket server, retrying in 5 seconds...");
+                delay(5000);
+            }
         }
         delay(500);
     }
