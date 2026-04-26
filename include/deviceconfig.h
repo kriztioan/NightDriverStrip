@@ -32,6 +32,7 @@
 
 #include "globals.h"
 
+#include <array>
 #include <tuple>
 #include <vector>
 
@@ -124,6 +125,39 @@
 
 class DeviceConfig : public IJSONSerializable
 {
+  public:
+    enum class OutputDriver : uint8_t
+    {
+        WS281x,
+        HUB75
+    };
+
+    struct RuntimeTopology
+    {
+        uint16_t width = MATRIX_WIDTH;
+        uint16_t height = MATRIX_HEIGHT;
+        bool serpentine = true;
+    };
+
+    struct RuntimeOutputs
+    {
+        OutputDriver driver =
+        #if USE_HUB75
+            OutputDriver::HUB75;
+        #else
+            OutputDriver::WS281x;
+        #endif
+        size_t channelCount = NUM_CHANNELS;
+        std::array<int8_t, NUM_CHANNELS> outputPins{};
+    };
+
+    struct RuntimeConfig
+    {
+        RuntimeTopology topology;
+        RuntimeOutputs outputs;
+    };
+
+  private:
     // Add variables for additional settings to this list
     String  hostname = cszHostname;
     String  location = cszLocation;
@@ -141,12 +175,20 @@ class DeviceConfig : public IJSONSerializable
     CRGB    globalColor = CRGB::Red;
     bool    applyGlobalColors = false;
     CRGB    secondColor = CRGB::Red;
+    int8_t  audioInputPin = INPUT_PIN;
+    RuntimeTopology runtimeTopology = {};
+    RuntimeOutputs runtimeOutputs = {};
 
     std::vector<SettingSpec, psram_allocator<SettingSpec>> settingSpecs;
     std::vector<std::reference_wrapper<SettingSpec>> settingSpecReferences;
     size_t writerIndex;
 
     void SaveToJSON() const;
+    bool SetTimeZoneInternal(const String& newTimeZone, bool skipWrite);
+    static std::array<int8_t, NUM_CHANNELS> GetCompiledWS281xPins();
+    static const char* DriverName(OutputDriver driver);
+    static bool IsHub75Build();
+    void LogRuntimeConfig(const char* reason) const;
 
     template <typename T>
     void SetAndSave(T& target, const T& source)
@@ -191,6 +233,13 @@ class DeviceConfig : public IJSONSerializable
     static constexpr const char * GlobalColorTag = NAME_OF(globalColor);
     static constexpr const char * ApplyGlobalColorsTag = NAME_OF(applyGlobalColors);
     static constexpr const char * SecondColorTag = NAME_OF(secondColor);
+    static constexpr const char * MatrixWidthTag = "matrixWidth";
+    static constexpr const char * MatrixHeightTag = "matrixHeight";
+    static constexpr const char * MatrixSerpentineTag = "matrixSerpentine";
+    static constexpr const char * OutputDriverTag = "outputDriver";
+    static constexpr const char * WS281xChannelCountTag = "ws281xChannelCount";
+    static constexpr const char * WS281xPinsTag = "ws281xPins";
+    static constexpr const char * AudioInputPinTag = "audioInputPin";
 
     DeviceConfig();
 
@@ -236,6 +285,7 @@ class DeviceConfig : public IJSONSerializable
     void SetRememberCurrentEffect(bool newRememberCurrentEffect);
 
     uint8_t GetBrightness() const { return brightness; }
+    static ValidateResponse ValidateBrightness(int newBrightness);
     static ValidateResponse ValidateBrightness(const String& newBrightness);
     void SetBrightness(int newBrightness);
 
@@ -243,6 +293,7 @@ class DeviceConfig : public IJSONSerializable
     void SetShowVUMeter(bool newShowVUMeter);
 
     int GetPowerLimit() const { return powerLimit; }
+    static ValidateResponse ValidatePowerLimit(int newPowerLimit);
     static ValidateResponse ValidatePowerLimit(const String& newPowerLimit);
     void SetPowerLimit(int newPowerLimit);
 
@@ -257,4 +308,73 @@ class DeviceConfig : public IJSONSerializable
 
     void SetColorSettings(const CRGB& globalColor, const CRGB& secondColor);
     void ApplyColorSettings(std::optional<CRGB> globalColor, std::optional<CRGB> secondColor, bool clearGlobalColor, bool applyGlobalColor);
+
+    static constexpr uint16_t GetCompiledMatrixWidth() { return MATRIX_WIDTH; }
+    static constexpr uint16_t GetCompiledMatrixHeight() { return MATRIX_HEIGHT; }
+    static constexpr size_t GetCompiledLEDCount() { return NUM_LEDS; }
+    static constexpr size_t GetCompiledChannelCount() { return NUM_CHANNELS; }
+    static constexpr int GetCompiledAudioInputPin() { return INPUT_PIN; }
+    static std::array<int8_t, NUM_CHANNELS> GetCompiledPins() { return GetCompiledWS281xPins(); }
+    static OutputDriver GetCompiledOutputDriver()
+    {
+        #if USE_HUB75
+            return OutputDriver::HUB75;
+        #else
+            return OutputDriver::WS281x;
+        #endif
+    }
+
+    RuntimeConfig GetRuntimeConfig() const { return RuntimeConfig{runtimeTopology, runtimeOutputs}; }
+    const RuntimeTopology& GetTopology() const { return runtimeTopology; }
+    const RuntimeOutputs& GetOutputs() const { return runtimeOutputs; }
+    uint16_t GetMatrixWidth() const { return runtimeTopology.width; }
+    uint16_t GetMatrixHeight() const { return runtimeTopology.height; }
+    bool IsMatrixSerpentine() const { return runtimeTopology.serpentine; }
+    size_t GetActiveLEDCount() const { return static_cast<size_t>(runtimeTopology.width) * runtimeTopology.height; }
+    int GetAudioInputPin() const { return audioInputPin; }
+    OutputDriver GetOutputDriver() const { return runtimeOutputs.driver; }
+    size_t GetChannelCount() const { return runtimeOutputs.channelCount; }
+    const std::array<int8_t, NUM_CHANNELS>& GetWS281xPins() const { return runtimeOutputs.outputPins; }
+    // When runtime output settings still match the compiled WS281x transport, we can keep using the
+    // long-proven FastLED controller path and reserve the new runtime manager for true pin/count changes.
+    bool UsesCompiledWS281xTransport() const
+    {
+        return runtimeOutputs.driver == GetCompiledOutputDriver()
+            && runtimeOutputs.channelCount == GetCompiledChannelCount()
+            && runtimeOutputs.outputPins == GetCompiledPins();
+    }
+    bool SupportsLiveTopology() const { return !IsHub75Build() && runtimeOutputs.driver == OutputDriver::WS281x; }
+    bool SupportsLiveOutputReconfigure() const { return !IsHub75Build() && runtimeOutputs.driver == OutputDriver::WS281x; }
+    bool SupportsConfigurableAudioInputPin() const
+    {
+        #if ENABLE_AUDIO && !USE_M5 && (USE_I2S_AUDIO || ELECROW)
+            return true;
+        #else
+            return false;
+        #endif
+    }
+    bool SupportsLiveAudioInputReconfigure() const { return false; }
+    String GetAudioInputModeName() const
+    {
+        #if !ENABLE_AUDIO
+            return "disabled";
+        #elif USE_M5
+            return "m5_internal";
+        #elif USE_I2S_AUDIO || ELECROW
+            return "i2s";
+        #else
+            return "adc_fixed";
+        #endif
+    }
+    bool RequiresRecompileForCurrentRuntimeConfig() const { return runtimeOutputs.driver != GetCompiledOutputDriver(); }
+    String GetCompiledDriverName() const { return DriverName(GetCompiledOutputDriver()); }
+    String GetRuntimeDriverName() const { return DriverName(runtimeOutputs.driver); }
+
+    ValidateResponse ValidateAudioInputPin(int pin) const;
+    ValidateResponse ValidateTopology(uint16_t width, uint16_t height, bool serpentine) const;
+    ValidateResponse ValidateOutputDriver(OutputDriver driver) const;
+    ValidateResponse ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins) const;
+    ValidateResponse ValidateRuntimeConfig(const RuntimeConfig& config) const;
+    bool SetRuntimeConfig(const RuntimeConfig& config, bool skipWrite = false, String* errorMessage = nullptr);
+    void SetAudioInputPin(int newAudioInputPin);
 };

@@ -36,6 +36,7 @@
 #include <numeric>
 
 #include "soundanalyzer.h"
+#include "systemcontainer.h"
 #include "values.h"
 
 #if ENABLE_AUDIO
@@ -45,6 +46,17 @@
 #if USE_M5
     #include <M5Unified.h>
 #endif
+
+namespace
+{
+    int GetConfiguredAudioInputPin()
+    {
+        if (g_ptrSystem)
+            return g_ptrSystem->GetConfiguredAudioInputPin();
+
+        return INPUT_PIN;
+    }
+}
 
 // SoundAnalyzerBase
 //
@@ -112,10 +124,10 @@ void SoundAnalyzerBase::FFT()
 void SoundAnalyzerBase::SampleAudio()
 {
     size_t bytesRead = 0;
+    const auto inputPin = GetConfiguredAudioInputPin();
 
-#if INPUT_PIN < 0
-    return;
-#endif
+    if (inputPin < 0)
+        return;
 
 #if USE_M5
     bytesRead = SampleM5();
@@ -210,10 +222,13 @@ float SoundAnalyzerBase::BeatEnhance(float amt)
 // Entry point for configuring board-specific audio input (M5, I2S Digital, or I2S ADC Analog).
 void SoundAnalyzerBase::InitAudioInput()
 {
-#if INPUT_PIN < 0
-    debugI("Audio: INPUT_PIN < 0, skipping hardware initialization. SimBeat only.");
-    return;
-#endif
+    const auto inputPin = GetConfiguredAudioInputPin();
+
+    if (inputPin < 0)
+    {
+        debugI("Audio: input pin < 0, skipping hardware initialization. SimBeat only.");
+        return;
+    }
 
     debugV("Begin InitAudioInput...");
 
@@ -407,7 +422,8 @@ void SoundAnalyzerBase::InitM5()
 void SoundAnalyzerBase::InitI2S_Modern()
 {
 #if (USE_I2S_AUDIO || ELECROW) && IS_IDF5
-    debugI("Audio: Initializing I2S Digital Mic (Modern) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, INPUT_PIN);
+    const auto inputPin = GetConfiguredAudioInputPin();
+    debugI("Audio: Initializing I2S Digital Mic (Modern) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, inputPin);
     // Digital Microphones (INMP441, etc.) - Standard I2S Mode
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &_rx_handle));
@@ -420,7 +436,7 @@ void SoundAnalyzerBase::InitI2S_Modern()
             .bclk = I2S_BCLK_PIN,
             .ws = I2S_WS_PIN,
             .dout = I2S_GPIO_UNUSED,
-            .din = INPUT_PIN,
+            .din = static_cast<gpio_num_t>(inputPin),
         },
     };
 
@@ -432,7 +448,8 @@ void SoundAnalyzerBase::InitI2S_Modern()
 void SoundAnalyzerBase::InitI2S_Legacy()
 {
 #if (USE_I2S_AUDIO || ELECROW) && !IS_IDF5
-    debugI("Audio: Initializing I2S Digital Mic (Legacy) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, INPUT_PIN);
+    const auto inputPin = GetConfiguredAudioInputPin();
+    debugI("Audio: Initializing I2S Digital Mic (Legacy) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, inputPin);
     const i2s_config_t i2s_config = {.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
                                      .sample_rate = SAMPLING_FREQUENCY,
                                      .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
@@ -447,12 +464,12 @@ void SoundAnalyzerBase::InitI2S_Legacy()
 
     pinMode(I2S_BCLK_PIN, OUTPUT);
     pinMode(I2S_WS_PIN, OUTPUT);
-    pinMode(INPUT_PIN, INPUT);
+    pinMode(inputPin, INPUT);
 
     const i2s_pin_config_t pin_config = {.bck_io_num = I2S_BCLK_PIN,
                                          .ws_io_num = I2S_WS_PIN,
                                          .data_out_num = I2S_PIN_NO_CHANGE,
-                                         .data_in_num = INPUT_PIN};
+                                         .data_in_num = inputPin};
 
     ESP_ERROR_CHECK(i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL));
     ESP_ERROR_CHECK(i2s_set_pin(I2S_NUM_0, &pin_config));

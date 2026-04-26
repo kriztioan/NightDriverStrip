@@ -116,6 +116,8 @@ constexpr static inline uint8_t WU_WEIGHT(uint8_t a, uint8_t b)
 
 class Boid;
 
+uint16_t XY(uint16_t x, uint16_t y);
+
 class GFXBase : public Adafruit_GFX
 {
 #if USE_NOISE
@@ -129,6 +131,7 @@ protected:
     size_t _width;
     size_t _height;
     size_t _ledcount;
+    bool _serpentine = true;
 
     // 32 Entries in the 5-bit gamma table
     static const uint8_t gamma5[32];
@@ -185,13 +188,17 @@ public:
     virtual ~GFXBase() override;
 
     #if USE_NOISE
+    void EnsureNoise();
+
     Noise &GetNoise()
     {
+        EnsureNoise();
         return *_ptrNoise;
     }
 
     const Noise &GetNoise() const
     {
+        const_cast<GFXBase*>(this)->EnsureNoise();
         return *_ptrNoise;
     }
     #endif
@@ -205,6 +212,23 @@ public:
     {
         return _ledcount;
     }
+
+    virtual size_t GetMatrixWidth() const
+    {
+        return _width;
+    }
+
+    virtual size_t GetMatrixHeight() const
+    {
+        return _height;
+    }
+
+    virtual bool IsSerpentine() const
+    {
+        return _serpentine;
+    }
+
+    virtual void ConfigureTopology(size_t width, size_t height, bool serpentine);
 
     static uint8_t beatcos8(accum88 beats_per_minute, uint8_t lowest = 0, uint8_t highest = 255, uint32_t timebase = 0, uint8_t phase_offset = 0);
     static uint8_t mapsin8(uint8_t theta, uint8_t lowest = 0, uint8_t highest = 255);
@@ -250,7 +274,7 @@ public:
     __attribute__((always_inline))
     inline virtual uint16_t xy(uint16_t x, uint16_t y) const noexcept
     {
-        if (x & 0x01)
+        if (_serpentine && (x & 0x01))
         {
             // Odd rows run backwards
             uint8_t reverseY = (_height - 1) - y;
@@ -262,18 +286,6 @@ public:
             return (x * _height) + y;
         }
     }
-
-    // This is an optimization that allows us to use direct math for the XY lookup when using the matrix, where
-    // it's a very simple layout.  Others may need to override this function.  Using a #define here allows
-    // us to avoid an extra virtual function call in the inner loop of the effects.
-
-    #if USE_HUB75
-        #define XY(x, y) ((y) * MATRIX_WIDTH + (x))
-    #elif HELMET
-        #define XY(x, y) (x, MATRIX_HEIGHT - 1 - y)           // Invert the Y axis for the helmet display
-    #else
-        #define XY(x, y) (((x) & 0x01) ? (((x) * MATRIX_HEIGHT) + ((MATRIX_HEIGHT - 1) - (y))) : (((x) * MATRIX_HEIGHT) + (y)))
-    #endif
 
     // Retrieves the color of a pixel at the specified X and Y coordinates.
     virtual CRGB getPixel(int16_t x, int16_t y) const;

@@ -53,6 +53,7 @@ class Screen;
 class SocketServer;
 class WebSocketServer;
 class CWebServer;
+class WS281xOutputManager;
 namespace nd_network { class NetworkReader; }
 using nd_network::NetworkReader;
 
@@ -89,6 +90,10 @@ class SystemContainer
 
     #if INCOMING_WIFI_ENABLED
         std::unique_ptr<SocketServer> _ptrSocketServer;
+    #endif
+
+    #if USE_WS281X
+        std::unique_ptr<WS281xOutputManager> _ptrWS281xOutputManager;
     #endif
 
     #if WEB_SOCKETS_ANY_ENABLED
@@ -130,6 +135,8 @@ class SystemContainer
 
     // Config objects
     void SetupConfig();
+    bool ApplyRuntimeConfiguration(String* errorMessage = nullptr);
+    int GetConfiguredAudioInputPin() const;
     bool HasJSONWriter() const { return !!_ptrJSONWriter; }
     JSONWriter& GetJSONWriter() const;
     bool HasDeviceConfig() const { return !!_ptrDeviceConfig; }
@@ -151,6 +158,12 @@ class SystemContainer
         SocketServer& SetupSocketServer(NetworkPort port, int ledCount);
         bool HasSocketServer() const { return !!_ptrSocketServer; }
         SocketServer& GetSocketServer() const;
+    #endif
+
+    #if USE_WS281X
+        WS281xOutputManager& SetupWS281xOutputManager();
+        bool HasWS281xOutputManager() const { return !!_ptrWS281xOutputManager; }
+        WS281xOutputManager& GetWS281xOutputManager() const;
     #endif
 
     #if WEB_SOCKETS_ANY_ENABLED

@@ -218,15 +218,27 @@ static const RemoteColorCode RemoteColorCodes[] =
 // Native RMT Decoder Implementation (Legacy 4.x API)
 // ---------------------------------------------------------
 
-#define NEC_DECODE_MARGIN 200  // Tolerance in microseconds
+#define NEC_DECODE_MARGIN 300  // Tolerance in microseconds
 #define RMT_RESOLUTION_HZ 1000000
+
+namespace
+{
+    #if USE_WS281X
+    // Reserve legacy RMT channel 7 for IR receive on WS281x builds. LED output uses channels from 0 upward,
+    // so the only impossible case is asking for eight LED channels and a remote at the same time.
+    static_assert(NUM_CHANNELS < 8, "WS281x plus remote exceeds available legacy ESP32 RMT channels");
+    #endif
+
+    constexpr int kRemoteRmtChannelIndex = 7;
+}
 
 class RemoteControlImpl
 {
 public:
-    RemoteControlImpl(int pin) : _pin(pin), _channel(RMT_CHANNEL_0) {}
+    RemoteControlImpl(int pin) : _pin(pin), _channel(static_cast<rmt_channel_t>(kRemoteRmtChannelIndex)) {}
 
     ~RemoteControlImpl() {
+        detachInterrupt(_pin);
         if (_begun) {
             rmt_rx_stop(_channel);
             rmt_driver_uninstall(_channel);
@@ -239,6 +251,8 @@ public:
         config.rx_config.filter_en = true;
         config.rx_config.filter_ticks_thresh = 100; // Ignore pulses shorter than 100us
         config.rx_config.idle_threshold = 20000;    // 20ms idle = end of frame
+
+        attachInterruptArg(_pin, &RemoteControlImpl::EdgeISR, this, CHANGE);
 
         if (rmt_config(&config) != ESP_OK) return false;
         if (rmt_driver_install(_channel, 1024, 0) != ESP_OK) return false;
@@ -267,6 +281,11 @@ private:
     rmt_channel_t _channel;
     RingbufHandle_t _ringbuf = NULL;
     bool _begun = false;
+
+    static void EdgeISR(void* arg)
+    {
+        (void)arg;
+    }
 
     bool match(uint32_t measured, uint32_t target) {
         return (measured >= (target - NEC_DECODE_MARGIN)) &&
@@ -297,11 +316,13 @@ private:
         if (symbol_count < 67) return false;
 
         uint32_t data = 0;
-        int bit_idx = 0;
-
         for (int i = 2; i < 66; i += 2) {
             if (!match(get_time(i), 560)) return false;
 
+            // Keep the historical MSB-first assembly here because the existing command tables were
+            // authored against these numeric decode values. Switching to protocol-pure LSB-first
+            // assembly changes every key code and breaks matching on working remotes.
+            
             data <<= 1;
 
             // 560us space = '0', 1690us space = '1'
@@ -363,8 +384,6 @@ void RemoteControl::handle()
     }
 
     if (result == 0) return;
-
-    // debugI("Received IR Remote Code: 0x%08lX %s\n", (unsigned long)result, isRepeat ? "(Repeat)" : "");
 
     if (isRepeat || result == lastResult)
     {

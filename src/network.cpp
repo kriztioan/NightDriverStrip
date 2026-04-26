@@ -489,7 +489,8 @@ namespace nd_network
             {"clock", "Refresh time", "Refreshing", [](const DebugCLI::cli_argv &) { NTPTimeClient::UpdateClockFromWeb(&l_Udp); }},
             #endif
             {"stats", "Display stats", "Displaying", [](const DebugCLI::cli_argv &) {
-                DebugCLI::cli_printf("%s:%zux%d %zuK %ddB:%s", FLASH_VERSION_NAME, g_ptrSystem->GetDevices().size(), NUM_LEDS, (size_t)(ESP.getFreeHeap()/1024), abs(WiFi.RSSI()), WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "None");
+                const auto& config = g_ptrSystem->GetDeviceConfig();
+                DebugCLI::cli_printf("%s:%zux%zu %zuK %ddB:%s", FLASH_VERSION_NAME, g_ptrSystem->GetDevices().size(), config.GetActiveLEDCount(), (size_t)(ESP.getFreeHeap()/1024), abs(WiFi.RSSI()), WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "None");
             }}
         };
         DebugCLI::RegisterCommands(cmds, sizeof(cmds) / sizeof(cmds[0]));
@@ -697,6 +698,7 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
 
         auto& graphics = effectManager.g();
         auto leds = graphics.leds;
+        const auto activeLEDCount = graphics.GetLEDCount();
 
         if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
         {
@@ -706,11 +708,11 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
                 // Potentially too large for the stack, so we allocate it on the heap instead
                 std::unique_ptr<ColorDataPacket> pPacket = std::make_unique<ColorDataPacket>();
                 pPacket->header = COLOR_DATA_PACKET_HEADER;
-                pPacket->width  = graphics.width();
-                pPacket->height = graphics.height();
-                memcpy(pPacket->colors, leds, sizeof(CRGB) * NUM_LEDS);
+                pPacket->width  = graphics.GetMatrixWidth();
+                pPacket->height = graphics.GetMatrixHeight();
+                memcpy(pPacket->colors, leds, sizeof(CRGB) * activeLEDCount);
 
-                if (!_viewer.SendPacket(socket, pPacket.get(), sizeof(ColorDataPacket)))
+                if (!_viewer.SendPacket(socket, pPacket.get(), sizeof(pPacket->header) + sizeof(pPacket->width) + sizeof(pPacket->height) + sizeof(CRGB) * activeLEDCount))
                 {
                     // If anything goes wrong, we close the socket so it can accept new incoming attempts
                     debugW("Error on color data socket, so closing");
@@ -720,7 +722,7 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
             }
 
 #if COLORDATA_WEB_SOCKET_ENABLED
-            webSocketServer.SendColorData(leds, NUM_LEDS);
+            webSocketServer.SendColorData(leds, activeLEDCount);
 #endif
         }
 

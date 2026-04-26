@@ -1377,18 +1377,8 @@ GFXBase::GFXBase(int w, int h) : Adafruit_GFX(w, h),
     // Allocate boids for matrix effects (like PatternBounce) when we have matrix dimensions
     #if MATRIX_HEIGHT > 1
         debugV("Allocating boids for matrix effects");
-        _boids.reset(psram_allocator<Boid>().allocate(MATRIX_WIDTH));
+        _boids = std::make_unique<Boid[]>(_width);
         assert(_boids);
-    #endif
-
-    #if USE_NOISE
-        debugV("Allocating noise");
-        _ptrNoise = std::make_unique<Noise>();          // Avoid specific PSRAM allocation since highly random access
-        assert(_ptrNoise);
-        debugV("Setting up noise");
-        NoiseVariablesSetup();
-        debugV("Filling noise");
-        FillGetNoise();
     #endif
 
     debugV("Setting up palette");
@@ -1396,15 +1386,44 @@ GFXBase::GFXBase(int w, int h) : Adafruit_GFX(w, h),
     ResetOscillators();
 }
 
-// Remove the XY macro definition that was set in gfxbase.h. In this file we won't use it beyond this point anyway.
-#undef XY
+void GFXBase::ConfigureTopology(size_t width, size_t height, bool serpentine)
+{
+    // The runtime topology work is intentionally routed through GFXBase so effects that already ask g()
+    // for geometry start honoring live strip layouts without each effect learning about DeviceConfig.
+    
+    _width      = width;
+    _height     = height;
+    _ledcount   = width * height;
+    _serpentine = serpentine;
+
+    WIDTH  = width;
+    HEIGHT = height;
+    
+    Adafruit_GFX::_width = width;
+    Adafruit_GFX::_height = height;
+}
+
+#if USE_NOISE
+void GFXBase::EnsureNoise()
+{
+    if (_ptrNoise)
+        return;
+
+    // Noise is large and only used by a subset of effects. Lazy allocation keeps the boot path leaner
+    // and still allows runtime topology to stay within the build-time maximum noise backing store.
+    _ptrNoise = std::make_unique<Noise>();
+    assert(_ptrNoise);
+    NoiseVariablesSetup();
+    FillGetNoise();
+}
+#endif
 
 // Dirty hack to support FastLED, which calls out of band to get the pixel index for "the" array, without
 // any indication of which array or who's asking, so we assume the first matrix. If you have trouble with
 // more than one matrix and some FastLED functions like blur2d, this would be why.
-uint16_t XY(uint8_t x, uint8_t y)
+uint16_t XY(uint16_t x, uint16_t y)
 {
-    static auto& g = g_ptrSystem->GetEffectManager().g();
+    auto& g = g_ptrSystem->GetEffectManager().g();
     return g.xy(x, y);
 }
 

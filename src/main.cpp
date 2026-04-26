@@ -459,7 +459,7 @@ void setup()
     #endif
 
     #if INCOMING_WIFI_ENABLED
-        g_ptrSystem->SetupSocketServer(NetworkPort::IncomingWiFi, NUM_LEDS);  // $C000 is free RAM on the C64, fwiw!
+        g_ptrSystem->SetupSocketServer(NetworkPort::IncomingWiFi, g_ptrSystem->GetDeviceConfig().GetActiveLEDCount());  // $C000 is free RAM on the C64, fwiw!
     #endif
 
     #if ENABLE_WIFI && ENABLE_WEBSERVER
@@ -482,9 +482,15 @@ void setup()
 
     #if ENABLE_AUDIO
     {
-        #if INPUT_PIN
-        if (INPUT_PIN >= 0)
-            pinMode(INPUT_PIN, INPUT);
+        // USE_M5 implies we are using M5Unified which manages the mic pins itself, so we 
+        // skip manual pin setup in that case.  For other boards, we set the audio input pin
+        // according to the current config, which allows the boot-applied pin to match what 
+        // settings report and for settings changes to take effect immediately.
+
+        #if !USE_M5
+        const auto audioInputPin = g_ptrSystem->GetConfiguredAudioInputPin();
+        if (audioInputPin >= 0)
+            pinMode(audioInputPin, INPUT);
         #endif
         #if TTGO
             pinMode(37, OUTPUT);            // This pin layout allows for mounting a MAX4466 to the backside
@@ -516,7 +522,9 @@ void setup()
     #elif USE_M5
 
         M5.begin();
-        // M5 specific setup is now inside M5Screen constructor
+        // M5Unified boots the panel in portrait. Set landscape before we size the Screen wrapper so
+        // the screen task and layout code agree on width/height from the start.
+        M5.Lcd.setRotation(1);
         g_ptrSystem->SetupHardwareDisplay(M5.Lcd.width(), M5.Lcd.height());
 
     #elif ELECROW

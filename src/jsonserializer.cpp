@@ -246,6 +246,7 @@ size_t JSONWriter::RegisterWriter(const std::function<void()>& writer)
     // Add a writer to the collection. Returns the index of the added writer, for use with FlagWriter()
 
     // Add the writer with its flag unset
+    std::lock_guard<std::mutex> lock(writersMutex);
     writers.push_back(std::make_shared<WriterEntry>(writer));
     return writers.size() - 1;
 }
@@ -255,10 +256,15 @@ void JSONWriter::FlagWriter(size_t index)
     // Flag a writer for invocation and wake up the task that calls them
 
     // Check if we received a valid writer index
-    if (index >= writers.size())
-        return;
+    std::shared_ptr<WriterEntry> entry;
+    {
+        std::lock_guard<std::mutex> lock(writersMutex);
+        if (index >= writers.size())
+            return;
+        entry = writers[index];
+    }
 
-    writers[index]->flag.store(true);
+    entry->flag.store(true);
     latestFlagMs.store(millis());
 
     g_ptrSystem->GetTaskManager().NotifyJSONWriterThread();
@@ -312,7 +318,14 @@ void IRAM_ATTR JSONWriterTaskEntry(void *)
             notifyWait = pdMS_TO_TICKS(holdUntil - now);
         }
 
-        for (auto &entryPtr : g_ptrSystem->GetJSONWriter().writers)
+        std::vector<std::shared_ptr<JSONWriter::WriterEntry>> writersSnapshot;
+        {
+            auto& jsonWriter = g_ptrSystem->GetJSONWriter();
+            std::lock_guard<std::mutex> lock(jsonWriter.writersMutex);
+            writersSnapshot = jsonWriter.writers;
+        }
+
+        for (auto &entryPtr : writersSnapshot)
         {
             auto& entry = *entryPtr;
             // Unset flag before we do the actual write. This makes that we don't miss another flag raise if it happens while reading

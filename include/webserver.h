@@ -167,7 +167,9 @@ class CWebServer
     static bool IsPostParamTrue(AsyncWebServerRequest * pRequest, const String & paramName);
     static const std::vector<std::reference_wrapper<SettingSpec>> & LoadDeviceSettingSpecs();
     static void SendSettingSpecsResponse(AsyncWebServerRequest * pRequest, const std::vector<std::reference_wrapper<SettingSpec>> & settingSpecs);
-    static void SetSettingsIfPresent(AsyncWebServerRequest * pRequest);
+    static bool ValidateLegacyDeviceSettings(AsyncWebServerRequest * pRequest, String* errorMessage = nullptr);
+    static bool ValidateUnifiedDeviceSettings(JsonObjectConst device, String* errorMessage = nullptr);
+    static bool SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* errorMessage = nullptr);
     static long GetEffectIndexFromParam(AsyncWebServerRequest * pRequest, bool post = false);
     static bool CheckAndGetSettingsEffect(AsyncWebServerRequest * pRequest, std::shared_ptr<LEDStripEffect> & effect, bool post = false);
     static void SendEffectSettingsResponse(AsyncWebServerRequest * pRequest, std::shared_ptr<LEDStripEffect> & effect);
@@ -179,6 +181,9 @@ class CWebServer
     static void GetSettingSpecs(AsyncWebServerRequest * pRequest);
     static void GetSettings(AsyncWebServerRequest * pRequest);
     static void SetSettings(AsyncWebServerRequest * pRequest);
+    static void GetUnifiedSettings(AsyncWebServerRequest * pRequest);
+    static void GetUnifiedSettingsSchema(AsyncWebServerRequest * pRequest);
+    static void SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVariantConst json);
     static void GetEffectSettingSpecs(AsyncWebServerRequest * pRequest);
     static void GetEffectSettings(AsyncWebServerRequest * pRequest);
     static void SetEffectSettings(AsyncWebServerRequest * pRequest);

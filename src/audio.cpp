@@ -42,6 +42,7 @@
 #if ENABLE_AUDIO
 #include "nd_network.h"
 #include "soundanalyzer.h"
+#include "systemcontainer.h"
 #include "time_utils.h"
 
 // AudioSamplerTaskEntry
@@ -51,8 +52,13 @@ void IRAM_ATTR AudioSamplerTaskEntry(void *)
 {
     debugI(">>> Sampler Task Started");
 
-    // Enable microphone input
-    pinMode(INPUT_PIN, INPUT);
+    // M5 boards sample through M5.Mic/M5Unified, not the generic INPUT_PIN path.
+    // Only configure INPUT_PIN for the external mic configurations that actually consume it.
+    #if !USE_M5
+    const auto audioInputPin = g_ptrSystem->GetConfiguredAudioInputPin();
+    if (audioInputPin >= 0)
+        pinMode(audioInputPin, INPUT);
+    #endif
 
     g_Analyzer.InitAudioInput();
 
@@ -67,7 +73,7 @@ void IRAM_ATTR AudioSamplerTaskEntry(void *)
         // VURatio with a fadeout
 
         static auto lastVU = 0.0f;
-        constexpr auto VU_DECAY_PER_SECOND = 6.00;
+        constexpr auto VU_DECAY_PER_SECOND = 9.00;
 
         // Get the elapsed time since the last frame. We'll calculate this at the right spot from the first loop onwards
         static auto frameDurationSeconds = (millis() - lastFrame) / 1000.0;

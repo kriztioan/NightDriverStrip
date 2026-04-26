@@ -41,6 +41,10 @@
 #include "taskmgr.h"
 #include "webserver.h"
 #include "websocketserver.h"
+#if USE_WS281X
+#include "ws281xgfx.h"
+#include "ws281xoutputmanager.h"
+#endif
 
 // SystemContainer
 //
@@ -145,6 +149,14 @@ SocketServer& SystemContainer::GetSocketServer() const
 }
 #endif
 
+#if USE_WS281X
+WS281xOutputManager& SystemContainer::GetWS281xOutputManager() const
+{
+    CheckPointer(!!_ptrWS281xOutputManager, "WS281xOutputManager");
+    return *_ptrWS281xOutputManager;
+}
+#endif
+
 #if WEB_SOCKETS_ANY_ENABLED
 WebSocketServer& SystemContainer::GetWebSocketServer() const
 {
@@ -194,7 +206,9 @@ SystemContainer::BufferManagerContainer& SystemContainer::SetupBufferManagers()
         uint32_t memtouse = ESP.getFreeHeap() - RESERVE_MEMORY;
     #endif
 
-    uint32_t memtoalloc = (_ptrDevices->size() * (sizeof(LEDBuffer) + NUM_LEDS * sizeof(CRGB)));
+    uint32_t memtoalloc = 0;
+    for (const auto& device : *_ptrDevices)
+        memtoalloc += sizeof(LEDBuffer) + (device->GetLEDCount() * sizeof(CRGB));
     uint32_t cBuffers = memtouse / memtoalloc;
 
     if (cBuffers < MIN_BUFFERS)
@@ -273,6 +287,67 @@ void SystemContainer::SetupConfig()
         _ptrDeviceConfig = make_unique_psram<DeviceConfig>();
 }
 
+int SystemContainer::GetConfiguredAudioInputPin() const
+{
+    if (_ptrDeviceConfig)
+        return _ptrDeviceConfig->GetAudioInputPin();
+
+    return DeviceConfig::GetCompiledAudioInputPin();
+}
+
+bool SystemContainer::ApplyRuntimeConfiguration(String* errorMessage)
+{
+    auto& config = GetDeviceConfig();
+
+    if (config.RequiresRecompileForCurrentRuntimeConfig())
+    {
+        if (errorMessage)
+            *errorMessage = "recompile needed";
+        return false;
+    }
+
+    #if USE_WS281X
+    if (_ptrDevices)
+    {
+        // Reconfiguring the already-owned GFX objects keeps the rest of the renderer stable while
+        // still letting the active WS281x layout, channel count, and pins move inside build limits.
+        for (auto& device : *_ptrDevices)
+            device->ConfigureTopology(config.GetMatrixWidth(), config.GetMatrixHeight(), config.IsMatrixSerpentine());
+    }
+
+    if (_ptrBufferManagers && _ptrDevices)
+    {
+        for (size_t i = 0; i < _ptrBufferManagers->size() && i < _ptrDevices->size(); ++i)
+            (*_ptrBufferManagers)[i].Reconfigure((*_ptrDevices)[i]);
+    }
+
+    #if INCOMING_WIFI_ENABLED
+    if (_ptrSocketServer)
+        _ptrSocketServer->SetLEDCount(config.GetActiveLEDCount());
+    #endif
+
+    // Compiled-pin WS281x transport is still the lowest-risk path for the common case where the user
+    // only changes topology inside the existing build envelope. Only engage the runtime manager when
+    // the active output really diverges from the compiled channel/pin layout.
+    if (_ptrDevices)
+    {
+        if (config.UsesCompiledWS281xTransport())
+        {
+            WS281xGFX::ApplyCompiledTransportConfiguration(config, *_ptrDevices, "runtime apply");
+        }
+        else
+        {
+            return SetupWS281xOutputManager().ApplyConfig(config, *_ptrDevices, errorMessage);
+        }
+    }
+    #endif
+
+    if (errorMessage)
+        *errorMessage = "";
+
+    return true;
+}
+
 #if ENABLE_WIFI
 NetworkReader& SystemContainer::SetupNetworkReader()
 {
@@ -295,7 +370,10 @@ CWebServer& SystemContainer::SetupWebServer()
 RemoteControl& SystemContainer::SetupRemoteControl()
 {
     if (!_ptrRemoteControl)
+    {
+        debugI("Remote configured: enabled=1 pin=%d", IR_REMOTE_PIN);
         _ptrRemoteControl = make_unique_psram<RemoteControl>();
+    }
     return *_ptrRemoteControl;
 }
 #endif
@@ -305,7 +383,18 @@ SocketServer& SystemContainer::SetupSocketServer(NetworkPort port, int ledCount)
 {
     if (!_ptrSocketServer)
         _ptrSocketServer = make_unique_psram<SocketServer>(port, ledCount);
+    else
+        _ptrSocketServer->SetLEDCount(ledCount);
     return *_ptrSocketServer;
+}
+#endif
+
+#if USE_WS281X
+WS281xOutputManager& SystemContainer::SetupWS281xOutputManager()
+{
+    if (!_ptrWS281xOutputManager)
+        _ptrWS281xOutputManager = make_unique_psram<WS281xOutputManager>();
+    return *_ptrWS281xOutputManager;
 }
 #endif
 

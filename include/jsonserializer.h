@@ -36,6 +36,7 @@
 #include <ArduinoJson.h>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 template <class E>
@@ -96,6 +97,7 @@ class JSONWriter
     struct WriterEntry;
 
     std::vector<std::shared_ptr<WriterEntry>> writers;
+    mutable std::mutex       writersMutex;
     std::atomic_ulong        latestFlagMs;
     std::atomic_bool         flushRequested;
     std::atomic_bool         haltWrites;
