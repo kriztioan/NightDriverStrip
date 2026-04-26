@@ -30,8 +30,6 @@
 //---------------------------------------------------------------------------
 
 
-#include <deque>
-
 #include "effects.h"
 #include "faneffects.h"
 #include "values.h"
@@ -41,8 +39,8 @@
 // BeatEffectBase
 //
 // A specialization of LEDStripEffect, adds a HandleBeat function that allows apps to
-// draw based on the music beat.  The Draw() function does the audio processing and calls
-// HandleBeat() whenever.  Apps are free to draw in both Draw() and HandleBeat().
+// react to the shared analyzer beat event.  Draw() remains free to do its own rendering;
+// BeatEffectBase only adapts the central beat callback onto the older HandleBeat API.
 //
 // The constructor allows you to specify the sensitivity by where the latch points are/
 // For a highly sensitive (defaults), keep them both close to 1.0.  For a wider beat
@@ -52,9 +50,6 @@
 class BeatEffectBase
 {
   protected:
-
-    const int _maxSamples = 60;
-    std::deque<float> _samples;
     double _lastBeat = 0;
     float _minRange = 0;
     float _minElapsed = 0;
@@ -79,47 +74,17 @@ class BeatEffectBase
     }
 
 
-    // BeatEffectBase::Draw
-    //
-    // Doesn't actually "draw" anything, but rather it scans the audio VU to detect beats, and when it finds one,
-    // it calls the virtual "HandleBeat" function.
+    // Beat handling moved into SoundAnalyzer so all effects see the same beat
+    // timing. ProcessAudio stays as a compatibility no-op for older effects.
+    virtual void ProcessAudio() {}
 
-    virtual void ProcessAudio()
+    virtual void OnBeat(const BeatInfo& beat)
     {
-        debugV("BeatEffectBase2::Draw");
-        double elapsed = SecondsSinceLastBeat();
+        const float elapsed = std::max(static_cast<float>(_minElapsed), beat.intervalMs / 1000.0f);
+        const float span = std::max(beat.strength, _minRange);
 
-        // Access peaks via const reference to avoid copying
-        const PeakData & peaks = g_Analyzer.Peaks();
-        auto basslevel = peaks[0] * 2;  // Scale to historical 0-2 range
-
-        debugV("basslevel: %0.2f", basslevel);
-        _samples.push_back(basslevel);
-        float minimum = *min_element(_samples.begin(), _samples.end());
-        float maximum = *max_element(_samples.begin(), _samples.end());
-
-        //Serial.printf("Samples: %d, max: %0.2f, min: %0.2f, span: %0.2f\n", _samples.size(), maximum, minimum, maximum-minimum);
-
-        if (_samples.size() >= _maxSamples)
-          _samples.pop_front();
-
-        if (maximum - minimum > _minRange)
-        {
-            if (elapsed < _minElapsed)
-            {
-                //Serial.printf("False Beat: elapsed: %0.2f, range: %0.2f, time: %0.2lf\n", elapsed, maximum - minimum, g_AppTime.CurrentTime());
-                // False beat too early, clear data but don't reset lastBeat
-                 _samples.clear();
-            }
-            else
-            {
-                debugV("Beat: elapsed: %0.2lf, range: %0.2lf\n", elapsed, maximum - minimum);
-
-                HandleBeat(false, elapsed, maximum - minimum);
-                _lastBeat = g_Values.AppTime.CurrentTime();
-                _samples.clear();
-            }
-        }
+        HandleBeat(beat.major, elapsed, span);
+        _lastBeat = g_Values.AppTime.CurrentTime();
     }
 };
 

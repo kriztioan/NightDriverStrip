@@ -52,8 +52,8 @@ void IRAM_ATTR AudioSamplerTaskEntry(void *)
 {
     debugI(">>> Sampler Task Started");
 
-    // M5 boards sample through M5.Mic/M5Unified, not the generic INPUT_PIN path.
-    // Only configure INPUT_PIN for the external mic configurations that actually consume it.
+    // M5 boards sample through M5.Mic/M5Unified, not the generic AUDIO_INPUT_PIN path.
+    // Only configure AUDIO_INPUT_PIN for the external mic configurations that actually consume it.
     #if !USE_M5
     const auto audioInputPin = g_ptrSystem->GetConfiguredAudioInputPin();
     if (audioInputPin >= 0)

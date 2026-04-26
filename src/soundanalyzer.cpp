@@ -54,7 +54,33 @@ namespace
         if (g_ptrSystem)
             return g_ptrSystem->GetConfiguredAudioInputPin();
 
-        return INPUT_PIN;
+        return AUDIO_INPUT_PIN;
+    }
+
+    template <size_t N>
+    float MeanOfHistory(const std::array<float, N>& values, size_t count)
+    {
+        if (count == 0)
+            return 0.0f;
+
+        const float sum = std::accumulate(values.begin(), values.begin() + count, 0.0f);
+        return sum / static_cast<float>(count);
+    }
+
+    template <size_t N>
+    float StdDevOfHistory(const std::array<float, N>& values, size_t count, float mean)
+    {
+        if (count == 0)
+            return 0.0f;
+
+        float variance = 0.0f;
+        for (size_t i = 0; i < count; ++i)
+        {
+            const float delta = values[i] - mean;
+            variance += delta * delta;
+        }
+
+        return sqrtf(variance / static_cast<float>(count));
     }
 }
 
@@ -101,9 +127,52 @@ SoundAnalyzerBase::~SoundAnalyzerBase()
 // Reset and clear the FFT buffers
 void SoundAnalyzerBase::Reset()
 {
+    debugI("Audio analyzer full reset");
+    ResetFrameState();
+    _noiseFloor.fill(0.0f);
+    _rawPrev.fill(0.0f);
+    _livePeaks.fill(0.0f);
+    _energyMaxEnv = 0.01f;
+    _msLastRemoteAudio = 0;
+    _AudioFPS = 0;
+    _serialFPS = 0;
+    _VURatio = 1.0f;
+    _VURatioFade = 1.0f;
+    _VU = 0.0f;
+    _PeakVU = 0.0f;
+    _MinVU = 0.0f;
+    _oldVU = 0.0f;
+    _oldPeakVU = 0.0f;
+    _oldMinVU = 0.0f;
+    ResetBeatDetection();
+}
+
+void SoundAnalyzerBase::ResetFrameState()
+{
     _vReal.fill(0.0f);
     _vImaginary.fill(0.0f);
     _vPeaks.fill(0.0f);
+    _Peaks.fill(0.0f);
+    _beatPeaks.fill(0.0f);
+}
+
+void SoundAnalyzerBase::ResetBeatDetection()
+{
+    debugV("Beat detector reset");
+    _lastBeatInfo = {};
+    _lastNearBeatInfo = {};
+    _previousBeatPeaks.fill(0.0f);
+    _beatScoreBaseline = 0.0f;
+    _beatFluxBaseline = 0.0f;
+    _beatBassBaseline = 0.0f;
+    _beatScoreDeviation = 0.0f;
+    _beatFluxDeviation = 0.0f;
+    _beatBassDeviation = 0.0f;
+    _previousBeatIntervalMs = 500.0f;
+    _lastBeatDetectedMs = 0;
+    _lastBeatDebugMs = 0;
+    _lastSimulatedBeatIndex = 0;
+    _hasSimulatedBeat = false;
 }
 
 // FFT
@@ -311,8 +380,175 @@ void SoundAnalyzerBase::SetPeakDataFromRemote(const PeakData &peaks)
     _msLastRemoteAudio = millis();
     _Peaks = peaks;
     _vPeaks = _Peaks;
+    _beatPeaks = _Peaks;
     float sum = std::accumulate(_vPeaks.begin(), _vPeaks.end(), 0.0f);
     UpdateVU(sum / (float)NUM_BANDS);
+}
+
+void SoundAnalyzerBase::RecordBeat(uint32_t now, float confidence, float strength, float bass, float mid, float treble, float flux, bool simulated)
+{
+    const float intervalMs = (_lastBeatDetectedMs == 0) ? _previousBeatIntervalMs : static_cast<float>(now - _lastBeatDetectedMs);
+
+    _lastBeatDetectedMs = now;
+    _previousBeatIntervalMs = (_lastBeatInfo.sequence == 0)
+        ? intervalMs
+        : ((_previousBeatIntervalMs * 0.75f) + (intervalMs * 0.25f));
+
+    _lastBeatInfo.sequence++;
+    _lastBeatInfo.timestampMs = now;
+    _lastBeatInfo.intervalMs = intervalMs;
+    _lastBeatInfo.msPerBeat = _previousBeatIntervalMs;
+    _lastBeatInfo.bpm = (_previousBeatIntervalMs > 1.0f) ? (60000.0f / _previousBeatIntervalMs) : 0.0f;
+    _lastBeatInfo.confidence = confidence;
+    _lastBeatInfo.strength = strength;
+    _lastBeatInfo.bass = bass;
+    _lastBeatInfo.mid = mid;
+    _lastBeatInfo.treble = treble;
+    _lastBeatInfo.flux = flux;
+    _lastBeatInfo.vu = _VU;
+    _lastBeatInfo.vuRatio = _VURatio;
+    _lastBeatInfo.major = confidence >= 0.95f || strength >= 1.90f;
+    _lastBeatInfo.simulated = simulated;
+}
+
+void SoundAnalyzerBase::RecordNearBeat(uint32_t now, float score, float strength, float bass, float mid, float treble, float flux)
+{
+    _lastNearBeatInfo.sequence++;
+    _lastNearBeatInfo.timestampMs = now;
+    _lastNearBeatInfo.intervalMs = 0.0f;
+    _lastNearBeatInfo.msPerBeat = _previousBeatIntervalMs;
+    _lastNearBeatInfo.bpm = (_previousBeatIntervalMs > 1.0f) ? (60000.0f / _previousBeatIntervalMs) : 0.0f;
+    _lastNearBeatInfo.confidence = score;
+    _lastNearBeatInfo.strength = strength;
+    _lastNearBeatInfo.bass = bass;
+    _lastNearBeatInfo.mid = mid;
+    _lastNearBeatInfo.treble = treble;
+    _lastNearBeatInfo.flux = flux;
+    _lastNearBeatInfo.vu = _VU;
+    _lastNearBeatInfo.vuRatio = _VURatio;
+    _lastNearBeatInfo.major = false;
+    _lastNearBeatInfo.simulated = false;
+}
+
+void SoundAnalyzerBase::UpdateBeatDetection()
+{
+    constexpr float kBaselineAlpha = 0.08f;
+    constexpr float kDeviationAlpha = 0.12f;
+
+    const size_t bassBands = std::max<size_t>(1, std::min<size_t>(NUM_BANDS, 3));
+    const size_t midBands = std::max<size_t>(1, std::min<size_t>(NUM_BANDS - bassBands, std::max<size_t>(1, NUM_BANDS / 3)));
+
+    float bass = 0.0f;
+    float mid = 0.0f;
+    float treble = 0.0f;
+    float flux = 0.0f;
+    float lowFlux = 0.0f;
+
+    for (size_t i = 0; i < NUM_BANDS; ++i)
+    {
+        const float band = _beatPeaks[i];
+        const float delta = std::max(0.0f, band - _previousBeatPeaks[i]);
+
+        if (i < bassBands)
+        {
+            bass += band;
+            lowFlux += delta;
+        }
+        else if (i < bassBands + midBands)
+        {
+            mid += band;
+        }
+        else
+        {
+            treble += band;
+        }
+
+        flux += delta;
+    }
+
+    bass /= static_cast<float>(bassBands);
+    if (midBands > 0)
+        mid /= static_cast<float>(midBands);
+
+    const size_t trebleBands = (NUM_BANDS > bassBands + midBands) ? (NUM_BANDS - bassBands - midBands) : 0;
+    if (trebleBands > 0)
+        treble /= static_cast<float>(trebleBands);
+
+    flux /= static_cast<float>(NUM_BANDS);
+    lowFlux /= static_cast<float>(bassBands);
+    const float beatBandGroups = static_cast<float>((bassBands > 0 ? 1 : 0) + (midBands > 0 ? 1 : 0) + (trebleBands > 0 ? 1 : 0));
+    const float beatVu = (bass + mid + treble) / std::max(1.0f, beatBandGroups);
+
+    const float score = bass * 0.55f + lowFlux * 1.50f + flux * 1.20f + mid * 0.15f + beatVu * 0.25f;
+    const float strength = std::clamp((bass * 1.10f) + (lowFlux * 2.10f) + (flux * 1.35f), 0.0f, 2.5f);
+    const float scoreThreshold = _beatScoreBaseline + std::max(0.03f, _beatScoreDeviation * 1.20f);
+    const float fluxThreshold = _beatFluxBaseline + std::max(0.012f, _beatFluxDeviation * 1.15f);
+    const float bassThreshold = _beatBassBaseline + std::max(0.012f, _beatBassDeviation * 1.00f);
+
+    const uint32_t now = millis();
+    const float minIntervalMs = std::clamp(_previousBeatIntervalMs * 0.48f, 200.0f, 650.0f);
+    const bool enoughGap = (_lastBeatDetectedMs == 0) || (static_cast<float>(now - _lastBeatDetectedMs) >= minIntervalMs);
+    const bool candidate = enoughGap
+        && score > scoreThreshold
+        && flux > fluxThreshold
+        && (bass > bassThreshold || lowFlux > fluxThreshold || (score > (scoreThreshold * 1.08f) && flux > (fluxThreshold * 1.10f)))
+        && strength > 0.10f
+        && (bass + lowFlux) > 0.06f;
+    const bool nearCandidate = enoughGap
+        && score > (scoreThreshold * 0.75f)
+        && flux > (fluxThreshold * 0.75f)
+        && (bass + lowFlux) > 0.05f;
+
+    if (candidate)
+    {
+        const float confidence = std::clamp(
+            ((score - scoreThreshold) * 1.40f)
+            + ((flux - fluxThreshold) * 1.80f)
+            + ((bass - bassThreshold) * 1.00f)
+            + strength * 0.20f,
+            0.0f,
+            1.5f);
+
+        RecordBeat(now, confidence, strength, bass, mid, treble, flux, false);
+        debugV("Beat detected: seq=%lu bass=%.3f flux=%.3f lowFlux=%.3f score=%.3f strength=%.3f bpm=%.1f",
+               (unsigned long)_lastBeatInfo.sequence,
+               bass,
+               flux,
+               lowFlux,
+               score,
+               strength,
+               _lastBeatInfo.bpm);
+    }
+    else if (nearCandidate)
+    {
+        RecordNearBeat(now, score, strength, bass, mid, treble, flux);
+
+        if (now - _lastBeatDebugMs >= 250)
+        {
+            _lastBeatDebugMs = now;
+            debugI("Beat near-miss: bass=%.3f/%.3f flux=%.3f/%.3f score=%.3f/%.3f lowFlux=%.3f strength=%.3f gap=%d",
+                   bass,
+                   bassThreshold,
+                   flux,
+                   fluxThreshold,
+                   score,
+                   scoreThreshold,
+                   lowFlux,
+                   strength,
+                   enoughGap ? 1 : 0);
+        }
+    }
+
+    const float baselineAlpha = candidate ? (kBaselineAlpha * 0.35f) : kBaselineAlpha;
+    _beatScoreBaseline += (score - _beatScoreBaseline) * baselineAlpha;
+    _beatFluxBaseline += (flux - _beatFluxBaseline) * baselineAlpha;
+    _beatBassBaseline += (bass - _beatBassBaseline) * baselineAlpha;
+
+    _beatScoreDeviation += (fabsf(score - _beatScoreBaseline) - _beatScoreDeviation) * kDeviationAlpha;
+    _beatFluxDeviation += (fabsf(flux - _beatFluxBaseline) - _beatFluxDeviation) * kDeviationAlpha;
+    _beatBassDeviation += (fabsf(bass - _beatBassBaseline) - _beatBassDeviation) * kDeviationAlpha;
+
+    _previousBeatPeaks = _beatPeaks;
 }
 
 #if ENABLE_AUDIO_DEBUG
@@ -370,7 +606,18 @@ void SoundAnalyzerBase::SimulateBeatPass()
     }
 
     _Peaks = simulatedPeaks;
+    _beatPeaks = simulatedPeaks;
     UpdateVU(targetVU);
+
+    // Simulated beats should fire exactly once per cycle so effects can be
+    // tested without depending on heuristic onset detection.
+    const uint32_t beatIndex = static_cast<uint32_t>(currentTime / beatPeriodMillis);
+    if (isOnBeat && (!_hasSimulatedBeat || beatIndex != _lastSimulatedBeatIndex))
+    {
+        _hasSimulatedBeat = true;
+        _lastSimulatedBeatIndex = beatIndex;
+        RecordBeat(currentTime, 1.0f, 2.0f, 0.85f, 0.35f, 0.15f, 0.90f, true);
+    }
 }
 
 // RunSamplerPass
@@ -388,7 +635,7 @@ void SoundAnalyzerBase::RunSamplerPass()
     if (millis() - _msLastRemoteAudio > AUDIO_PEAK_REMOTE_TIMEOUT)
     {
         // Use local microphone - type determined at compile time
-        Reset();
+        ResetFrameState();
         SampleAudio();
         FFT();
         ProcessPeaksEnergy();
@@ -399,6 +646,8 @@ void SoundAnalyzerBase::RunSamplerPass()
         float sum = std::accumulate(_Peaks.begin(), _Peaks.end(), 0.0f);
         UpdateVU(sum / NUM_BANDS);
     }
+
+    UpdateBeatDetection();
 }
 
 // --- Private Initialization Helpers ---
@@ -497,7 +746,7 @@ void SoundAnalyzerBase::InitADC_Modern()
     // Configure pattern: channel, attenuation, etc.
     adc_digi_pattern_config_t adc_pattern[1] = {0};
     adc_pattern[0].atten = ADC_ATTEN_DB_12; // 12dB (formerly 11dB) for full range ~3.3V
-    adc_pattern[0].channel = ADC_CHANNEL_0; // FIXED for now, ideally map from INPUT_PIN
+    adc_pattern[0].channel = ADC_CHANNEL_0; // FIXED for now, ideally map from AUDIO_INPUT_PIN
     adc_pattern[0].unit = ADC_UNIT_1;
     adc_pattern[0].bit_width = ADC_BITWIDTH_12;
 
@@ -661,6 +910,8 @@ size_t SoundAnalyzerBase::SampleADC_Legacy()
 template<const AudioInputParams& Params>
 const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
 {
+    PeakData rawSignals{};
+
     // Band offset handled in ComputeBandLayout so index 0 is the lowest VISIBLE band
     float frameMax = 0.0f;
     float frameSumRaw = 0.0f;
@@ -690,6 +941,7 @@ const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
         if (end <= start)
         {
             _vPeaks[b] = 0.0f;
+            rawSignals[b] = 0.0f;
             continue;
         }
 
@@ -752,13 +1004,13 @@ const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
             float right = (b < NUM_BANDS - 1) ? _rawPrev[b + 1] : signal;
             float smoothed = 0.25f * (2.0f * signal + left + right);
             _rawPrev[b] = smoothed;
-            _vPeaks[b] = smoothed;
+            rawSignals[b] = smoothed;
             if (smoothed > frameMax)
             {
                 frameMax = smoothed;
             }
         #else
-            _vPeaks[b] = signal;
+            rawSignals[b] = signal;
             if (signal > frameMax)
             {
                 frameMax = signal;
@@ -784,6 +1036,7 @@ const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
     {
         _vPeaks.fill(0.0f);
         _Peaks.fill(0.0f);
+        _beatPeaks.fill(0.0f);
         UpdateVU(0.0f);
         return _Peaks;
     }
@@ -796,6 +1049,7 @@ const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
     {
         _vPeaks.fill(0.0f);
         _Peaks.fill(0.0f);
+        _beatPeaks.fill(0.0f);
         UpdateVU(0.0f);
         return _Peaks;
     }
@@ -803,12 +1057,20 @@ const PeakData & SoundAnalyzer<Params>::ProcessPeaksEnergy()
     float envFloor = std::max(_params.energyMinEnv, envFloorRaw);
     float normDen = std::max(_energyMaxEnv, envFloor);
     const float invEnv = 1.0f / normDen;
+    const float beatNoiseRef = std::max(noiseMean, _params.energyMinEnv);
     float sumNorm = 0.0f;
 
     // Now that layout skips the lowest bins, emit all NUM_BANDS directly with no reindexing
     for (int b = 0; b < NUM_BANDS; b++)
     {
-        float vTarget = std::clamp(powf(std::max(0.0f, _vPeaks[b] * invEnv), _params.compressGamma), 0.0f, 1.0f);
+        // Beat detection runs from the pre-display signal so it is not pushed
+        // around by the same adaptive envelope and attack limiting used to make
+        // the spectrum/VU visuals look good.
+        const float beatReference = std::max({_noiseFloor[b], beatNoiseRef, _params.energyMinEnv});
+        const float beatRatio = std::max(0.0f, rawSignals[b]) / (beatReference + 1e-9f);
+        _beatPeaks[b] = std::clamp(sqrtf(beatRatio), 0.0f, 2.0f);
+
+        float vTarget = std::clamp(powf(std::max(0.0f, rawSignals[b] * invEnv), _params.compressGamma), 0.0f, 1.0f);
         vTarget = std::clamp(vTarget * kDisplayGain, 0.0f, 1.0f);
 
         const float bandFloor = std::max(kBandFloorMin * 1.0f, kBandFloorScale); // Fixed kBandFloorMin usage

@@ -122,6 +122,54 @@ class InsulatorSpectrumEffect : public EffectWithId<InsulatorSpectrumEffect>, pu
 class VUMeter
 {
   protected:
+    mutable uint32_t _lastIndicatorBeatSequence = 0;
+    mutable uint32_t _lastIndicatorNearBeatSequence = 0;
+    mutable uint32_t _indicatorUntilMs = 0;
+    mutable CRGB _indicatorColor = CRGB::Black;
+
+    bool UpdateBeatIndicatorState() const
+    {
+        const auto & beat = g_Analyzer.LastBeat();
+        const auto & nearBeat = g_Analyzer.LastNearBeat();
+        const uint32_t now = millis();
+
+        if (beat.sequence != 0 && beat.sequence != _lastIndicatorBeatSequence)
+        {
+            // Every accepted beat should restart the lamp pulse.  Do not apply
+            // additional gating here; the analyzer has already classified it.
+            _lastIndicatorBeatSequence = beat.sequence;
+            _indicatorColor = CRGB::Red;
+            _indicatorUntilMs = now + static_cast<uint32_t>(std::clamp(beat.msPerBeat * 0.03f, 20.0f, 36.0f));
+            return true;
+        }
+
+        if (nearBeat.sequence != 0 && nearBeat.sequence != _lastIndicatorNearBeatSequence)
+        {
+            _lastIndicatorNearBeatSequence = nearBeat.sequence;
+
+            // Near-miss pulses are shorter and only take effect when a real beat
+            // did not just restart the indicator above.
+            _indicatorColor = CRGB::Blue;
+            _indicatorUntilMs = now + static_cast<uint32_t>(std::clamp(nearBeat.msPerBeat * 0.02f, 14.0f, 24.0f));
+            return true;
+        }
+
+        return now <= _indicatorUntilMs;
+    }
+
+    void DrawBeatIndicator(std::vector<std::shared_ptr<GFXBase>> & GFX, int yVU) const
+    {
+        if (!UpdateBeatIndicatorState())
+            return;
+
+        const int centerLeft = (GFX[0]->width() / 2) - 1;
+        const int centerRight = centerLeft + 1;
+
+        // Overlay the center pair with a saturated pulse so beat classifier
+        // state is visible even when the rest of the meter uses the palette.
+        GFX[0]->setPixel(centerLeft, yVU, _indicatorColor);
+        GFX[0]->setPixel(centerRight, yVU, _indicatorColor);
+    }
 
     // DrawVUPixels
     //
@@ -186,6 +234,8 @@ class VUMeter
 
         for (int i = 0; i < bars; i++)
             DrawVUPixels(GFX, i, yVU, i > bars ? 255 : 0, pPalette);
+
+        DrawBeatIndicator(GFX, yVU);
     }
 };
 

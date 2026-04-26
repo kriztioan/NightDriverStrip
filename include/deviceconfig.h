@@ -175,7 +175,7 @@ class DeviceConfig : public IJSONSerializable
     CRGB    globalColor = CRGB::Red;
     bool    applyGlobalColors = false;
     CRGB    secondColor = CRGB::Red;
-    int8_t  audioInputPin = INPUT_PIN;
+    int8_t  audioInputPin = AUDIO_INPUT_PIN;
     RuntimeTopology runtimeTopology = {};
     RuntimeOutputs runtimeOutputs = {};
 
@@ -313,7 +313,7 @@ class DeviceConfig : public IJSONSerializable
     static constexpr uint16_t GetCompiledMatrixHeight() { return MATRIX_HEIGHT; }
     static constexpr size_t GetCompiledLEDCount() { return NUM_LEDS; }
     static constexpr size_t GetCompiledChannelCount() { return NUM_CHANNELS; }
-    static constexpr int GetCompiledAudioInputPin() { return INPUT_PIN; }
+    static constexpr int GetCompiledAudioInputPin() { return AUDIO_INPUT_PIN; }
     static std::array<int8_t, NUM_CHANNELS> GetCompiledPins() { return GetCompiledWS281xPins(); }
     static OutputDriver GetCompiledOutputDriver()
     {
