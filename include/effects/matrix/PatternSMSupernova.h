@@ -21,13 +21,13 @@ public:
     {
         std::for_each(_debris_items.begin(), _debris_items.end(),
 		              [](DebrisItem& debris_item) { debris_item.Clear(); });
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
     {
         step = -1;
-        g()->DimAll(200);
+        g().DimAll(200);
 
         for (auto& debris_item : _debris_items) {
             if (!debris_item._is_shift && step) {
@@ -36,9 +36,9 @@ public:
             }
 
             if (debris_item._is_shift && ParticlesUpdate(debris_item)) {
-                CRGB baseRGB = ColorFromPalette(g()->IsPalettePaused() ? g()->GetCurrentPalette() : HeatColors_p, debris_item._hue, 255, LINEARBLEND);
+                CRGB baseRGB = ColorFromPalette(g().IsPalettePaused() ? g().GetCurrentPalette() : HeatColors_p, debris_item._hue, 255, LINEARBLEND);
                 baseRGB.nscale8(debris_item._state);
-                g()->drawPixelXYF_Wu(debris_item._position_x, debris_item._position_y, baseRGB);
+                g().drawPixelXYF_Wu(debris_item._position_x, debris_item._position_y, baseRGB);
             }
         }
     }

@@ -208,7 +208,8 @@ public:
     bool SerializeToJSON(JsonObject& jsonObject) override;
 
     // Must provide at least one drawing instance, like the first matrix or strip we are drawing on
-    std::shared_ptr<GFXBase> g(int iChannel = 0) const;
+    GFXBase& g(int iChannel = 0);
+    const GFXBase& g(int iChannel = 0) const;
 
     // ShowVU - Control whether VU meter should be drawn.  Returns the previous state when set.
     virtual bool ShowVU(bool bShow);
@@ -219,8 +220,8 @@ public:
     // When a global color is set via the remote, we create a fill effect and assign it as the "remote effect"
     // which takes drawing precedence
 
-    void ApplyGlobalColor(CRGB color) const;
-    void ApplyGlobalPaletteColors() const;
+    void ApplyGlobalColor(CRGB color);
+    void ApplyGlobalPaletteColors();
 
     void ClearRemoteColor(bool retainRemoteEffect = false);
 
@@ -261,8 +262,8 @@ public:
 
     void CheckEffectTimerExpired();
 
-    void NextPalette() const;
-    void PreviousPalette() const;
+    void NextPalette();
+    void PreviousPalette();
     // Update to the next effect and abort the current effect.
 
     void NextEffect(bool skipSave = false);

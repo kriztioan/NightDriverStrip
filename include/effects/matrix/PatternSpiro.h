@@ -94,8 +94,8 @@ public:
   }
   void Draw() override
   {
-    auto graphics = g();
-    graphics->DimAll(253);
+    auto& graphics = g();
+    graphics.DimAll(253);
 
     // effects.ShowFrame();
 
@@ -103,14 +103,14 @@ public:
 
     for (int i = 0; i < spirocount; i++)
     {
-      uint8_t x = graphics->mapsin8(theta1 + i * spirooffset, minx, maxx);
-      uint8_t y = graphics->mapcos8(theta1 + i * spirooffset, miny, maxy);
+      uint8_t x = graphics.mapsin8(theta1 + i * spirooffset, minx, maxx);
+      uint8_t y = graphics.mapcos8(theta1 + i * spirooffset, miny, maxy);
 
-      uint8_t x2 = graphics->mapsin8(theta2 + i * spirooffset, x - radiusx, x + radiusx);
-      uint8_t y2 = graphics->mapcos8(theta2 + i * spirooffset, y - radiusy, y + radiusy);
+      uint8_t x2 = graphics.mapsin8(theta2 + i * spirooffset, x - radiusx, x + radiusx);
+      uint8_t y2 = graphics.mapcos8(theta2 + i * spirooffset, y - radiusy, y + radiusy);
 
-      CRGB color = graphics->ColorFromCurrentPalette(hueoffset + i * spirooffset, 128);
-      graphics->leds[graphics->xy(x2, y2)] += color;
+      CRGB color = graphics.ColorFromCurrentPalette(hueoffset + i * spirooffset, 128);
+      graphics.leds[graphics.xy(x2, y2)] += color;
 
       if (x2 == MATRIX_CENTER_X && y2 == MATRIX_CENTER_Y)
         change = true;

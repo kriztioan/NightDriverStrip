@@ -429,15 +429,17 @@ public:
 
     void UpdateQuoteDisplay()
     {
+        auto& graphics = g();
+
         textSymbol.UpdatePos();
         textPrice.UpdatePos();
         textChange.UpdatePos();
         textVolume.UpdatePos();
 
-        textSymbol.Draw(g().get());
-        textPrice.Draw(g().get());
-        textChange.Draw(g().get());
-        textVolume.Draw(g().get());
+        textSymbol.Draw(&graphics);
+        textPrice.Draw(&graphics);
+        textChange.Draw(&graphics);
+        textVolume.Draw(&graphics);
 
         if (stockData.empty())
             return;
@@ -486,9 +488,9 @@ public:
                     // Now draw from bottom up to breakeven in red, and from breakeven to top in green
 
                     if (currentStock.points[i].val < breakeven)
-                        g()->drawLine(x0, breakevenY, x1, y1, CRGB::Red);
+                        graphics.drawLine(x0, breakevenY, x1, y1, CRGB::Red);
                     else
-                        g()->drawLine(x0, y0, x1, breakevenY, CRGB::Green);
+                        graphics.drawLine(x0, y0, x1, breakevenY, CRGB::Green);
                 }
             }
         }
@@ -501,8 +503,9 @@ public:
 
     void Draw() override
     {
-        g()->fillScreen(BLACK16);
-        g()->fillRect(0, 0, MATRIX_WIDTH, 9, g()->to16bit(CRGB(0,0,128)));
+        auto& graphics = g();
+        graphics.fillScreen(BLACK16);
+        graphics.fillRect(0, 0, MATRIX_WIDTH, 9, graphics.to16bit(CRGB(0,0,128)));
 
         // Periodically refetch the stock data from the server
 

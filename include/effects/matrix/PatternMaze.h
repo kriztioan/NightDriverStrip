@@ -239,8 +239,8 @@ private:
         shuffleDirections();
 
         CRGB color = chooseColor(index);
-        g()->drawPixel(imagePoint.x, imagePoint.y, color);
-        g()->drawPixel(MATRIX_WIDTH - 1 - imagePoint.x, imagePoint.y, color);
+        g().drawPixel(imagePoint.x, imagePoint.y, color);
+        g().drawPixel(MATRIX_WIDTH - 1 - imagePoint.x, imagePoint.y, color);
 
         for (int i = 0; i < 4; i++)
         {
@@ -254,8 +254,8 @@ private:
 
                 Point newImagePoint = imagePoint.Move(direction);
 
-                g()->drawPixel(newImagePoint.x, newImagePoint.y, color);
-                g()->drawPixel(MATRIX_WIDTH - 1 - newImagePoint.x, newImagePoint.y, color);
+                g().drawPixel(newImagePoint.x, newImagePoint.y, color);
+                g().drawPixel(MATRIX_WIDTH - 1 - newImagePoint.x, newImagePoint.y, color);
 
                 cellCount++;
                 cells[cellCount - 1] = newPoint;
@@ -268,8 +268,8 @@ private:
         if (index > -1) {
             Point finishedPoint = cells[index];
             imagePoint = createPoint(finishedPoint.x * 2, finishedPoint.y * 2);
-            g()->drawPixel(imagePoint.x, imagePoint.y, color);
-            g()->drawPixel(MATRIX_WIDTH - 1 - imagePoint.x, imagePoint.y, color);
+            g().drawPixel(imagePoint.x, imagePoint.y, color);
+            g().drawPixel(MATRIX_WIDTH - 1 - imagePoint.x, imagePoint.y, color);
 
             removeCell(index);
         }
@@ -285,7 +285,7 @@ public:
         if (cellCount < 1)
         {
             hue = random(256);
-            g()->Clear();
+            g().Clear();
 
             // reset the maze grid
             for (int y = 0; y < height; y++) {
@@ -324,7 +324,7 @@ public:
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 };
 

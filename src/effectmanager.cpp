@@ -135,8 +135,8 @@ void EffectManager::StartEffect()
     std::shared_ptr<LEDStripEffect> & effect = _tempEffect ? _tempEffect : _vEffects[_iCurrentEffect];
 
     #if USE_HUB75
-        auto pMatrix = std::static_pointer_cast<HUB75GFX>(_gfx[0]);
-        pMatrix->SetCaption(effect->FriendlyName(), CAPTION_TIME);
+        auto& matrix = static_cast<HUB75GFX&>(*_gfx[0]);
+        matrix.SetCaption(effect->FriendlyName(), CAPTION_TIME);
     #endif
 
     effect->Start();
@@ -238,9 +238,14 @@ void EffectManager::AddEffectEventListener(IEffectEventListener& listener)
 }
 
 // Must provide at least one drawing instance, like the first matrix or strip we are drawing on
-std::shared_ptr<GFXBase> EffectManager::g(int iChannel) const
+GFXBase& EffectManager::g(int iChannel)
 {
-    return _gfx[iChannel];
+    return *_gfx[iChannel];
+}
+
+const GFXBase& EffectManager::g(int iChannel) const
+{
+    return *_gfx[iChannel];
 }
 
 bool EffectManager::IsEffectEnabled(size_t i) const
@@ -353,17 +358,16 @@ bool EffectManager::IsIntervalEternal() const
     return _effectInterval == 0;
 }
 
-void EffectManager::NextPalette() const
+void EffectManager::NextPalette()
 {
     debugV("EffectManager::NextPalette");
-    auto g = _gfx[0].get();
-    g->CyclePalette(1);
+    g().CyclePalette(1);
 }
 
-void EffectManager::PreviousPalette() const
+void EffectManager::PreviousPalette()
 {
     debugV("EffectManager::PreviousPalette");
-    g()->CyclePalette(-1);
+    g().CyclePalette(-1);
 }
 
 void EffectManager::LoadDefaultEffects()
@@ -602,7 +606,7 @@ void EffectManager::ClearRemoteColor(bool retainRemoteEffect)
         _tempEffect = nullptr;
 
     #if USE_HUB75
-        g()->PausePalette(false);
+        g().PausePalette(false);
     #endif
 
     g_ptrSystem->GetDeviceConfig().ClearApplyGlobalColors();
@@ -613,7 +617,7 @@ void EffectManager::ClearRemoteColor(bool retainRemoteEffect)
 // When a global color is set via the remote, we create a fill effect and assign it as the "remote effect"
 // which takes drawing precedence
 
-void EffectManager::ApplyGlobalColor(CRGB color) const
+void EffectManager::ApplyGlobalColor(CRGB color)
 {
     debugI("Setting Global Color: %08lX\n", (unsigned long)(uint32_t)color);
 
@@ -623,10 +627,10 @@ void EffectManager::ApplyGlobalColor(CRGB color) const
     ApplyGlobalPaletteColors();
 }
 
-void EffectManager::ApplyGlobalPaletteColors() const
+void EffectManager::ApplyGlobalPaletteColors()
 {
     #if USE_HUB75
-        auto  pMatrix = g();
+        auto& pMatrix = g();
         auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
         auto& globalColor = deviceConfig.GlobalColor();
         auto& secondColor = deviceConfig.SecondColor();
@@ -636,15 +640,15 @@ void EffectManager::ApplyGlobalPaletteColors() const
         if (secondColor == globalColor)
         {
             CHSV hsv = rgb2hsv_approximate(globalColor);
-            pMatrix->setPalette(CRGBPalette16(globalColor, CRGB(CHSV(hsv.hue + 64, 255, 255))));
+            pMatrix.setPalette(CRGBPalette16(globalColor, CRGB(CHSV(hsv.hue + 64, 255, 255))));
         }
         else
         {
             // But if we have two different colors, we create a palette spread between them
-            pMatrix->setPalette(CRGBPalette16(secondColor, globalColor));
+            pMatrix.setPalette(CRGBPalette16(secondColor, globalColor));
         }
 
-        pMatrix->PausePalette(true);
+        pMatrix.PausePalette(true);
     #endif
 }
 

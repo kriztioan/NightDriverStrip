@@ -70,7 +70,7 @@ class PatternSM2DDPR : public EffectWithId<PatternSM2DDPR> {
                 }
 
                 int hue = ::map(dist, radius, -3, 125, 255);
-                g()->leds[XY(x, y)] = CHSV(hue, 255, brightness);
+                g().leds[XY(x, y)] = CHSV(hue, 255, brightness);
             }
         }
     }

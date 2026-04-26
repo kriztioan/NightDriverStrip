@@ -102,8 +102,8 @@ class MeteorChannel
 
     virtual void Draw(LEDStripEffect* owner)
     {
-        auto pGFX = owner->g(0);
-        const int ledCount = static_cast<int>(pGFX->GetLEDCount());
+        auto& gfx = owner->g(0);
+        const int ledCount = static_cast<int>(gfx.GetLEDCount());
         static CHSV hsv;
         hsv.val = 255;
         hsv.sat = 255;
@@ -154,7 +154,7 @@ class MeteorChannel
                     hsv2rgb_rainbow(hsv, rgb);
 
                     // Blend with current pixel from primary device, then set on all channels
-                    CRGB c = pGFX->getPixel(x);
+                    CRGB c = gfx.getPixel(x);
                     nblend(c, rgb, 75);
                     owner->setPixelOnAllChannels(x, c);
                 }

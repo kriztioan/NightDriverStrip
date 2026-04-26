@@ -85,7 +85,7 @@ public:
             lastData = sIP;
             qrcode_initText(&qrcode, qrcodeData, qrVersion, ECC_LOW, sIP.c_str());
         }
-        g()->fillScreen(g()->to16bit(CRGB::DarkBlue));
+        g().fillScreen(g().to16bit(CRGB::DarkBlue));
         const int leftMargin = MATRIX_CENTER_X - qrcode.size / 2;
         const int topMargin = 4;
         const int borderSize = 2;
@@ -105,7 +105,7 @@ public:
 
         for (uint8_t y = startY; y < endY; y++) {
             for (uint8_t x = startX; x < endX; x++) {
-                g()->setPixel(leftMargin + x, topMargin + y, (qrcode_getModule(&qrcode, x, y) ? foregroundColor : BLACK16));
+                g().setPixel(leftMargin + x, topMargin + y, (qrcode_getModule(&qrcode, x, y) ? foregroundColor : BLACK16));
             }
         }
     }

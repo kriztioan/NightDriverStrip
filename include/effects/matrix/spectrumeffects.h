@@ -320,7 +320,7 @@ class SpectrumAnalyzerEffect : public EffectWithId<SpectrumAnalyzerEffect>, virt
 
     void DrawBar(const uint8_t iBar, CRGB baseColor, int offset = 0)
     {
-        auto pGFXChannel = g();
+        auto& pGFXChannel = g();
         int value, value2;
 
         static_assert(!(NUM_BANDS & 1));     // We assume an even number of bars because we peek ahead from an odd one below
@@ -336,25 +336,25 @@ class SpectrumAnalyzerEffect : public EffectWithId<SpectrumAnalyzerEffect>, virt
             // bar 16, for example, it will take all of bar 4 and none of bar 5.  For bar 17, it will take 3/4 of bar 4 and 1/4 of bar 5.
 
             int ib = iBar % barsPerBand;
-            value  = (g_Analyzer.Peak2Decay(iBand) * (barsPerBand - ib) + g_Analyzer.Peak2Decay(iNextBand) * (ib) ) / barsPerBand * (pGFXChannel->height() - 1);
-            value2 = (g_Analyzer.Peak2Decay(iBand) * (barsPerBand - ib) + g_Analyzer.Peak2Decay(iNextBand) * (ib) ) / barsPerBand *  pGFXChannel->height();
+            value  = (g_Analyzer.Peak2Decay(iBand) * (barsPerBand - ib) + g_Analyzer.Peak2Decay(iNextBand) * (ib) ) / barsPerBand * (pGFXChannel.height() - 1);
+            value2 = (g_Analyzer.Peak2Decay(iBand) * (barsPerBand - ib) + g_Analyzer.Peak2Decay(iNextBand) * (ib) ) / barsPerBand *  pGFXChannel.height();
         }
         else
         {
             // One to one case, just use the actual band value we mapped to
 
-            value  = g_Analyzer.Peak2Decay(iBand) * (pGFXChannel->height() - 1);
-            value2 = g_Analyzer.Peak2Decay(iBand) *  pGFXChannel->height();
+            value  = g_Analyzer.Peak2Decay(iBand) * (pGFXChannel.height() - 1);
+            value2 = g_Analyzer.Peak2Decay(iBand) *  pGFXChannel.height();
         }
 
 
-        if (value > pGFXChannel->height())
-            value = pGFXChannel->height();
+        if (value > pGFXChannel.height())
+            value = pGFXChannel.height();
 
-        if (value2 > pGFXChannel->height())
-            value2 = pGFXChannel->height();
+        if (value2 > pGFXChannel.height())
+            value2 = pGFXChannel.height();
 
-        int barWidth  = pGFXChannel->width() / _numBars;
+        int barWidth  = pGFXChannel.width() / _numBars;
         int xOffset   = iBar * barWidth;
 
         // The top of the bar is normally just matrix height less the value.  Here, however, we "enhance" the bar by pulsing it a bit with
@@ -366,14 +366,14 @@ class SpectrumAnalyzerEffect : public EffectWithId<SpectrumAnalyzerEffect>, virt
         value *= g_Analyzer.BeatEnhance(BARBEAT_ENHANCE);
         value2 *= g_Analyzer.BeatEnhance(BARBEAT_ENHANCE);
 
-        int yOffset   = pGFXChannel->height() - value ;
-        int yOffset2  = pGFXChannel->height() - value2 ;
+        int yOffset   = pGFXChannel.height() - value ;
+        int yOffset2  = pGFXChannel.height() - value2 ;
 
         offset %= MATRIX_WIDTH;
 
-        for (int y = yOffset2; y < pGFXChannel->height(); y++)
+        for (int y = yOffset2; y < pGFXChannel.height(); y++)
             for (int x = xOffset; x < xOffset + barWidth; x++)
-                g()->setPixel((x - offset + MATRIX_WIDTH) % MATRIX_WIDTH, y, baseColor);
+                pGFXChannel.setPixel((x - offset + MATRIX_WIDTH) % MATRIX_WIDTH, y, baseColor);
 
         // We draw the highlight in white, but if its falling at a different rate than the bar itself,
         // it indicates a free-floating highlight, and those get faded out based on age
@@ -398,11 +398,11 @@ class SpectrumAnalyzerEffect : public EffectWithId<SpectrumAnalyzerEffect>, virt
                 float agePercent = (float) msPeakAge / (float) MILLIS_PER_SECOND;
                 uint8_t fadeAmount = std::min(255.0f, agePercent * 256);
                 colorHighlight.fadeToBlackBy(fadeAmount);
-                pGFXChannel->drawLine(xOffset, max(0, yOffset-1), xOffset + barWidth - 1, max(0, yOffset-1), colorHighlight);
+                pGFXChannel.drawLine(xOffset, max(0, yOffset-1), xOffset + barWidth - 1, max(0, yOffset-1), colorHighlight);
             }
             else
             {
-                pGFXChannel->drawLine(xOffset, max(0, yOffset2-1), xOffset + barWidth - 1, max(0, yOffset2-1), colorHighlight);
+                pGFXChannel.drawLine(xOffset, max(0, yOffset2-1), xOffset + barWidth - 1, max(0, yOffset2-1), colorHighlight);
             }
         }
     }
@@ -499,7 +499,7 @@ class SpectrumAnalyzerEffect : public EffectWithId<SpectrumAnalyzerEffect>, virt
         if (_bScrollBars)
             _offset++;
 
-        auto pGFXChannel = _GFX[0];
+        auto& pGFXChannel = g();
 
         if (_colorScrollSpeed > 0)
         {
@@ -512,7 +512,7 @@ class SpectrumAnalyzerEffect : public EffectWithId<SpectrumAnalyzerEffect>, virt
         if (_fadeRate)
             fadeAllChannelsToBlackBy(_fadeRate);
         else
-            pGFXChannel->Clear();
+            pGFXChannel.Clear();
 
         for (int i = 0; i < _numBars; i++)
         {
@@ -523,11 +523,11 @@ class SpectrumAnalyzerEffect : public EffectWithId<SpectrumAnalyzerEffect>, virt
             // on the USA flag solid red rather than pinkish...
 
             // A paused palette overrides everything else
-            if (pGFXChannel->IsPalettePaused())
+            if (pGFXChannel.IsPalettePaused())
             {
                 // We don't use the color offset when the palette is paused
                 int q = ::map(i, 0, _numBars, 0, 240);
-                DrawBar(i, pGFXChannel->ColorFromCurrentPalette(q % 240, 255, _colorScrollSpeed > 0 ? LINEARBLEND : NOBLEND), _offset);
+                DrawBar(i, pGFXChannel.ColorFromCurrentPalette(q % 240, 255, _colorScrollSpeed > 0 ? LINEARBLEND : NOBLEND), _offset);
             }
             else
             {
@@ -584,6 +584,8 @@ class WaveformEffectBase : public EffectWithId<TEffect>
 
     void DrawSpike(int x, float v, bool bErase = true)
     {
+        auto& graphics = LEDStripEffect::g();
+
         v = std::min(v, 1.0f);
         v = std::max(v, 0.0f);
 
@@ -608,10 +610,10 @@ class WaveformEffectBase : public EffectWithId<TEffect>
                 if (y < 2 || y > (MATRIX_HEIGHT - 2))
                     color  = CRGB::Red;
                 else
-                    color = LEDStripEffect::g()->ColorFromCurrentPalette(255 - index + ms / 11, 255, LINEARBLEND);
+                    color = graphics.ColorFromCurrentPalette(255 - index + ms / 11, 255, LINEARBLEND);
             }
 
-            bErase ? LEDStripEffect::g()->setPixel(x, y, color) : LEDStripEffect::g()->drawPixel(x, y, color);
+            bErase ? graphics.setPixel(x, y, color) : graphics.drawPixel(x, y, color);
 
         }
         _iColorOffset = (_iColorOffset + _increment) % 255;
@@ -627,7 +629,7 @@ class WaveformEffectBase : public EffectWithId<TEffect>
     virtual void Draw() override
     {
         int top = g_ptrSystem->GetEffectManager().IsVUVisible() ? 1 : 0;
-        LEDStripEffect::g()->MoveInwardX(top);                            // Start on Y=1 so we don't shift the VU meter
+        this->g().MoveInwardX(top);                            // Start on Y=1 so we don't shift the VU meter
         DrawSpike(MATRIX_WIDTH-1, g_Analyzer.VURatio()/2.0);
         DrawSpike(0, g_Analyzer.VURatio()/2.0);
     }
@@ -693,26 +695,26 @@ class GhostWave : public WaveformEffectBase<GhostWave>
 
     virtual void Draw() override
     {
+        auto& graphics = g();
         auto& effectManager = g_ptrSystem->GetEffectManager();
         int top = effectManager.IsVUVisible() ? 1 : 0;
 
-        g()->MoveOutwardsX(top);
+        graphics.MoveOutwardsX(top);
 
         if (_fade)
-            g()->DimAll(255-_fade);
+            graphics.DimAll(255-_fade);
 
         if (_blur)
-            g()->blur2d(g()->leds, MATRIX_WIDTH, 0, MATRIX_HEIGHT, 1, _blur);
+            graphics.blur2d(graphics.leds, MATRIX_WIDTH, 0, MATRIX_HEIGHT, 1, _blur);
 
         // VURatio is too fast, VURatioFade looks too slow, but averaged between them is just right
 
-        float audioLevel = (g_Analyzer.VURatioFade() + g_Analyzer.VURatio()) / 2;
-
+        float audioLevel = (g_Analyzer.VURatioFade() + g_Analyzer.VURatio() * 2) / 3;
         // Offsetting by 0.25, which is a very low ratio, helps keep the line thin when sound is low
         //audioLevel = (audioLevel - 0.25) / 1.75;
 
         // Now pulse it by some amount based on the beat
-        audioLevel = audioLevel * g_Analyzer.BeatEnhance(SPECTRUMBARBEAT_ENHANCE);
+        // audioLevel = audioLevel * g_Analyzer.BeatEnhance(SPECTRUMBARBEAT_ENHANCE);
 
         DrawSpike(MATRIX_WIDTH/2, audioLevel, _erase);
         DrawSpike(MATRIX_WIDTH/2-1, audioLevel, _erase);
@@ -780,6 +782,8 @@ class SpectrumBarEffect : public EffectWithId<SpectrumBarEffect>, public BeatEff
 
     void DrawGraph()
     {
+        auto& graphics = g();
+
         ProcessAudio();
 
         constexpr size_t halfHeight = MATRIX_HEIGHT / 2;
@@ -811,12 +815,12 @@ class SpectrumBarEffect : public EffectWithId<SpectrumBarEffect>, public BeatEff
             if (x1 < 0 || x2 >= MATRIX_WIDTH)
                 break;
 
-            CRGB  color = g()->IsPalettePaused() ? g()->ColorFromCurrentPalette() : CHSV(hue + iBand * _hueStep, 255, 255);
+            CRGB  color = graphics.IsPalettePaused() ? graphics.ColorFromCurrentPalette() : CHSV(hue + iBand * _hueStep, 255, 255);
 
-            g()->drawLine(x1, top, x1, bottom, color);
-            g()->drawLine(x2, top, x2, bottom, color);
+            graphics.drawLine(x1, top, x1, bottom, color);
+            graphics.drawLine(x2, top, x2, bottom, color);
         }
-        g()->drawLine(0, halfHeight, MATRIX_WIDTH - 1, halfHeight, CRGB::Grey);
+        graphics.drawLine(0, halfHeight, MATRIX_WIDTH - 1, halfHeight, CRGB::Grey);
      }
 
     virtual void Start() override
@@ -829,7 +833,7 @@ class SpectrumBarEffect : public EffectWithId<SpectrumBarEffect>, public BeatEff
 
         // This effect doesn't clear during drawing, so we need to clear to start the frame
 
-        g()->Clear();
+        g().Clear();
     }
 
     virtual void Draw() override
@@ -837,7 +841,7 @@ class SpectrumBarEffect : public EffectWithId<SpectrumBarEffect>, public BeatEff
         // Rather than clearing the screen, we fade it out quickly, which gives a nice persistence of vision effect
         // as the bars fade back to black once the line has receeded
 
-        g()->DimAll(200);
+        g().DimAll(200);
         DrawGraph();
     }
 };
@@ -883,7 +887,7 @@ class AudioSpikeEffect : public EffectWithId<AudioSpikeEffect>
         {
             uint8_t y1 = ::map(data[offset+x], 0, 2500, 0, MATRIX_HEIGHT);
             CRGB color = ColorFromPalette(spectrumBasicColors, (y1 * 4) + colorOffset, 255, NOBLEND);
-            g()->drawLine(x, lastY, x+1, y1, color);
+            g().drawLine(x, lastY, x+1, y1, color);
             lastY = y1;
         }
         offset += MATRIX_WIDTH;

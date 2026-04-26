@@ -32,7 +32,7 @@ public:
 
   void Start() override
   {
-    g()->Clear();
+    g().Clear();
   }
 
   void Draw() override
@@ -50,10 +50,10 @@ public:
 
       hue2++;
 
-    if (g()->IsPalettePaused())
+    if (g().IsPalettePaused())
     {
-      color = g()->ColorFromCurrentPalette(hue);
-      color2 = g()->ColorFromCurrentPalette(hue + 127);
+      color = g().ColorFromCurrentPalette(hue);
+      color2 = g().ColorFromCurrentPalette(hue + 127);
     }
     else
     {
@@ -70,10 +70,10 @@ public:
     // sky-written trailer of color.
     for (uint8_t y = 0; y < HEIGHT; y++)
     {
-      g()->leds[XY((deltaHue + y + 1U) % WIDTH, HEIGHT - 1U - y)] += color;
-      g()->leds[XY((deltaHue + y) % WIDTH, HEIGHT - 1U - y)] += color2; // color2
-      g()->leds[XY((deltaHue2 + y) % WIDTH, y)] += color;
-      g()->leds[XY((deltaHue2 + y + 1U) % WIDTH, y)] += color2; // color2
+      g().leds[XY((deltaHue + y + 1U) % WIDTH, HEIGHT - 1U - y)] += color;
+      g().leds[XY((deltaHue + y) % WIDTH, HEIGHT - 1U - y)] += color2; // color2
+      g().leds[XY((deltaHue2 + y) % WIDTH, y)] += color;
+      g().leds[XY((deltaHue2 + y + 1U) % WIDTH, y)] += color2; // color2
     }
 
     EVERY_N_MILLISECONDS(100)
@@ -82,16 +82,16 @@ public:
       // Calling SetNoise() in here will index past what was
       // FillGetNoised, which returns slowly scrolling bars
       // of black along X and Y axes.
-      g()->FillGetNoise();
-      // g()->SetNoise(1, 1, 1, 4, 4);
+      g().FillGetNoise();
+      // g().SetNoise(1, 1, 1, 4, 4);
     }
 
     // Lower number for thicker, more static fog. Higher for more wisp.
     // Smearing 1 was the minimal fix that cured the vertical bars.
-    g()->MoveFractionalNoiseX(1);
-    g()->MoveFractionalNoiseY(1);
+    g().MoveFractionalNoiseX(1);
+    g().MoveFractionalNoiseY(1);
     // Without this, we get tornadoes where the diagonals cross as there's
     // an excess of set pixels there.
-    g()->BlurFrame(10);
+    g().BlurFrame(10);
   }
 };

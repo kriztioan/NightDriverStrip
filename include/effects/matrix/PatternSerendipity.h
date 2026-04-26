@@ -149,24 +149,24 @@ class PatternSerendipity : public EffectWithId<PatternSerendipity>
 
     void Draw() override
     {
-        auto graphics = g();
+        auto& graphics = g();
 
         // manage the Oszillators
         UpdateTimers();
 
         // draw just a line defined by 5 oszillators
 
-        graphics->drawLine(
+        graphics.drawLine(
             multiTimer[3].count, // x1
             multiTimer[4].count, // y1
             multiTimer[0].count, // x2
             multiTimer[1].count, // y2
             CRGB(CHSV(multiTimer[2].count, 255, 255)));
 
-        graphics->BlurFrame(50);
+        graphics.BlurFrame(50);
 
         // increase the contrast
-//        graphics->DimAll(252);
+//        graphics.DimAll(252);
         return;
     }
 };

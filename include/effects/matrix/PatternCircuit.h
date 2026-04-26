@@ -173,14 +173,14 @@ private:
             }
         }
 
-        void draw(std::shared_ptr<GFXBase> graphics, CRGB colors[SNAKE_LENGTH])
+        void draw(GFXBase& graphics, CRGB colors[SNAKE_LENGTH])
         {
             for (uint8_t i = 0; i < SNAKE_LENGTH; i++)
-                graphics->leds[XY(pixels[i].x, pixels[i].y)] = colors[i] %= (255 - i * (255 / SNAKE_LENGTH / 4));
+                graphics.leds[XY(pixels[i].x, pixels[i].y)] = colors[i] %= (255 - i * (255 / SNAKE_LENGTH / 4));
 
             uint8_t m = random(20, 100);
-            graphics->leds[XY(pixels[SNAKE_LENGTH - 1].x, pixels[SNAKE_LENGTH - 1].y)] = CRGB(0, m, 0); // End tail with random dark green
-            graphics->leds[XY(pixels[0].x, pixels[0].y)] = CRGB::White;                                 // Head end bright white dot
+            graphics.leds[XY(pixels[SNAKE_LENGTH - 1].x, pixels[SNAKE_LENGTH - 1].y)] = CRGB(0, m, 0); // End tail with random dark green
+            graphics.leds[XY(pixels[0].x, pixels[0].y)] = CRGB::White;                                 // Head end bright white dot
         }
     };
 
@@ -205,7 +205,7 @@ public:
         for (int i = 0; i < snakeCount; i++)
             snakes[i].reset();
         msStart = millis();
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
@@ -217,10 +217,10 @@ public:
 
         for (int i = 0; i < MATRIX_WIDTH * MATRIX_HEIGHT / 10; i++)
         {
-            g()->leds[XY(random(0, MATRIX_WIDTH), random(0, MATRIX_HEIGHT))].fadeToBlackBy(32);
+            g().leds[XY(random(0, MATRIX_WIDTH), random(0, MATRIX_HEIGHT))].fadeToBlackBy(32);
         }
 
-        // fill_palette(colors, SNAKE_LENGTH, initialHue++, 5, graphics->currentPalette, 255, LINEARBLEND);
+        // fill_palette(colors, SNAKE_LENGTH, initialHue++, 5, graphics.currentPalette, 255, LINEARBLEND);
         fill_palette(colors, SNAKE_LENGTH, 0, 4, ForestColors_p, 255, LINEARBLEND);
         for (int i = 0; i < snakeCount; i++)
         {

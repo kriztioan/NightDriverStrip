@@ -19,7 +19,7 @@ class PatternSMRadialWave : public EffectWithId<PatternSMRadialWave>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
@@ -34,7 +34,7 @@ class PatternSMRadialWave : public EffectWithId<PatternSMRadialWave>
             {
                 uint8_t angle = rMap[x][y].angle;
                 uint8_t radius = rMap[x][y].scaled_radius;
-                g()->leds[XY(x, y)] = CHSV(t + radius, 255, sin8(t * 4 + sin8(t * 4 - radius) + angle * 3));
+                g().leds[XY(x, y)] = CHSV(t + radius, 255, sin8(t * 4 + sin8(t * 4 - radius) + angle * 3));
             }
         }
     }

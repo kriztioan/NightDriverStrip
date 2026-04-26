@@ -490,9 +490,9 @@ public:
         const int fontWidth  = 5;
         const int xHalf      = MATRIX_WIDTH / 2 - 1;
 
-        g()->fillScreen(BLACK16);
-        g()->fillRect(0, 0, MATRIX_WIDTH, 9, g()->to16bit(CRGB(0,0,128)));
-        g()->setFont(&Apple5x7);
+        g().fillScreen(BLACK16);
+        g().fillRect(0, 0, MATRIX_WIDTH, 9, g().to16bit(CRGB(0,0,128)));
+        g().setFont(&Apple5x7);
 
         auto now = system_clock::now();
 
@@ -529,14 +529,14 @@ public:
         // Print the town/city name
         int x = 0;
         int y = fontHeight + 1;
-        g()->setCursor(x, y);
-        g()->setTextColor(WHITE16);
+        g().setCursor(x, y);
+        g().setTextColor(WHITE16);
         String showLocation = strLocation;
         showLocation.toUpperCase();
         if (g_ptrSystem->GetDeviceConfig().GetOpenWeatherAPIKey().isEmpty())
-            g()->print("No API Key");
+            g().print("No API Key");
         else
-            g()->print((strLocationName.isEmpty() ? showLocation : strLocationName).substring(0, (MATRIX_WIDTH - 2 * fontWidth)/fontWidth));
+            g().print((strLocationName.isEmpty() ? showLocation : strLocationName).substring(0, (MATRIX_WIDTH - 2 * fontWidth)/fontWidth));
 
         // Display the temperature, right-justified
 
@@ -544,17 +544,17 @@ public:
         {
             String strTemp((int)temperature);
             x = MATRIX_WIDTH - fontWidth * strTemp.length();
-            g()->setCursor(x, y);
-            g()->setTextColor(g()->to16bit(CRGB(192,192,192)));
-            g()->print(strTemp);
+            g().setCursor(x, y);
+            g().setTextColor(g().to16bit(CRGB(192,192,192)));
+            g().print(strTemp);
         }
 
         // Draw the separator lines
 
         y+=1;
 
-        g()->drawLine(0, y, MATRIX_WIDTH-1, y, CRGB(0,0,128));
-        g()->drawLine(xHalf, y, xHalf, MATRIX_HEIGHT-1, CRGB(0,0,128));
+        g().drawLine(0, y, MATRIX_WIDTH-1, y, CRGB(0,0,128));
+        g().drawLine(xHalf, y, xHalf, MATRIX_HEIGHT-1, CRGB(0,0,128));
         y+=2 + fontHeight;
 
         // Figure out which day of the week it is
@@ -565,17 +565,17 @@ public:
         const char * pszTomorrow = pszDaysOfWeek[ (todayTime->tm_wday + 1) % 7 ];
 
         // Draw the day of the week and tomorrow's day as well
-        g()->setTextColor(WHITE16);
-        g()->setCursor(0, MATRIX_HEIGHT);
-        g()->print(pszToday);
-        g()->setCursor(xHalf+2, MATRIX_HEIGHT);
-        g()->print(pszTomorrow);
+        g().setTextColor(WHITE16);
+        g().setCursor(0, MATRIX_HEIGHT);
+        g().print(pszToday);
+        g().setCursor(xHalf+2, MATRIX_HEIGHT);
+        g().print(pszTomorrow);
 
         // Draw the temperature in lighter white
 
         if (dataReady)
         {
-            g()->setTextColor(g()->to16bit(CRGB(192,192,192)));
+            g().setTextColor(g().to16bit(CRGB(192,192,192)));
             String strHi((int) highToday);
             String strLo((int) loToday);
 
@@ -583,12 +583,12 @@ public:
 
             x = xHalf - fontWidth * strHi.length();
             y = MATRIX_HEIGHT - fontHeight;
-            g()->setCursor(x,y);
-            g()->print(strHi);
+            g().setCursor(x,y);
+            g().print(strHi);
             x = xHalf - fontWidth * strLo.length();
             y+= fontHeight;
-            g()->setCursor(x,y);
-            g()->print(strLo);
+            g().setCursor(x,y);
+            g().print(strLo);
 
             // Draw tomorrow's HI and LO temperatures
 
@@ -596,12 +596,12 @@ public:
             strLo = String((int)loTomorrow);
             x = MATRIX_WIDTH - fontWidth * strHi.length();
             y = MATRIX_HEIGHT - fontHeight;
-            g()->setCursor(x,y);
-            g()->print(strHi);
+            g().setCursor(x,y);
+            g().print(strHi);
             x = MATRIX_WIDTH - fontWidth * strLo.length();
             y+= fontHeight;
-            g()->setCursor(x,y);
-            g()->print(strLo);
+            g().setCursor(x,y);
+            g().print(strLo);
         }
     }
 };

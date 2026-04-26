@@ -33,14 +33,14 @@ class PatternSMHolidayLights : public EffectWithId<PatternSMHolidayLights>
         uint16_t idx = random16(NUM_LEDS);
         for (unsigned i = 0; i < scaleToNumLeds; i++)
             if (random8() < density)
-                if ((g()->getPixel(idx).r + g()->getPixel(idx).g + g()->getPixel(idx).b) < 10)
-                    g()->leds[idx] = random(48, 16777216);
+                if ((g().getPixel(idx).r + g().getPixel(idx).g + g().getPixel(idx).b) < 10)
+                    g().leds[idx] = random(48, 16777216);
     }
 
     void addGlitter(uint8_t chanceOfGlitter)
     {
         if (random8() < chanceOfGlitter)
-            g()->leds[random16(NUM_LEDS)] = random(0, 16777215);
+            g().leds[random16(NUM_LEDS)] = random(0, 16777215);
     }
 
     void spruce()
@@ -65,26 +65,26 @@ class PatternSMHolidayLights : public EffectWithId<PatternSMHolidayLights>
         if (effId == 2)
         {
             // Draw a pixel with certain conditions if 'effId' is 2.
-            g()->drawPixelXYF_Wu(x / 4 + height_adj, (float)(MATRIX_HEIGHT - 1 - i),
+            g().drawPixelXYF_Wu(x / 4 + height_adj, (float)(MATRIX_HEIGHT - 1 - i),
                                  random8(10) == 0 ? CHSV(random8(), random8(32, 255), 255)
                                      : CHSV(100, 255, ::map(speed, 1, 255, 128, 100)));
         }
         else
         {
             // Draw a pixel with different color conditions if 'effId' is not 2.
-            g()->drawPixelXYF_Wu(x / 4 + height_adj, (float)(MATRIX_HEIGHT - 1 - i), CHSV(hue + i * z, 255, 255));
+            g().drawPixelXYF_Wu(x / 4 + height_adj, (float)(MATRIX_HEIGHT - 1 - i), CHSV(hue + i * z, 255, 255));
         }
     }
 
     // Set a specific LED color based on some conditions and time.
     if (!(MATRIX_WIDTH & 0x01))
     {
-        g()->leds[XY(MATRIX_WIDTH / 2 - ((millis() >> 9) & 0x01 ? 1 : 0), minDim - 1 - ((millis() >> 8) & 0x01 ? 1 : 0))] =
+        g().leds[XY(MATRIX_WIDTH / 2 - ((millis() >> 9) & 0x01 ? 1 : 0), minDim - 1 - ((millis() >> 8) & 0x01 ? 1 : 0))] =
             CHSV(0, 255, 255);
     }
     else
     {
-        g()->leds[XY(MATRIX_WIDTH / 2, minDim - 1)] = CHSV(0, (millis() >> 9) & 0x01 ? 0 : 255, 255);
+        g().leds[XY(MATRIX_WIDTH / 2, minDim - 1)] = CHSV(0, (millis() >> 9) & 0x01 ? 0 : 255, 255);
     }
 
     // If 'glitch' is true, call the 'confetti' function.
@@ -100,7 +100,7 @@ class PatternSMHolidayLights : public EffectWithId<PatternSMHolidayLights>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override

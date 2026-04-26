@@ -507,8 +507,8 @@ public:
 
         // Fetch current graphics buffer
         auto &effectManager = g_ptrSystem->GetEffectManager();
-        auto gfx = effectManager.g();
-        if (!gfx || gfx->leds == nullptr)
+        auto& gfx = effectManager.g();
+        if (gfx.leds == nullptr)
             return;
 
         // Blit: draw each LED as a scale x scale rectangle (direct buffer reads, no per-dest-pixel loop)
@@ -533,14 +533,14 @@ public:
                 if (MATRIX_HEIGHT == 1) // Single row strip - wrap it
                 {
                     if (ledIndex < MATRIX_WIDTH)
-                        c = gfx->leds[ledIndex];
+                        c = gfx.leds[ledIndex];
                     else
                         c = CRGB::Black; // Padding if we run out of LEDs
                     ledIndex++;
                 }
                 else // Real matrix
                 {
-                    c = gfx->leds[XY(x, y)];
+                    c = gfx.leds[XY(x, y)];
                 }
 
                 uint16_t c16 = display.to16bit(c);

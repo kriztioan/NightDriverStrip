@@ -13,7 +13,7 @@ class PatternSMRadialFire : public EffectWithId<PatternSMRadialFire>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
@@ -47,8 +47,8 @@ class PatternSMRadialFire : public EffectWithId<PatternSMRadialFire>
 
                 // Step 2: Choose base color depending on palette state
                 CRGB baseColor;
-                if (g()->IsPalettePaused())
-                    baseColor = g()->ColorFromCurrentPalette(Col);
+                if (g().IsPalettePaused())
+                    baseColor = g().ColorFromCurrentPalette(Col);
                 else
                     baseColor = CRGB::Red;
 
@@ -57,7 +57,7 @@ class PatternSMRadialFire : public EffectWithId<PatternSMRadialFire>
 
                 // Step 4: Fade color based on brightness
                 CRGB color = heatColor.fadeToBlackBy(255 - Bri);
-                nblend(g()->leds[XY(x, y)], color, speed);
+                nblend(g().leds[XY(x, y)], color, speed);
             }
         }
     }

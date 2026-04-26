@@ -234,10 +234,10 @@ class PatternCube : public EffectWithId<PatternCube>
 
     void Draw() override
     {
-        g()->Clear();
+        g().Clear();
         zCamera = (int)beatsin8(2, 100, 140);
         AngxSpeed = beatsin8(3, 3, 10) / 100.0f;
-        AngySpeed = g()->beatcos8(5, 3, 10) / 100.0f;
+        AngySpeed = g().beatcos8(5, 3, 10) / 100.0f;
 
         // Update values
         Angx += AngxSpeed;
@@ -267,26 +267,26 @@ class PatternCube : public EffectWithId<PatternCube>
         // Draw as many cubes as will fit horizontally, stepping by the smaller dimension
         for (uint32_t xOffset = 0; (int)xOffset < MATRIX_WIDTH; xOffset += tileSize)
         {
-            CRGB color = g()->ColorFromCurrentPalette(hue + 64 + xOffset);
+            CRGB color = g().ColorFromCurrentPalette(hue + 64 + xOffset);
 
             // Backface - Drawn first to ensure they are behind frontfaces (Painter's Algorithm)
             for (const auto &e : edge)
             {
                 if (!e.visible)
                 {
-                    g()->BresenhamLine(screen[e.x].x + xOffset, screen[e.x].y, screen[e.y].x + xOffset,
+                    g().BresenhamLine(screen[e.x].x + xOffset, screen[e.x].y, screen[e.y].x + xOffset,
                                        screen[e.y].y, color);
                 }
             }
 
-            color = g()->ColorFromCurrentPalette(hue + 128 + xOffset);
+            color = g().ColorFromCurrentPalette(hue + 128 + xOffset);
 
             // Frontface - Drawn second to overlap backfaces correctly
             for (const auto &e : edge)
             {
                 if (e.visible)
                 {
-                    g()->BresenhamLine(screen[e.x].x + xOffset, screen[e.x].y, screen[e.y].x + xOffset,
+                    g().BresenhamLine(screen[e.x].x + xOffset, screen[e.x].y, screen[e.y].x + xOffset,
                                        screen[e.y].y, color);
                 }
             }

@@ -489,7 +489,7 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
         }
         else
         {
-            LEDStripEffect::g()->blurRows(LEDStripEffect::g()->leds, MATRIX_WIDTH, MATRIX_HEIGHT, 0, _blurFactor * 255);
+            LEDStripEffect::g().blurRows(LEDStripEffect::g().leds, MATRIX_WIDTH, MATRIX_HEIGHT, 0, _blurFactor * 255);
             LEDStripEffect::fadeAllChannelsToBlackBy(55 * (2.0 - g_Analyzer.VURatioFade()));
         }
 

@@ -288,8 +288,8 @@ void LoadEffectFactories()
         TJpgDec.setJpgScale(1);
         TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap)
         {
-            auto pgfx = g_ptrSystem->GetEffectManager().g();
-            pgfx->drawRGBBitmap(x, y, bitmap, w, h);
+            auto& gfx = g_ptrSystem->GetEffectManager().g();
+            gfx.drawRGBBitmap(x, y, bitmap, w, h);
             return true;
         });
 

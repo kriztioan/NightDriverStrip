@@ -590,13 +590,13 @@ class PDPGridEffect : public EffectWithId<PDPGridEffect>
 
     virtual void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     virtual void Draw() override
     {
         fadeAllChannelsToBlackBy(60);
-        g()->MoveY(1);
+        g().MoveY(1);
         for (int x = 0; x < MATRIX_WIDTH; x++)
         {
             // Pick a color, CRGB::Red 90% of the time, CRGB::Green 10% of the time
@@ -677,7 +677,7 @@ class PDPCMXEffect : public EffectWithId<PDPCMXEffect>
 
     virtual void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     virtual void Draw() override

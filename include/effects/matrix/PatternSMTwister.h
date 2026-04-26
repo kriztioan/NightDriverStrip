@@ -20,15 +20,15 @@ class PatternSMTwister : public EffectWithId<PatternSMTwister>
         {
             uint8_t dx = lerp8by8(x1, x, i * 255 / steps);
             uint16_t index = XY(dx, y);
-            g()->leds[index] = color;
+            g().leds[index] = color;
             if (grad)
-                g()->leds[index] %=
+                g().leds[index] %=
                     (sin8(numline * 8 + side * 64 + a + sinOff) + i * 255 / steps) / 2; // for draw gradient line
         }
         if (dot)
         { // add white point at the ends of line
-            g()->leds[XY(x, y)] = CRGB::Black;
-            g()->leds[XY(x1, y)] = CRGB::Black;
+            g().leds[XY(x, y)] = CRGB::Black;
+            g().leds[XY(x1, y)] = CRGB::Black;
         }
     }
 
@@ -39,13 +39,13 @@ class PatternSMTwister : public EffectWithId<PatternSMTwister>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
     {
         uint16_t a = millis() / 10;
-        g()->Clear();
+        g().Clear();
 
         for (uint16_t i = 0; i < MATRIX_HEIGHT; i++)
         {

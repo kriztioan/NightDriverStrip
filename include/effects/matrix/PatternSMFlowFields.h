@@ -32,7 +32,7 @@ class PatternSMFlowFields : public EffectWithId<PatternSMFlowFields>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
 
         x = random16();
         y = random16();
@@ -64,7 +64,7 @@ class PatternSMFlowFields : public EffectWithId<PatternSMFlowFields>
                 boid.location.x = random(COLS);
                 boid.location.y = 0;
             }
-            g()->drawPixelXYF_Wu(boid.location.x, boid.location.y, g()->ColorFromCurrentPalette(boid.hue, 255, LINEARBLEND));
+            g().drawPixelXYF_Wu(boid.location.x, boid.location.y, g().ColorFromCurrentPalette(boid.hue, 255, LINEARBLEND));
         }
         fadeAllChannelsToBlackBy(15);
 

@@ -25,7 +25,7 @@ class PatternSMSpiroPulse : public EffectWithId<PatternSMSpiroPulse>
 
     void Start() override
     {
-        g()->Clear();
+        g().Clear();
     }
 
     void Draw() override
@@ -55,7 +55,7 @@ class PatternSMSpiroPulse : public EffectWithId<PatternSMSpiroPulse>
         float radY = CalcRad * CenterY / 2;
         for (uint8_t i = 0; i < AM; i++)
         {
-            g()->drawPixelXYF_Wu((CenterX + sin(t + (Angle * i)) * radX),
+            g().drawPixelXYF_Wu((CenterX + sin(t + (Angle * i)) * radX),
                 MATRIX_HEIGHT - 1 - (CenterY + cos(t + (Angle * i)) * radY),
                 ColorFromPalette(HeatColors_p, t * 10 + ((256 / AM) * i)));
         }
