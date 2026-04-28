@@ -33,6 +33,12 @@
 #include <esp_err.h>
 #include <esp_task_wdt.h>
 
+// This runtime transport intentionally targets the ESP-IDF legacy RMT API.
+// We depend on the Arduino/IDF compatibility layer because the sender uses
+// the legacy translator-based TX path (`rmt_translator_init`,
+// `rmt_write_sample`, `rmt_wait_tx_done`) rather than the newer IDF5 encoder
+// API. If that shim is unavailable, this transport cannot be built.
+
 #ifndef RMT_DEFAULT_CONFIG_TX
     #error "NightDriverStrip WS281x runtime transport requires the ESP-IDF legacy RMT API compatibility layer."
 #endif
@@ -262,8 +268,38 @@ void WS281xOutputManager::ReleaseChannel(size_t channelIndex)
 
     if (state.installed)
     {
-        rmt_wait_tx_done(channel, 0);
-        rmt_driver_uninstall(channel);
+        const auto waitError = rmt_wait_tx_done(channel, kRmtWaitTimeout);
+        if (waitError == ESP_ERR_TIMEOUT)
+        {
+            debugW("rmt_wait_tx_done timed out during ReleaseChannel for channel=%zu pin=%d; forcing TX stop",
+                   channelIndex,
+                   state.pin);
+
+            const auto stopError = rmt_tx_stop(channel);
+            if (stopError != ESP_OK)
+            {
+                debugE("rmt_tx_stop failed during ReleaseChannel for channel=%zu pin=%d error=%s",
+                       channelIndex,
+                       state.pin,
+                       esp_err_to_name(stopError));
+            }
+        }
+        else if (waitError != ESP_OK)
+        {
+            debugE("rmt_wait_tx_done failed during ReleaseChannel for channel=%zu pin=%d error=%s",
+                   channelIndex,
+                   state.pin,
+                   esp_err_to_name(waitError));
+        }
+
+        const auto uninstallError = rmt_driver_uninstall(channel);
+        if (uninstallError != ESP_OK)
+        {
+            debugE("rmt_driver_uninstall failed during ReleaseChannel for channel=%zu pin=%d error=%s",
+                   channelIndex,
+                   state.pin,
+                   esp_err_to_name(uninstallError));
+        }
         state.installed = false;
     }
 
