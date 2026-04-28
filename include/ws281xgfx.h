@@ -34,6 +34,7 @@
 #include "globals.h"
 
 #include "gfxbase.h"
+#include <mutex>
 
 class DeviceConfig;
 
@@ -51,7 +52,7 @@ public:
     ~WS281xGFX() override;
 
     static void InitializeHardware(std::vector<std::shared_ptr<GFXBase>>& devices);
-    static void ApplyCompiledTransportConfiguration(const DeviceConfig& deviceConfig, const std::vector<std::shared_ptr<GFXBase>>& devices, const char* reason);
+    static std::mutex& TransportMutex();
     void ConfigureTopology(size_t width, size_t height, bool serpentine) override;
 
     // PostProcessFrame

@@ -297,6 +297,8 @@ int SystemContainer::GetConfiguredAudioInputPin() const
 
 bool SystemContainer::ApplyRuntimeConfiguration(String* errorMessage)
 {
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
     auto& config = GetDeviceConfig();
 
     if (config.RequiresRecompileForCurrentRuntimeConfig())
@@ -307,38 +309,45 @@ bool SystemContainer::ApplyRuntimeConfiguration(String* errorMessage)
     }
 
     #if USE_WS281X
-    if (_ptrDevices)
+    try
     {
-        // Reconfiguring the already-owned GFX objects keeps the rest of the renderer stable while
-        // still letting the active WS281x layout, channel count, and pins move inside build limits.
-        for (auto& device : *_ptrDevices)
-            device->ConfigureTopology(config.GetMatrixWidth(), config.GetMatrixHeight(), config.IsMatrixSerpentine());
-    }
-
-    if (_ptrBufferManagers && _ptrDevices)
-    {
-        for (size_t i = 0; i < _ptrBufferManagers->size() && i < _ptrDevices->size(); ++i)
-            (*_ptrBufferManagers)[i].Reconfigure((*_ptrDevices)[i]);
-    }
-
-    #if INCOMING_WIFI_ENABLED
-    if (_ptrSocketServer)
-        _ptrSocketServer->SetLEDCount(config.GetActiveLEDCount());
-    #endif
-
-    // Compiled-pin WS281x transport is still the lowest-risk path for the common case where the user
-    // only changes topology inside the existing build envelope. Only engage the runtime manager when
-    // the active output really diverges from the compiled channel/pin layout.
-    if (_ptrDevices)
-    {
-        if (config.UsesCompiledWS281xTransport())
+        if (_ptrDevices)
         {
-            WS281xGFX::ApplyCompiledTransportConfiguration(config, *_ptrDevices, "runtime apply");
+            // Reconfiguring the already-owned GFX objects keeps the rest of the renderer stable while
+            // still letting the active WS281x layout, channel count, and pins move inside build limits.
+            for (auto& device : *_ptrDevices)
+                device->ConfigureTopology(config.GetMatrixWidth(), config.GetMatrixHeight(), config.IsMatrixSerpentine());
         }
-        else
+
+        if (_ptrBufferManagers && _ptrDevices)
         {
-            return SetupWS281xOutputManager().ApplyConfig(config, *_ptrDevices, errorMessage);
+            for (size_t i = 0; i < _ptrBufferManagers->size() && i < _ptrDevices->size(); ++i)
+                (*_ptrBufferManagers)[i].Reconfigure((*_ptrDevices)[i]);
         }
+
+        #if INCOMING_WIFI_ENABLED
+        if (_ptrSocketServer)
+            _ptrSocketServer->SetLEDCount(config.GetActiveLEDCount());
+        #endif
+
+        // The mutable WS281x output layer is now always owned by NightDriver so live pin/count/color-order
+        // changes stay on one transport path instead of handing off between different ESP32 RMT backends.
+        if (_ptrDevices && !SetupWS281xOutputManager().ApplyConfig(config, *_ptrDevices, errorMessage))
+            return false;
+
+        if (_ptrEffectManager && !_ptrEffectManager->ReinitializeEffects())
+        {
+            if (errorMessage)
+                *errorMessage = "failed to reinitialize effects for new topology";
+            return false;
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        debugE("Runtime configuration failed due to insufficient memory");
+        if (errorMessage)
+            *errorMessage = "insufficient memory for runtime reconfiguration";
+        return false;
     }
     #endif
 

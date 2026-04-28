@@ -130,6 +130,8 @@ void InitEffectsManager()
 
 void EffectManager::StartEffect()
 {
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
     // If there's a temporary effect override from the remote control active, we start that, else
     // we start the current regular effect
 
@@ -148,7 +150,9 @@ void EffectManager::StartEffect()
 void EffectManager::DispatchBeatIfNeeded()
 {
 #if ENABLE_AUDIO
-    const auto& beat = g_Analyzer.LastBeat();
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
+    const auto beat = g_Analyzer.LastBeat();
     if (beat.sequence == 0 || beat.sequence == _lastBeatSequence)
         return;
 
@@ -330,6 +334,8 @@ const String & EffectManager::GetCurrentEffectName() const
 
 void EffectManager::SetCurrentEffectIndex(size_t i)
 {
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
     if (i >= _vEffects.size())
     {
         debugW("Invalid index for SetCurrentEffectIndex");
@@ -598,6 +604,25 @@ bool EffectManager::Init()
     return true;
 }
 
+bool EffectManager::ReinitializeEffects()
+{
+    if (!Init())
+        return false;
+
+    if (_tempEffect)
+    {
+        debugV("About to re-init temp effect %s", _tempEffect->FriendlyName().c_str());
+        if (!_tempEffect->Init(_gfx))
+        {
+            debugW("Could not re-initialize temporary effect: %s\n", _tempEffect->FriendlyName().c_str());
+            return false;
+        }
+    }
+
+    StartEffect();
+    return true;
+}
+
 bool EffectManager::ShowVU(bool bShow)
 {
     auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
@@ -607,7 +632,7 @@ bool EffectManager::ShowVU(bool bShow)
 
     // Erase any exising pixels since effects don't all clear each frame
     if (!bShow)
-        _gfx[0]->setPixelsF(0, MATRIX_WIDTH, CRGB::Black);
+        _gfx[0]->setPixelsF(0, _gfx[0]->GetMatrixWidth(), CRGB::Black);
 
     return bResult;
 }
@@ -947,6 +972,8 @@ bool EffectManager::DeleteEffect(size_t index)
 
 void EffectManager::CheckEffectTimerExpired()
 {
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
     if (IsIntervalEternal() && !GetCurrentEffect().HasMaximumEffectTime())
         return;
 
@@ -968,6 +995,8 @@ void EffectManager::CheckEffectTimerExpired()
 
 void EffectManager::NextEffect(bool skipSave)
 {
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
     auto enabled = AreEffectsEnabled();
 
     do
@@ -987,6 +1016,8 @@ void EffectManager::NextEffect(bool skipSave)
 
 void EffectManager::PreviousEffect()
 {
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
     auto enabled = AreEffectsEnabled();
 
     do
@@ -1010,6 +1041,8 @@ void EffectManager::PreviousEffect()
 
 void EffectManager::Update()
 {
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+
     if ((_gfx[0])->GetLEDCount() == 0)
         return;
 

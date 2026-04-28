@@ -150,7 +150,9 @@ protected:
     String _currentPaletteName;
 
     #if USE_NOISE
-        std::unique_ptr<Noise> _ptrNoise;
+        // I was this many years old when I learned about std::once
+        mutable std::unique_ptr<Noise> _ptrNoise;
+        mutable std::once_flag _noiseInitOnce;
     #endif
 
     static constexpr int _heatColorsPaletteIndex = 6;
@@ -177,7 +179,7 @@ public:
 
     CRGB *leds = nullptr;
     #if MATRIX_HEIGHT > 1
-        std::unique_ptr<Boid[]> _boids;
+        std::unique_ptr<Boid[], psram_array_deleter<Boid>> _boids;
     #endif
 
     using PolarMapArray = PolarMap[kMatrixWidth][kMatrixHeight];
@@ -188,7 +190,7 @@ public:
     virtual ~GFXBase() override;
 
     #if USE_NOISE
-    void EnsureNoise();
+    void EnsureNoise() const;
 
     Noise &GetNoise()
     {
@@ -198,7 +200,7 @@ public:
 
     const Noise &GetNoise() const
     {
-        const_cast<GFXBase*>(this)->EnsureNoise();
+        EnsureNoise();
         return *_ptrNoise;
     }
     #endif
@@ -497,11 +499,11 @@ public:
         // the oscillators: linear ramps 0-255
         // osci[0-3] are used for noise animation
         // osci[4-5] are used for palette rotation
-        void NoiseVariablesSetup();
+        void NoiseVariablesSetup() const;
 
         void SetNoise(uint32_t nx, uint32_t ny, uint32_t nz, uint32_t sx, uint32_t sy);
 
-        void FillGetNoise();
+        void FillGetNoise() const;
 
         // The next couple of two-liners define function templates for the different noise approaches
         // that are implemented in the project. The desired noise approach for a particular use case

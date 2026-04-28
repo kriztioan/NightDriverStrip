@@ -132,6 +132,10 @@ class LEDStripEffect : public IJSONSerializable
     explicit LEDStripEffect(const JsonObjectConst&  jsonObject);
     virtual ~LEDStripEffect();
 
+    // Init may be called more than once during the lifetime of an effect. In particular, live WS281x
+    // topology/output changes re-run Init() on every effect so it can refresh cached geometry, LED counts,
+    // and any size-dependent allocations. Implementations must therefore be re-entrant/idempotent and
+    // replace or rebuild any topology-dependent state instead of assuming one-time construction.
     virtual bool Init(std::vector<std::shared_ptr<GFXBase>>& gfx);
 
     virtual void Start() {}                                         // Optional method called when time to clean/init the effect

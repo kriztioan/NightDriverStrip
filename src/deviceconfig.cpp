@@ -49,6 +49,29 @@ namespace
 {
     constexpr const char* kRecompileNeededMessage = "recompile needed";
 
+    // It's annoying to have to map from the compile-time COLOR_ORDER macro to the 
+    // runtime enum, but it is what it is.  It's better than tying to a FastLED type.
+
+    constexpr DeviceConfig::WS281xColorOrder ToRuntimeColorOrder(EOrder order)
+    {
+        switch (order)
+        {
+            case EOrder::RGB: return DeviceConfig::WS281xColorOrder::RGB;
+            case EOrder::RBG: return DeviceConfig::WS281xColorOrder::RBG;
+            case EOrder::GRB: return DeviceConfig::WS281xColorOrder::GRB;
+            case EOrder::GBR: return DeviceConfig::WS281xColorOrder::GBR;
+            case EOrder::BRG: return DeviceConfig::WS281xColorOrder::BRG;
+            case EOrder::BGR: return DeviceConfig::WS281xColorOrder::BGR;
+            default:          return DeviceConfig::WS281xColorOrder::GRB;
+        }
+    }
+
+    #if USE_WS281X
+    constexpr auto kCompiledWS281xColorOrder = ToRuntimeColorOrder(COLOR_ORDER);
+    #else
+    constexpr auto kCompiledWS281xColorOrder = DeviceConfig::WS281xColorOrder::GRB;
+    #endif
+
     constexpr std::array<int8_t, NUM_CHANNELS> kCompiledWS281xPins = {
         #if NUM_CHANNELS >= 1
         LED_PIN0,
@@ -119,6 +142,25 @@ const char* DeviceConfig::DriverName(OutputDriver driver)
     }
 }
 
+DeviceConfig::WS281xColorOrder DeviceConfig::GetCompiledWS281xColorOrder()
+{
+    return kCompiledWS281xColorOrder;
+}
+
+String DeviceConfig::GetColorOrderName(WS281xColorOrder colorOrder)
+{
+    switch (colorOrder)
+    {
+        case WS281xColorOrder::RGB: return "RGB";
+        case WS281xColorOrder::RBG: return "RBG";
+        case WS281xColorOrder::GRB: return "GRB";
+        case WS281xColorOrder::GBR: return "GBR";
+        case WS281xColorOrder::BRG: return "BRG";
+        case WS281xColorOrder::BGR: return "BGR";
+        default:                    return "GRB";
+    }
+}
+
 bool DeviceConfig::IsHub75Build()
 {
     return GetCompiledOutputDriver() == OutputDriver::HUB75;
@@ -134,14 +176,15 @@ void DeviceConfig::LogRuntimeConfig(const char* reason) const
         activePins += String(runtimeOutputs.outputPins[i]);
     }
 
-    debugI("Runtime config (%s): driver=%s matrix=%ux%u leds=%u serpentine=%d channels=%u audioPin=%d",
+    debugI("Runtime config (%s): driver=%s matrix=%ux%u leds=%u serpentine=%d channels=%u colorOrder=%s audioPin=%d",
            reason,
            DriverName(runtimeOutputs.driver),
            runtimeTopology.width,
            runtimeTopology.height,
            static_cast<unsigned>(GetActiveLEDCount()),
            runtimeTopology.serpentine,
-           static_cast<unsigned>(runtimeOutputs.channelCount),
+            static_cast<unsigned>(runtimeOutputs.channelCount),
+           GetColorOrderName(runtimeOutputs.colorOrder).c_str(),
            audioInputPin);
     debugI("Runtime config pins (%s): activeChannels=%s", reason, activePins.c_str());
 }
@@ -152,6 +195,7 @@ DeviceConfig::DeviceConfig()
     runtimeOutputs.driver = GetCompiledOutputDriver();
     runtimeOutputs.channelCount = NUM_CHANNELS;
     runtimeOutputs.outputPins = GetCompiledWS281xPins();
+    runtimeOutputs.colorOrder = GetCompiledWS281xColorOrder();
 
     writerIndex = g_ptrSystem->GetJSONWriter().RegisterWriter(
         [this] { assert(SaveToJSONFile(DEVICE_CONFIG_FILE, *this)); }
@@ -211,6 +255,7 @@ bool DeviceConfig::SerializeToJSON(JsonObject& jsonObject, bool includeSensitive
     jsonDoc[MatrixSerpentineTag] = runtimeTopology.serpentine;
     jsonDoc[OutputDriverTag] = DriverName(runtimeOutputs.driver);
     jsonDoc[WS281xChannelCountTag] = runtimeOutputs.channelCount;
+    jsonDoc[WS281xColorOrderTag] = GetColorOrderName(runtimeOutputs.colorOrder);
 
     auto ws281xPins = jsonDoc[WS281xPinsTag].to<JsonArray>();
     for (auto pin : runtimeOutputs.outputPins)
@@ -281,6 +326,17 @@ bool DeviceConfig::DeserializeFromJSON(const JsonObjectConst& jsonObject, bool s
     if (jsonObject[WS281xChannelCountTag].is<size_t>())
         updated.outputs.channelCount = jsonObject[WS281xChannelCountTag].as<size_t>();
 
+    if (jsonObject[WS281xColorOrderTag].is<String>())
+    {
+        const auto colorOrderName = jsonObject[WS281xColorOrderTag].as<String>();
+        if (colorOrderName == "RGB") updated.outputs.colorOrder = WS281xColorOrder::RGB;
+        else if (colorOrderName == "RBG") updated.outputs.colorOrder = WS281xColorOrder::RBG;
+        else if (colorOrderName == "GRB") updated.outputs.colorOrder = WS281xColorOrder::GRB;
+        else if (colorOrderName == "GBR") updated.outputs.colorOrder = WS281xColorOrder::GBR;
+        else if (colorOrderName == "BRG") updated.outputs.colorOrder = WS281xColorOrder::BRG;
+        else if (colorOrderName == "BGR") updated.outputs.colorOrder = WS281xColorOrder::BGR;
+    }
+
     if (jsonObject[WS281xPinsTag].is<JsonArrayConst>())
     {
         auto pinArray = jsonObject[WS281xPinsTag].as<JsonArrayConst>();
@@ -299,7 +355,7 @@ bool DeviceConfig::DeserializeFromJSON(const JsonObjectConst& jsonObject, bool s
         ntpServer = NTP_SERVER_DEFAULT;
 
     if (jsonObject[TimeZoneTag].is<String>())
-        return SetTimeZoneInternal(jsonObject[TimeZoneTag], true);
+        return SetTimeZone(jsonObject[TimeZoneTag], true);
 
     if (!skipWrite)
         SaveToJSON();
@@ -461,6 +517,12 @@ const std::vector<std::reference_wrapper<SettingSpec>>& DeviceConfig::GetSetting
             "Serpentine layout",
             "Controls the logical XY mapping for strip-based matrices. HUB75 ignores this because its panel mapping is build-defined.",
             SettingSpec::SettingType::Boolean
+        );
+        settingSpecs.emplace_back(
+            WS281xColorOrderTag,
+            "WS281x color order",
+            "Byte order used when streaming RGB values to WS281x LEDs. This applies live on strip builds and is ignored on HUB75 builds.",
+            SettingSpec::SettingType::String
         );
         auto& audioInputPinSpec = settingSpecs.emplace_back(
             AudioInputPinTag,
@@ -647,11 +709,11 @@ void DeviceConfig::SetAudioInputPin(int newAudioInputPin)
     LogRuntimeConfig("audio input pin changed");
 }
 
-// This helper separates "apply the timezone to the running process" from "persist a user edit".
+// This setter separates "apply the timezone to the running process" from "persist a user edit".
 // Startup/config-load needs to set TZ immediately so localtime() is correct, but it must not
 // immediately rewrite device.cfg just because we re-applied the already-persisted value.
 // The timezone JSON file used by this logic is generated using tools/gen-tz-json.py
-bool DeviceConfig::SetTimeZoneInternal(const String& newTimeZone, bool skipWrite)
+bool DeviceConfig::SetTimeZone(const String& newTimeZone, bool skipWrite)
 {
     String quotedTZ = "\n\"" + newTimeZone + '"';
 
@@ -689,11 +751,6 @@ bool DeviceConfig::SetTimeZoneInternal(const String& newTimeZone, bool skipWrite
         SaveToJSON();
 
     return true;
-}
-
-bool DeviceConfig::SetTimeZone(const String& newTimeZone, bool skipWrite)
-{
-    return SetTimeZoneInternal(newTimeZone, skipWrite);
 }
 
 #if ENABLE_WIFI
@@ -809,7 +866,7 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateTopology(uint16_t width, ui
         if (width != GetCompiledMatrixWidth() || height != GetCompiledMatrixHeight())
             return { false, kRecompileNeededMessage };
 
-        if (serpentine != runtimeTopology.serpentine)
+        if (serpentine != GetCompiledMatrixSerpentine())
             return { false, kRecompileNeededMessage };
     }
 
@@ -824,7 +881,7 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateOutputDriver(OutputDriver d
     return { true, "" };
 }
 
-DeviceConfig::ValidateResponse DeviceConfig::ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins) const
+DeviceConfig::ValidateResponse DeviceConfig::ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins, WS281xColorOrder colorOrder) const
 {
     if (channelCount == 0)
         return { false, "channel count must be greater than zero" };
@@ -839,12 +896,18 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateWS281xSettings(size_t chann
 
         if (pins != GetCompiledWS281xPins())
             return { false, kRecompileNeededMessage };
+
+        if (colorOrder != GetCompiledWS281xColorOrder())
+            return { false, kRecompileNeededMessage };
     }
 
     for (size_t i = 0; i < channelCount; ++i)
     {
         if (pins[i] < 0)
             return { false, "active channels require valid GPIO pins" };
+
+        if (!GPIO_IS_VALID_OUTPUT_GPIO(static_cast<gpio_num_t>(pins[i])))
+            return { false, "WS281x channel pins must be valid output GPIOs" };
 
         for (size_t j = i + 1; j < channelCount; ++j)
         {
@@ -866,7 +929,7 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateRuntimeConfig(const Runtime
     if (!topologyValid)
         return { false, topologyMessage };
 
-    auto [ws281xValid, ws281xMessage] = ValidateWS281xSettings(config.outputs.channelCount, config.outputs.outputPins);
+    auto [ws281xValid, ws281xMessage] = ValidateWS281xSettings(config.outputs.channelCount, config.outputs.outputPins, config.outputs.colorOrder);
     if (!ws281xValid)
         return { false, ws281xMessage };
 
@@ -889,7 +952,8 @@ bool DeviceConfig::SetRuntimeConfig(const RuntimeConfig& config, bool skipWrite,
         || runtimeTopology.serpentine != config.topology.serpentine
         || runtimeOutputs.driver != config.outputs.driver
         || runtimeOutputs.channelCount != config.outputs.channelCount
-        || runtimeOutputs.outputPins != config.outputs.outputPins;
+        || runtimeOutputs.outputPins != config.outputs.outputPins
+        || runtimeOutputs.colorOrder != config.outputs.colorOrder;
 
     runtimeTopology = config.topology;
     runtimeOutputs = config.outputs;

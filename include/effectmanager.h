@@ -163,6 +163,7 @@ public:
     void AddEffectEventListener(IEffectEventListener& listener);
 
     void LoadDefaultEffects();
+    bool ReinitializeEffects();
 
     // DeserializeFromJSON
     //

@@ -132,6 +132,16 @@ class DeviceConfig : public IJSONSerializable
         HUB75
     };
 
+    enum class WS281xColorOrder : uint8_t
+    {
+        RGB,
+        RBG,
+        GRB,
+        GBR,
+        BRG,
+        BGR
+    };
+
     struct RuntimeTopology
     {
         uint16_t width = MATRIX_WIDTH;
@@ -149,6 +159,7 @@ class DeviceConfig : public IJSONSerializable
         #endif
         size_t channelCount = NUM_CHANNELS;
         std::array<int8_t, NUM_CHANNELS> outputPins{};
+        WS281xColorOrder colorOrder = WS281xColorOrder::GRB;
     };
 
     struct RuntimeConfig
@@ -184,8 +195,6 @@ class DeviceConfig : public IJSONSerializable
     size_t writerIndex;
 
     void SaveToJSON() const;
-    bool SetTimeZoneInternal(const String& newTimeZone, bool skipWrite);
-    static std::array<int8_t, NUM_CHANNELS> GetCompiledWS281xPins();
     static const char* DriverName(OutputDriver driver);
     static bool IsHub75Build();
     void LogRuntimeConfig(const char* reason) const;
@@ -239,6 +248,7 @@ class DeviceConfig : public IJSONSerializable
     static constexpr const char * OutputDriverTag = "outputDriver";
     static constexpr const char * WS281xChannelCountTag = "ws281xChannelCount";
     static constexpr const char * WS281xPinsTag = "ws281xPins";
+    static constexpr const char * WS281xColorOrderTag = "ws281xColorOrder";
     static constexpr const char * AudioInputPinTag = "audioInputPin";
 
     DeviceConfig();
@@ -311,10 +321,20 @@ class DeviceConfig : public IJSONSerializable
 
     static constexpr uint16_t GetCompiledMatrixWidth() { return MATRIX_WIDTH; }
     static constexpr uint16_t GetCompiledMatrixHeight() { return MATRIX_HEIGHT; }
+    static constexpr bool GetCompiledMatrixSerpentine()
+    {
+        #if USE_HUB75
+            return false;
+        #else
+            return true;
+        #endif
+    }
     static constexpr size_t GetCompiledLEDCount() { return NUM_LEDS; }
     static constexpr size_t GetCompiledChannelCount() { return NUM_CHANNELS; }
     static constexpr int GetCompiledAudioInputPin() { return AUDIO_INPUT_PIN; }
-    static std::array<int8_t, NUM_CHANNELS> GetCompiledPins() { return GetCompiledWS281xPins(); }
+    static std::array<int8_t, NUM_CHANNELS> GetCompiledWS281xPins();
+    static WS281xColorOrder GetCompiledWS281xColorOrder();
+    static String GetColorOrderName(WS281xColorOrder colorOrder);
     static OutputDriver GetCompiledOutputDriver()
     {
         #if USE_HUB75
@@ -335,14 +355,7 @@ class DeviceConfig : public IJSONSerializable
     OutputDriver GetOutputDriver() const { return runtimeOutputs.driver; }
     size_t GetChannelCount() const { return runtimeOutputs.channelCount; }
     const std::array<int8_t, NUM_CHANNELS>& GetWS281xPins() const { return runtimeOutputs.outputPins; }
-    // When runtime output settings still match the compiled WS281x transport, we can keep using the
-    // long-proven FastLED controller path and reserve the new runtime manager for true pin/count changes.
-    bool UsesCompiledWS281xTransport() const
-    {
-        return runtimeOutputs.driver == GetCompiledOutputDriver()
-            && runtimeOutputs.channelCount == GetCompiledChannelCount()
-            && runtimeOutputs.outputPins == GetCompiledPins();
-    }
+    WS281xColorOrder GetWS281xColorOrder() const { return runtimeOutputs.colorOrder; }
     bool SupportsLiveTopology() const { return !IsHub75Build() && runtimeOutputs.driver == OutputDriver::WS281x; }
     bool SupportsLiveOutputReconfigure() const { return !IsHub75Build() && runtimeOutputs.driver == OutputDriver::WS281x; }
     bool SupportsConfigurableAudioInputPin() const
@@ -373,7 +386,7 @@ class DeviceConfig : public IJSONSerializable
     ValidateResponse ValidateAudioInputPin(int pin) const;
     ValidateResponse ValidateTopology(uint16_t width, uint16_t height, bool serpentine) const;
     ValidateResponse ValidateOutputDriver(OutputDriver driver) const;
-    ValidateResponse ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins) const;
+    ValidateResponse ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins, WS281xColorOrder colorOrder) const;
     ValidateResponse ValidateRuntimeConfig(const RuntimeConfig& config) const;
     bool SetRuntimeConfig(const RuntimeConfig& config, bool skipWrite = false, String* errorMessage = nullptr);
     void SetAudioInputPin(int newAudioInputPin);

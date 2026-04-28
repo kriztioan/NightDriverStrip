@@ -159,8 +159,12 @@ void SoundAnalyzerBase::ResetFrameState()
 void SoundAnalyzerBase::ResetBeatDetection()
 {
     debugV("Beat detector reset");
-    _lastBeatInfo = {};
-    _lastNearBeatInfo = {};
+    {
+        // Need a mutex because it writes the same shared beat structs that the render thread reads.
+        std::lock_guard<std::mutex> lock(_beatInfoMutex);
+        _lastBeatInfo = {};
+        _lastNearBeatInfo = {};
+    }
     _previousBeatPeaks.fill(0.0f);
     _beatScoreBaseline = 0.0f;
     _beatFluxBaseline = 0.0f;
@@ -411,6 +415,7 @@ void SoundAnalyzerBase::SetPeakDataFromRemote(const PeakData &peaks)
 
 void SoundAnalyzerBase::RecordBeat(uint32_t now, float confidence, float strength, float bass, float mid, float treble, float flux, bool simulated)
 {
+    std::lock_guard<std::mutex> lock(_beatInfoMutex);
     const float intervalMs = (_lastBeatDetectedMs == 0) ? _previousBeatIntervalMs : static_cast<float>(now - _lastBeatDetectedMs);
 
     _lastBeatDetectedMs = now;
@@ -437,6 +442,7 @@ void SoundAnalyzerBase::RecordBeat(uint32_t now, float confidence, float strengt
 
 void SoundAnalyzerBase::RecordNearBeat(uint32_t now, float score, float strength, float bass, float mid, float treble, float flux)
 {
+    std::lock_guard<std::mutex> lock(_beatInfoMutex);
     _lastNearBeatInfo.sequence++;
     _lastNearBeatInfo.timestampMs = now;
     _lastNearBeatInfo.intervalMs = 0.0f;
@@ -505,17 +511,20 @@ void SoundAnalyzerBase::UpdateBeatDetection()
 
     const float score = bass * 0.55f + lowFlux * 1.50f + flux * 1.20f + mid * 0.15f + beatVu * 0.25f;
     const float strength = std::clamp((bass * 1.10f) + (lowFlux * 2.10f) + (flux * 1.35f), 0.0f, 2.5f);
-    const float scoreThreshold = _beatScoreBaseline + std::max(0.03f, _beatScoreDeviation * 1.20f);
-    const float fluxThreshold = _beatFluxBaseline + std::max(0.012f, _beatFluxDeviation * 1.15f);
-    const float bassThreshold = _beatBassBaseline + std::max(0.012f, _beatBassDeviation * 1.00f);
+    const float scoreThreshold = _beatScoreBaseline + std::max(0.025f, _beatScoreDeviation * 1.08f);
+    const float fluxThreshold = _beatFluxBaseline + std::max(0.010f, _beatFluxDeviation * 1.08f);
+    const float bassThreshold = _beatBassBaseline + std::max(0.010f, _beatBassDeviation * 0.82f);
 
     const uint32_t now = millis();
-    const float minIntervalMs = std::clamp(_previousBeatIntervalMs * 0.48f, 200.0f, 650.0f);
+    const float minIntervalMs = std::clamp(_previousBeatIntervalMs * 0.44f, 170.0f, 650.0f);
     const bool enoughGap = (_lastBeatDetectedMs == 0) || (static_cast<float>(now - _lastBeatDetectedMs) >= minIntervalMs);
     const bool candidate = enoughGap
         && score > scoreThreshold
         && flux > fluxThreshold
-        && (bass > bassThreshold || lowFlux > fluxThreshold || (score > (scoreThreshold * 1.08f) && flux > (fluxThreshold * 1.10f)))
+        && (bass > bassThreshold
+            || (bass + lowFlux) > (bassThreshold * 1.18f)
+            || lowFlux > (fluxThreshold * 0.92f)
+            || (score > (scoreThreshold * 1.03f) && flux > (fluxThreshold * 1.05f)))
         && strength > 0.10f
         && (bass + lowFlux) > 0.06f;
     const bool nearCandidate = enoughGap
@@ -550,7 +559,7 @@ void SoundAnalyzerBase::UpdateBeatDetection()
         if (now - _lastBeatDebugMs >= 250)
         {
             _lastBeatDebugMs = now;
-            debugI("Beat near-miss: bass=%.3f/%.3f flux=%.3f/%.3f score=%.3f/%.3f lowFlux=%.3f strength=%.3f gap=%d",
+            debugV("Beat near-miss: bass=%.3f/%.3f flux=%.3f/%.3f score=%.3f/%.3f lowFlux=%.3f strength=%.3f gap=%d",
                    bass,
                    bassThreshold,
                    flux,

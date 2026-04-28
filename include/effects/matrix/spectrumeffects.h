@@ -129,8 +129,8 @@ class VUMeter
 
     bool UpdateBeatIndicatorState() const
     {
-        const auto & beat = g_Analyzer.LastBeat();
-        const auto & nearBeat = g_Analyzer.LastNearBeat();
+        const auto beat = g_Analyzer.LastBeat();
+        const auto nearBeat = g_Analyzer.LastNearBeat();
         const uint32_t now = millis();
 
         if (beat.sequence != 0 && beat.sequence != _lastIndicatorBeatSequence)

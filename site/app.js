@@ -1,3 +1,48 @@
+/* Abandon all hope, all ye who enter.  Here be AI code that even the author doesn't understand.  You've been warned.
+
+                          ud$$$**$$$$$$$bc.
+                       u@**"        4$$$$$$$Nu
+                     J                ""#$$$$$$r
+                    @                       $$$$b
+                  .F                        ^*3$$$
+                 :% 4                         J$$$N
+                 $  :F                       :$$$$$
+                4F  9                       J$$$$$$$
+                4$   k             4$$$$bed$$$$$$$$$
+                $$r  'F            $$$$$$$$$$$$$$$$$r
+                $$$   b.           $$$$$$$$$$$$$$$$$N
+                $$$$$k 3eeed$$b    $$$Euec."$$$$$$$$$
+ .@$**N.        $$$$$" $$$$$$F'L $$$$$$$$$$$  $$$$$$$
+ :$$L  'L       $$$$$ 4$$$$$$  * $$$$$$$$$$F  $$$$$$F         edNc
+@$$$$N  ^k      $$$$$  3$$$$*%   $F4$$$$$$$   $$$$$"        d"  z$N
+$$$$$$   ^k     '$$$"   #$$$F   .$  $$$$$c.u@$$$          J"  @$$$$r
+$$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
+ ^$$$$$$.    "NL   "N. z@*     $$$  $$$$$$$$$$$$$P      $P  d$$$$$$$
+    ^"*$$$$b   '*L   9$E      4$$$  d$$$$$$$$$$$"     d*   J$$$$$r
+         ^$$$$u  '$.  $$$L     "#" d$$$$$$".@$$    .@$"  z$$$$*"
+           ^$$$$. ^$N.3$$$       4u$$$$$$$ 4$$$  u$*" z$$$"
+             '*$$$$$$$$ *$b      J$$$$$$$b u$$P $"  d$$P
+                #$$$$$$ 4$ 3*$"$*$ $"$'c@@$$$$ .u@$$$P
+                  "$$$$  ""F~$ $uNr$$$^&J$$$$F $$$$#
+                    "$$    "$$$bd$.$W$$$$$$$$F $$"
+                      ?k         ?$$$$$$$$$$$F'*
+                       9$$bL     z$$$$$$$$$$$F
+                        $$$$    $$$$$$$$$$$$$
+                         '#$$c  '$$$$$$$$$"
+                          .@"#$$$$$$$$$$$$b
+                        z*      $$$$$$$$$$$$N.
+                      e"      z$$"  #$$$k  '*$$.
+                  .u*      u@$P"      '#$$c   "$$c
+           u@$*"""       d$$"            "$$$u  ^*$$b.
+         :$F           J$P"                ^$$$c   '"$$$$$$bL
+        d$$  ..      @$#                      #$$b         '#$
+        9$$$$$$b   4$$                          ^$$k         '$
+         "$$6""$b u$$                             '$    d$$$$$P
+           '$F $$$$$"                              ^b  ^$$$$b$
+            '$W$$$$"                                'b@$$$$"
+                                                     ^$$$*
+*/
+
 (function () {
   "use strict";
 
@@ -17,6 +62,8 @@
     dynamicStats: null,
     settings: null,
     settingsSpecs: [],
+    timezones: null,
+    timezonesLoading: false,
     unifiedSettings: null,
     unifiedSchema: null,
     effects: null,
@@ -43,8 +90,17 @@
       socket: null,
       connected: false,
       frame: null
-    }
+    },
+    drag: {
+      effectIndex: null,
+      dropIndex: null
+    },
+    activeTab: localStorage.getItem("nd.activeTab") || "effects"
   };
+
+  const COLOR_ORDER_OPTIONS = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"];
+  const SYNTHETIC_WS281X_PIN_PREFIX = "ws281xPin";
+  const COUNTRY_OPTIONS = buildCountryOptions();
 
   const els = {};
 
@@ -55,6 +111,7 @@
     bindEvents();
     initializeStaticShell();
     await loadAll();
+    void ensureTimezonesLoaded();
     restartPolling();
   }
 
@@ -69,7 +126,9 @@
       "summaryCpuCores", "summaryHeap", "summaryPsram",
       "effectsMeta", "effectsTableBody", "reloadSettingsButton", "applySettingsButton",
       "applySettingsRebootButton", "deviceSettingsForm", "statsTimestamp", "statsGrid",
-      "previewConnectButton", "previewDisconnectButton", "previewStatus", "previewCanvas",
+      "previewConnectButton", "previewDisconnectButton", "previewStatus", "previewWrap", "previewCanvas",
+      "tabEffectsButton", "tabSettingsButton", "tabStatisticsButton",
+      "tabEffectsPane", "tabSettingsPane", "tabStatisticsPane", "tabBodyPanel",
       "effectSettingsDialog", "effectDialogTitle", "effectSettingsForm", "closeEffectDialogButton",
       "cancelEffectDialogButton", "applyEffectDialogButton", "toastStack"
     ];
@@ -100,9 +159,16 @@
     });
     els.previewConnectButton.addEventListener("click", connectPreviewSocket);
     els.previewDisconnectButton.addEventListener("click", disconnectPreviewSocket);
+    els.tabEffectsButton.addEventListener("click", () => setActiveTab("effects"));
+    els.tabSettingsButton.addEventListener("click", () => setActiveTab("settings"));
+    els.tabStatisticsButton.addEventListener("click", () => setActiveTab("statistics"));
     els.closeEffectDialogButton.addEventListener("click", closeEffectDialog);
     els.cancelEffectDialogButton.addEventListener("click", closeEffectDialog);
     els.applyEffectDialogButton.addEventListener("click", applyEffectSettings);
+    window.addEventListener("resize", () => {
+      updateActiveTabCutout();
+      drawPreviewFrame();
+    });
   }
 
   function initializeStaticShell() {
@@ -110,42 +176,99 @@
     els.webPortValue.textContent = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
     els.statsRefreshInput.value = state.statsRefreshSeconds;
     els.autoRefreshToggle.checked = state.autoRefresh;
+    setActiveTab(state.activeTab);
     setConnectionState("Starting", "pending");
+  }
+
+  function setActiveTab(tabName) {
+    state.activeTab = tabName;
+    localStorage.setItem("nd.activeTab", tabName);
+
+    const themeClassByTab = {
+      effects: "card-green",
+      settings: "card-blue",
+      statistics: "card-purple"
+    };
+
+    const tabs = [
+      { name: "effects", button: els.tabEffectsButton, pane: els.tabEffectsPane },
+      { name: "settings", button: els.tabSettingsButton, pane: els.tabSettingsPane },
+      { name: "statistics", button: els.tabStatisticsButton, pane: els.tabStatisticsPane }
+    ];
+
+    tabs.forEach((tab) => {
+      const active = tab.name === tabName;
+      tab.button.classList.toggle("active", active);
+      tab.button.setAttribute("aria-selected", active ? "true" : "false");
+      tab.pane.classList.toggle("active", active);
+      tab.pane.hidden = !active;
+    });
+
+    Object.values(themeClassByTab).forEach((className) => {
+      els.tabBodyPanel.classList.remove(className);
+    });
+    els.tabBodyPanel.classList.add(themeClassByTab[tabName] || "card-green");
+    updateActiveTabCutout();
+
+    if (tabName === "settings") {
+      void ensureTimezonesLoaded();
+    }
+  }
+
+  function updateActiveTabCutout() {
+    const activeButton = [els.tabEffectsButton, els.tabSettingsButton, els.tabStatisticsButton]
+      .find((button) => button && button.classList.contains("active"));
+
+    if (!activeButton) {
+      return;
+    }
+
+    const cutLeft = 18 + activeButton.offsetLeft;
+    const cutWidth = activeButton.offsetWidth;
+    els.tabBodyPanel.style.setProperty("--tab-cut-left", `${cutLeft}px`);
+    els.tabBodyPanel.style.setProperty("--tab-cut-width", `${cutWidth}px`);
   }
 
   async function loadAll() {
     setConnectionState("Loading", "pending");
-    try {
-      const [staticStats, dynamicStats, settings, settingsSpecs, unifiedSettings, unifiedSchema, effects] = await Promise.all([
-        fetchJson("/statistics/static"),
-        fetchJson("/statistics/dynamic"),
-        fetchJson("/settings"),
-        fetchJson("/settings/specs"),
-        fetchJson("/api/v1/settings"),
-        fetchJson("/api/v1/settings/schema"),
-        fetchJson("/effects")
-      ]);
+    const requests = [
+      ["/statistics/static", "staticStats"],
+      ["/statistics/dynamic", "dynamicStats"],
+      ["/settings", "settings"],
+      ["/settings/specs", "settingsSpecs"],
+      ["/api/v1/settings", "unifiedSettings"],
+      ["/api/v1/settings/schema", "unifiedSchema"],
+      ["/effects", "effects"]
+    ];
 
-      state.staticStats = staticStats;
-      state.dynamicStats = dynamicStats;
-      state.settings = settings;
-      state.settingsSpecs = settingsSpecs;
-      state.unifiedSettings = unifiedSettings;
-      state.unifiedSchema = unifiedSchema;
-      state.effects = effects;
-      state.deviceDraft = {};
-      state.deviceErrors.clear();
+    const results = await Promise.allSettled(requests.map(([path]) => fetchJson(path)));
+    let anySuccess = false;
+    const failures = [];
 
-      renderSettingsForm();
-      renderEffects();
-      renderSummaries();
-      renderStats();
-      drawPreviewFrame();
-      setConnectionState("Connected", "online");
-    } catch (error) {
-      handleError("Initial load failed", error);
-      setConnectionState("Offline", "offline");
+    results.forEach((result, index) => {
+      const [path, stateKey] = requests[index];
+      if (result.status === "fulfilled") {
+        state[stateKey] = result.value;
+        anySuccess = true;
+      } else {
+        failures.push(`${path}: ${result.reason && result.reason.message ? result.reason.message : "failed"}`);
+      }
+    });
+
+    state.deviceDraft = {};
+    state.deviceErrors.clear();
+
+    safeRenderAfterLoad();
+
+    if (state.activeTab === "settings") {
+      void ensureTimezonesLoaded();
     }
+
+    if (failures.length > 0) {
+      handleError("Some data failed to load", new Error(failures.join(" | ")));
+    }
+
+    setConnectionState(anySuccess ? "Connected" : "Offline", anySuccess ? "online" : "offline");
   }
 
   async function loadEffectsOnly() {
@@ -177,8 +300,41 @@
       renderSettingsForm();
       renderSummaries();
       renderStats();
+      void ensureTimezonesLoaded();
     } catch (error) {
       handleError("Failed to reload settings", error);
+    }
+  }
+
+  function safeRenderAfterLoad() {
+    try {
+      renderSettingsForm();
+    } catch (error) {
+      handleError("Failed to render settings", error);
+    }
+
+    try {
+      renderEffects();
+    } catch (error) {
+      handleError("Failed to render effects", error);
+    }
+
+    try {
+      renderSummaries();
+    } catch (error) {
+      handleError("Failed to render summary", error);
+    }
+
+    try {
+      renderStats();
+    } catch (error) {
+      handleError("Failed to render statistics", error);
+    }
+
+    try {
+      drawPreviewFrame();
+    } catch (error) {
+      handleError("Failed to render preview frame", error);
     }
   }
 
@@ -227,9 +383,8 @@
     const effects = state.effects;
     const staticStats = state.staticStats;
     const dynamicStats = state.dynamicStats;
-    const unifiedSettings = state.unifiedSettings;
 
-    if (!effects || !staticStats || !dynamicStats || !unifiedSettings) {
+    if (!effects || !staticStats || !dynamicStats) {
       return;
     }
 
@@ -261,13 +416,28 @@
   function renderEffects() {
     const effects = state.effects;
     if (!effects || !Array.isArray(effects.Effects)) {
-      els.effectsTableBody.innerHTML = '<tr><td colspan="5" class="empty-cell">No effects loaded.</td></tr>';
+      els.effectsTableBody.innerHTML = '<tr><td colspan="6" class="empty-cell">No effects loaded.</td></tr>';
       return;
     }
 
     const rows = effects.Effects.map((effect, index) => {
       const tr = document.createElement("tr");
       const isCurrent = index === Number(effects.currentEffect || 0);
+      tr.dataset.effectIndex = String(index);
+
+      const gripCell = document.createElement("td");
+      gripCell.className = "grip-cell";
+      const grip = document.createElement("span");
+      grip.className = "drag-grip";
+      grip.draggable = true;
+      grip.title = "Drag to reorder";
+      grip.addEventListener("dragstart", (event) => handleEffectDragStart(event, index, tr));
+      grip.addEventListener("dragend", () => clearEffectDragState());
+      gripCell.appendChild(grip);
+      tr.appendChild(gripCell);
+
+      tr.addEventListener("dragover", (event) => handleEffectDragOver(event, index, tr));
+      tr.addEventListener("drop", (event) => handleEffectDrop(event, index));
 
       const onCell = document.createElement("td");
       const toggle = document.createElement("input");
@@ -297,11 +467,9 @@
 
       const actionsCell = document.createElement("td");
       actionsCell.className = "row-actions";
-      actionsCell.appendChild(miniButton("Trigger", () => postForm("/currentEffect", { currentEffectIndex: index }).then(loadEffectsOnly), !effect.enabled));
-      actionsCell.appendChild(miniButton("Settings", () => openEffectDialog(index)));
-      actionsCell.appendChild(miniButton("Up", () => moveEffect(index, Math.max(0, index - 1)), index === 0));
-      actionsCell.appendChild(miniButton("Down", () => moveEffect(index, index + 1), index === effects.Effects.length - 1));
-      actionsCell.appendChild(miniButton("Delete", () => deleteEffect(index), !!effect.core));
+      actionsCell.appendChild(miniIconButton("▶", "Trigger effect", () => postForm("/currentEffect", { currentEffectIndex: index }).then(loadEffectsOnly), !effect.enabled));
+      actionsCell.appendChild(miniIconButton("⚙", "Effect settings", () => openEffectDialog(index)));
+      actionsCell.appendChild(miniIconButton("🗑", "Delete effect", () => deleteEffect(index), !!effect.core));
       tr.appendChild(actionsCell);
 
       return tr;
@@ -310,23 +478,220 @@
     els.effectsTableBody.replaceChildren(...rows);
   }
 
+  function handleEffectDragStart(event, effectIndex, row) {
+    state.drag.effectIndex = effectIndex;
+    state.drag.dropIndex = effectIndex;
+    row.classList.add("dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(effectIndex));
+    }
+  }
+
+  function handleEffectDragOver(event, effectIndex, row) {
+    if (state.drag.effectIndex === null) {
+      return;
+    }
+    event.preventDefault();
+    state.drag.dropIndex = effectIndex;
+    Array.from(els.effectsTableBody.querySelectorAll("tr")).forEach((candidate) => {
+      candidate.classList.toggle("drop-target", candidate === row);
+    });
+  }
+
+  async function handleEffectDrop(event, effectIndex) {
+    event.preventDefault();
+    const fromIndex = state.drag.effectIndex;
+    clearEffectDragState();
+    if (fromIndex === null || fromIndex === effectIndex) {
+      return;
+    }
+    try {
+      await moveEffect(fromIndex, effectIndex);
+    } catch (_error) {
+      // moveEffect already reports errors
+    }
+  }
+
+  function clearEffectDragState() {
+    state.drag.effectIndex = null;
+    state.drag.dropIndex = null;
+    Array.from(els.effectsTableBody.querySelectorAll("tr")).forEach((row) => {
+      row.classList.remove("dragging", "drop-target");
+    });
+  }
+
   function renderSettingsForm() {
     if (!state.settings || !Array.isArray(state.settingsSpecs)) {
+      els.deviceSettingsForm.innerHTML = '<div class="empty-cell">Settings data is unavailable.</div>';
       return;
     }
 
     const fragment = document.createDocumentFragment();
-    state.settingsSpecs.forEach((spec) => {
-      if (spec.writeOnly && !spec.hasValidation) {
+    getSettingsSections().forEach((section) => {
+      if (section.specs.length === 0) {
         return;
       }
-      const currentValue = Object.prototype.hasOwnProperty.call(state.settings, spec.name)
-        ? state.settings[spec.name]
-        : defaultValueForSpec(spec);
-      fragment.appendChild(buildSettingField(spec, currentValue, state.deviceDraft, state.deviceErrors, false));
+
+      const sectionNode = document.createElement("section");
+      sectionNode.className = "settings-section";
+
+      const headerNode = document.createElement("header");
+      headerNode.className = "settings-section-header";
+
+      const titleNode = document.createElement("h3");
+      titleNode.textContent = section.title;
+      headerNode.appendChild(titleNode);
+
+      if (section.description) {
+        const descriptionNode = document.createElement("p");
+        descriptionNode.textContent = section.description;
+        headerNode.appendChild(descriptionNode);
+      }
+
+      sectionNode.appendChild(headerNode);
+
+      const bodyNode = document.createElement("div");
+      bodyNode.className = "settings-section-body";
+      section.specs.forEach((spec) => {
+        const currentValue = getCurrentDeviceSettingValue(spec);
+        bodyNode.appendChild(buildSettingField(spec, currentValue, state.deviceDraft, state.deviceErrors, false));
+      });
+      sectionNode.appendChild(bodyNode);
+      fragment.appendChild(sectionNode);
     });
 
     els.deviceSettingsForm.replaceChildren(fragment);
+  }
+
+  function getSettingsSections() {
+    const orderedSpecs = getOrderedDeviceSettingSpecs().filter((spec) => !(spec.writeOnly && !spec.hasValidation));
+    const sections = [
+      { key: "topology", title: "Topology", description: "Matrix geometry and logical mapping.", specs: [] },
+      { key: "output", title: "Output", description: "Driver selection and WS281x transport settings.", specs: [] },
+      { key: "location", title: "Location", description: "Region, timezone, and weather lookup settings.", specs: [] },
+      { key: "clock", title: "Clock & Weather", description: "Time formatting and synchronization behavior.", specs: [] },
+      { key: "audio", title: "Audio", description: "Audio sampling and microphone input settings.", specs: [] },
+      { key: "appearance", title: "Appearance", description: "Brightness, colors, and visual state persistence.", specs: [] },
+      { key: "system", title: "System", description: "Network identity and general device options.", specs: [] }
+    ];
+
+    const byKey = new Map(sections.map((section) => [section.key, section]));
+    orderedSpecs.forEach((spec) => {
+      byKey.get(settingSectionKey(spec.name)).specs.push(spec);
+    });
+
+    return sections;
+  }
+
+  function getOrderedDeviceSettingSpecs() {
+    const specs = state.settingsSpecs.slice();
+    const compiledMaxChannels = Number((((state.unifiedSchema || {}).outputs || {}).ws281x || {}).compiledMaxChannels || 0);
+    const configuredPins = (((state.unifiedSettings || {}).outputs || {}).ws281x || {}).pins || [];
+
+    for (let index = 0; index < Math.max(compiledMaxChannels, configuredPins.length); index += 1) {
+      specs.push({
+        name: `${SYNTHETIC_WS281X_PIN_PREFIX}${index}`,
+        friendlyName: `WS281x pin ${index + 1}`,
+        description: `GPIO assigned to WS281x channel ${index + 1}.`,
+        type: settingType.Integer,
+        minimumValue: -1,
+        maximumValue: 48
+      });
+    }
+
+    return specs.sort(compareSettingSpecs);
+  }
+
+  function compareSettingSpecs(left, right) {
+    const rankDiff = settingPriority(left.name) - settingPriority(right.name);
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
+    return String(left.friendlyName || left.name).localeCompare(String(right.friendlyName || right.name));
+  }
+
+  function settingPriority(name) {
+    const priorities = {
+      matrixWidth: 0,
+      matrixHeight: 1,
+      matrixSerpentine: 2,
+      outputDriver: 10,
+      ws281xChannelCount: 11,
+      ws281xColorOrder: 12
+    };
+
+    if (Object.prototype.hasOwnProperty.call(priorities, name)) {
+      return priorities[name];
+    }
+
+    const pinIndex = syntheticWs281xPinIndex(name);
+    if (pinIndex !== null) {
+      return 3 + pinIndex;
+    }
+
+    return 100;
+  }
+
+  function settingSectionKey(name) {
+    if (name === "matrixWidth" || name === "matrixHeight" || name === "matrixSerpentine") {
+      return "topology";
+    }
+
+    if (
+      name === "outputDriver"
+      || name === "ws281xChannelCount"
+      || name === "ws281xColorOrder"
+      || syntheticWs281xPinIndex(name) !== null
+    ) {
+      return "output";
+    }
+
+    if (name === "location" || name === "locationIsZip" || name === "countryCode" || name === "timeZone") {
+      return "location";
+    }
+
+    if (name === "use24HourClock" || name === "useCelsius" || name === "ntpServer" || name === "openWeatherApiKey") {
+      return "clock";
+    }
+
+    if (name === "audioInputPin") {
+      return "audio";
+    }
+
+    if (
+      name === "brightness"
+      || name === "globalColor"
+      || name === "secondColor"
+      || name === "applyGlobalColors"
+      || name === "clearGlobalColor"
+      || name === "showVUMeter"
+      || name === "rememberCurrentEffect"
+      || name === "effectInterval"
+    ) {
+      return "appearance";
+    }
+
+    return "system";
+  }
+
+  function syntheticWs281xPinIndex(name) {
+    const match = /^ws281xPin(\d+)$/.exec(String(name || ""));
+    return match ? Number(match[1]) : null;
+  }
+
+  function getCurrentDeviceSettingValue(spec) {
+    const pinIndex = syntheticWs281xPinIndex(spec.name);
+    if (pinIndex !== null) {
+      const pins = (((state.unifiedSettings || {}).outputs || {}).ws281x || {}).pins || [];
+      return pinIndex < pins.length ? pins[pinIndex] : -1;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(state.settings, spec.name)) {
+      return state.settings[spec.name];
+    }
+
+    return defaultValueForSpec(spec);
   }
 
   function renderEffectDialogForm() {
@@ -346,16 +711,32 @@
   }
 
   function buildSettingField(spec, currentValue, draftStore, errorSet, isEffectDialog) {
-    const wrapper = document.createElement("label");
-    wrapper.className = "field" + (spec.type === settingType.String && String(currentValue || "").length > 80 ? " full-span" : "");
+    const wrapper = document.createElement("div");
+    const needsStackedLayout = spec.type === settingType.Palette;
+    wrapper.className = "setting-row" + (needsStackedLayout ? " stacked" : "");
 
-    const title = document.createElement("span");
+    const meta = document.createElement("div");
+    meta.className = "setting-meta";
+    const title = document.createElement("div");
+    title.className = "setting-name";
     title.textContent = spec.friendlyName || spec.name;
-    wrapper.appendChild(title);
+    meta.appendChild(title);
+    wrapper.appendChild(meta);
+
+    const valueWrap = document.createElement("div");
+    valueWrap.className = "setting-value";
+    wrapper.appendChild(valueWrap);
 
     const key = spec.name;
     const currentDraft = Object.prototype.hasOwnProperty.call(draftStore, key) ? draftStore[key] : currentValue;
     const readOnly = !!spec.readOnly;
+    const isBrightnessField = key === "brightness";
+    const isColorOrderField = key === "ws281xColorOrder";
+    const isTimeZoneField = key === "timeZone";
+    const isCountryCodeField = key === "countryCode";
+    const isOutputDriverField = key === "outputDriver";
+    const isChannelCountField = key === "ws281xChannelCount";
+    const isEffectIntervalField = key === "effectInterval";
 
     const setDraftValue = (value) => {
       if (valuesEqual(value, currentValue)) {
@@ -379,9 +760,78 @@
     };
 
     let control;
+
+    if (isEffectIntervalField) {
+      const intervalMs = Number(currentDraft || 0);
+      const fallbackSeconds = Math.max(1, Math.round(Math.max(Number(currentValue || 0), 60000) / 1000));
+      const initialSeconds = Math.max(1, Math.round((intervalMs > 0 ? intervalMs : Math.max(Number(currentValue || 0), 60000)) / 1000));
+
+      const row = document.createElement("div");
+      row.className = "interval-row";
+
+      const switchLabel = document.createElement("label");
+      switchLabel.className = "mac-switch";
+      control = document.createElement("input");
+      control.type = "checkbox";
+      control.checked = intervalMs > 0;
+      control.disabled = readOnly;
+      const track = document.createElement("span");
+      track.className = "mac-switch-track";
+      const thumb = document.createElement("span");
+      thumb.className = "mac-switch-thumb";
+      track.appendChild(thumb);
+      switchLabel.appendChild(control);
+      switchLabel.appendChild(track);
+
+      const rotateLabel = document.createElement("span");
+      rotateLabel.className = "interval-switch-label";
+      rotateLabel.textContent = "Rotate effects";
+
+      const secondsField = document.createElement("label");
+      secondsField.className = "inline-field";
+      const secondsInput = document.createElement("input");
+      secondsInput.type = "number";
+      secondsInput.min = "1";
+      secondsInput.step = "1";
+      secondsInput.inputMode = "numeric";
+      secondsInput.value = String(initialSeconds || fallbackSeconds);
+      secondsInput.disabled = readOnly || !control.checked;
+      const secondsSuffix = document.createElement("span");
+      secondsSuffix.textContent = "sec";
+      secondsField.appendChild(secondsInput);
+      secondsField.appendChild(secondsSuffix);
+
+      const syncDraftValue = () => {
+        const seconds = clampInt(secondsInput.value, 1, 2147483, fallbackSeconds);
+        secondsInput.value = String(seconds);
+        secondsInput.disabled = readOnly || !control.checked;
+        setDraftValue(control.checked ? seconds * 1000 : 0);
+        setFieldError(false, "");
+      };
+
+      control.addEventListener("change", syncDraftValue);
+      secondsInput.addEventListener("change", syncDraftValue);
+
+      row.appendChild(switchLabel);
+      row.appendChild(rotateLabel);
+      row.appendChild(secondsField);
+      valueWrap.appendChild(row);
+      const help = document.createElement("div");
+      help.className = "field-help";
+      help.innerHTML = (spec.description || "") + " Disable rotation to keep the current effect active indefinitely.";
+      meta.appendChild(help);
+
+      if (isEffectDialog) {
+        wrapper.dataset.dialogField = "1";
+      }
+
+      return wrapper;
+    }
+
     switch (spec.type) {
       case settingType.Boolean: {
-        wrapper.classList.add("full-span");
+        const switchLabel = document.createElement("label");
+        switchLabel.className = "mac-switch";
         control = document.createElement("input");
         control.type = "checkbox";
         control.checked = !!currentDraft;
@@ -390,13 +840,17 @@
           setDraftValue(!!control.checked);
           setFieldError(false, "");
         });
+        const track = document.createElement("span");
+        track.className = "mac-switch-track";
+        const thumb = document.createElement("span");
+        thumb.className = "mac-switch-thumb";
+        track.appendChild(thumb);
+        switchLabel.appendChild(control);
+        switchLabel.appendChild(track);
         const toggle = document.createElement("div");
-        toggle.className = "toggle";
-        toggle.appendChild(control);
-        const toggleText = document.createElement("span");
-        toggleText.textContent = spec.friendlyName || spec.name;
-        toggle.appendChild(toggleText);
-        wrapper.replaceChildren(toggle);
+        toggle.className = "toggle setting-toggle";
+        toggle.appendChild(switchLabel);
+        valueWrap.appendChild(toggle);
         break;
       }
 
@@ -427,7 +881,7 @@
         });
         row.appendChild(control);
         row.appendChild(numeric);
-        wrapper.appendChild(row);
+        valueWrap.appendChild(row);
         break;
       }
 
@@ -468,43 +922,74 @@
           box.appendChild(value);
           row.appendChild(box);
         });
-        wrapper.appendChild(row);
+        valueWrap.appendChild(row);
         break;
       }
 
       case settingType.Slider: {
         control = document.createElement("input");
         control.type = "range";
-        control.min = spec.minimumValue ?? 0;
-        control.max = spec.maximumValue ?? 255;
-        control.value = currentDraft;
+        control.min = isBrightnessField ? 5 : (spec.minimumValue ?? 0);
+        control.max = isBrightnessField ? 100 : (spec.maximumValue ?? 255);
+        control.value = isBrightnessField ? String(rawBrightnessToDisplay(currentDraft)) : currentDraft;
         control.disabled = readOnly;
         const output = document.createElement("input");
         output.type = "number";
-        output.value = String(currentDraft);
+        output.value = isBrightnessField ? String(rawBrightnessToDisplay(currentDraft)) : String(currentDraft);
         output.disabled = readOnly;
         output.addEventListener("change", () => {
-          const intValue = clampInt(output.value, Number(control.min), Number(control.max), currentValue);
+          const intValue = clampInt(output.value, Number(control.min), Number(control.max), isBrightnessField ? rawBrightnessToDisplay(currentValue) : currentValue);
           output.value = String(intValue);
           control.value = String(intValue);
-          setDraftValue(intValue);
+          setDraftValue(isBrightnessField ? displayBrightnessToRaw(intValue) : intValue);
           setFieldError(false, "");
         });
         control.addEventListener("input", () => {
           output.value = control.value;
-          setDraftValue(clampInt(control.value, Number(control.min), Number(control.max), currentValue));
+          const sliderValue = clampInt(control.value, Number(control.min), Number(control.max), isBrightnessField ? rawBrightnessToDisplay(currentValue) : currentValue);
+          setDraftValue(isBrightnessField ? displayBrightnessToRaw(sliderValue) : sliderValue);
           setFieldError(false, "");
         });
         const row = document.createElement("div");
-        row.className = "color-row";
+        row.className = "slider-row";
         row.appendChild(control);
         row.appendChild(output);
-        wrapper.appendChild(row);
+        valueWrap.appendChild(row);
         break;
       }
 
       default: {
-        control = document.createElement(spec.type === settingType.String ? "textarea" : "input");
+        if (isColorOrderField || isTimeZoneField || isCountryCodeField || isOutputDriverField || isChannelCountField) {
+          control = document.createElement("select");
+          const options =
+            isColorOrderField ? getColorOrderOptions()
+            : isTimeZoneField ? getTimeZoneOptions()
+            : isCountryCodeField ? COUNTRY_OPTIONS
+            : isOutputDriverField ? getOutputDriverOptions()
+            : getChannelCountOptions();
+          options.forEach((optionValue) => {
+            const option = document.createElement("option");
+            if (typeof optionValue === "string") {
+              option.value = optionValue;
+              option.textContent = optionValue;
+              option.selected = String(optionValue) === String(currentDraft);
+            } else {
+              option.value = optionValue.value;
+              option.textContent = optionValue.label;
+              option.selected = String(optionValue.value) === String(currentDraft);
+            }
+            control.appendChild(option);
+          });
+          control.disabled = readOnly;
+          control.addEventListener("change", () => {
+            setDraftValue(isChannelCountField ? Number(control.value) : control.value);
+            setFieldError(false, "");
+          });
+          valueWrap.appendChild(control);
+          break;
+        }
+
+        control = document.createElement("input");
         if (control.tagName === "INPUT") {
           control.type = spec.type === settingType.Float || spec.type === settingType.Integer || spec.type === settingType.PositiveBigInteger
             ? "number"
@@ -525,7 +1010,7 @@
           setDraftValue(coerced);
           setFieldError(false, "");
         });
-        wrapper.appendChild(control);
+        valueWrap.appendChild(control);
         break;
       }
     }
@@ -533,7 +1018,7 @@
     const help = document.createElement("div");
     help.className = "field-help";
     help.innerHTML = spec.description || "";
-    wrapper.appendChild(help);
+    meta.appendChild(help);
 
     if (isEffectDialog) {
       wrapper.dataset.dialogField = "1";
@@ -602,6 +1087,7 @@
     }
   }
 
+  
   async function moveEffect(effectIndex, newIndex) {
     try {
       await postForm("/moveEffect", { effectIndex, newIndex });
@@ -629,14 +1115,29 @@
       return;
     }
 
-    const payload = { ...state.deviceDraft };
-    if (Object.keys(payload).length === 0) {
+    const { legacyPayload, unifiedPayload } = splitDeviceDraftPayloads(state.deviceDraft);
+    if (Object.keys(legacyPayload).length === 0 && Object.keys(unifiedPayload).length === 0) {
       toast("No device setting changes to apply.", "success");
       return;
     }
 
+    if (!rebootAfter && Object.prototype.hasOwnProperty.call(legacyPayload, "hostname")) {
+      const shouldContinue = window.confirm(
+        "Hostname changes do not take effect until the device reboots.\n\n" +
+        "Click OK to apply the change now and reboot later, or Cancel to use Apply + Reboot instead."
+      );
+      if (!shouldContinue) {
+        return;
+      }
+    }
+
     try {
-      await postForm("/settings", payload);
+      if (Object.keys(unifiedPayload).length > 0) {
+        await postJson("/api/v1/settings", unifiedPayload);
+      }
+      if (Object.keys(legacyPayload).length > 0) {
+        await postForm("/settings", legacyPayload);
+      }
       toast("Device settings applied.", "success");
       await loadSettingsOnly();
       if (rebootAfter) {
@@ -709,7 +1210,8 @@
     const staticStats = state.staticStats;
     const dynamicStats = state.dynamicStats;
     const unifiedSettings = state.unifiedSettings;
-    if (!staticStats || !dynamicStats || !unifiedSettings) {
+    if (!staticStats || !dynamicStats) {
+      els.statsGrid.innerHTML = '<div class="empty-cell">Statistics data is unavailable.</div>';
       return;
     }
 
@@ -717,6 +1219,8 @@
     cards.push(statCard("Output", [
       ["Compiled driver", staticStats.COMPILED_OUTPUT_DRIVER],
       ["Active driver", staticStats.ACTIVE_OUTPUT_DRIVER],
+      ["Compiled order", staticStats.COMPILED_WS281X_COLOR_ORDER || "--"],
+      ["Active order", staticStats.CONFIGURED_WS281X_COLOR_ORDER || "--"],
       ["Configured", `${staticStats.CONFIGURED_MATRIX_WIDTH}x${staticStats.CONFIGURED_MATRIX_HEIGHT}`],
       ["Active", `${staticStats.ACTIVE_MATRIX_WIDTH}x${staticStats.ACTIVE_MATRIX_HEIGHT}`],
       ["LEDs", `${staticStats.ACTIVE_NUM_LEDS} / ${staticStats.COMPILED_NUM_LEDS}`],
@@ -758,14 +1262,16 @@
       ["Code free", formatBytes(staticStats.CODE_FREE)]
     ]));
 
-    cards.push(statCard("Schema", [
-      ["Topology live", truthy(unifiedSettings.topology.liveApply)],
-      ["Output live", truthy(unifiedSettings.outputs.liveApply)],
-      ["Audio live", truthy(unifiedSettings.device.audio.liveApply)],
-      ["Audio reboot", truthy(unifiedSettings.device.audio.requiresReboot)],
-      ["Remote enabled", truthy(unifiedSettings.device.remote.enabled)],
-      ["Remote pin", unifiedSettings.device.remote.pin]
-    ]));
+    if (unifiedSettings && unifiedSettings.topology && unifiedSettings.outputs && unifiedSettings.device && unifiedSettings.device.audio && unifiedSettings.device.remote) {
+      cards.push(statCard("Schema", [
+        ["Topology live", truthy(unifiedSettings.topology.liveApply)],
+        ["Output live", truthy(unifiedSettings.outputs.liveApply)],
+        ["Audio live", truthy(unifiedSettings.device.audio.liveApply)],
+        ["Audio reboot", truthy(unifiedSettings.device.audio.requiresReboot)],
+        ["Remote enabled", truthy(unifiedSettings.device.remote.enabled)],
+        ["Remote pin", unifiedSettings.device.remote.pin]
+      ]));
+    }
 
     els.statsGrid.replaceChildren(...cards);
     els.statsTimestamp.textContent = `Updated ${new Date().toLocaleTimeString()}`;
@@ -802,21 +1308,31 @@
       return;
     }
 
+    if (state.staticStats && !state.staticStats.FRAMES_SOCKET) {
+      toast("Frame preview socket is not enabled in this build.", "error");
+      return;
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}/frames`);
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/frames`);
     socket.binaryType = "arraybuffer";
     socket.onopen = function () {
       state.preview.connected = true;
       els.previewStatus.textContent = "Preview connected";
       toast("Frame preview connected.", "success");
+      refreshPreviewVisibility();
     };
     socket.onclose = function () {
       state.preview.connected = false;
       state.preview.socket = null;
+      state.preview.frame = null;
       els.previewStatus.textContent = "Preview offline";
+      refreshPreviewVisibility();
     };
     socket.onerror = function () {
       handleError("Preview socket error");
+      els.previewStatus.textContent = "Preview unavailable";
+      refreshPreviewVisibility();
     };
     socket.onmessage = function (event) {
       try {
@@ -835,7 +1351,9 @@
       state.preview.socket = null;
     }
     state.preview.connected = false;
+    state.preview.frame = null;
     els.previewStatus.textContent = "Preview offline";
+    refreshPreviewVisibility();
   }
 
   function drawPreviewFrame() {
@@ -846,28 +1364,80 @@
       return;
     }
 
-    const width = Number(staticStats.ACTIVE_MATRIX_WIDTH || staticStats.CONFIGURED_MATRIX_WIDTH || 1);
-    const height = Number(staticStats.ACTIVE_MATRIX_HEIGHT || staticStats.CONFIGURED_MATRIX_HEIGHT || 1);
-    canvas.width = width;
-    canvas.height = height;
+    const metrics = getPreviewDisplayMetrics();
+    const width = metrics.width;
+    const height = metrics.height;
+    refreshPreviewVisibility();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.classList.toggle("preview-canvas-thin", metrics.displayHeight <= 12);
+    canvas.style.maxWidth = "none";
+    canvas.style.width = `${metrics.displayWidth}px`;
+    canvas.style.height = `${metrics.displayHeight}px`;
+    canvas.width = Math.max(1, Math.round(metrics.displayWidth * dpr));
+    canvas.height = Math.max(1, Math.round(metrics.displayHeight * dpr));
 
     const ctx = canvas.getContext("2d");
-    const imageData = ctx.createImageData(width, height);
-    let pixel = 0;
-    for (let i = 0; i < frame.length && pixel < imageData.data.length; i += 3) {
-      imageData.data[pixel++] = frame[i] || 0;
-      imageData.data[pixel++] = frame[i + 1] || 0;
-      imageData.data[pixel++] = frame[i + 2] || 0;
-      imageData.data[pixel++] = 255;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, metrics.displayWidth, metrics.displayHeight);
+    ctx.imageSmoothingEnabled = false;
+
+    let offset = 0;
+    for (let y = 0; y < height; y += 1) {
+      const top = y * metrics.pixelHeight;
+      for (let x = 0; x < width; x += 1) {
+        const red = frame[offset] || 0;
+        const green = frame[offset + 1] || 0;
+        const blue = frame[offset + 2] || 0;
+        offset += 3;
+        ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+        ctx.fillRect(x * metrics.pixelWidth, top, metrics.pixelWidth, metrics.pixelHeight);
+      }
     }
-    ctx.putImageData(imageData, 0, 0);
   }
 
-  function miniButton(label, handler, disabled) {
+  function getPreviewDisplayMetrics() {
+    const staticStats = state.staticStats;
+    const canvas = els.previewCanvas;
+    if (!canvas || !staticStats) {
+      return {
+        width: 1,
+        height: 1,
+        displayWidth: 1,
+        displayHeight: 4,
+        pixelWidth: 1,
+        pixelHeight: 4
+      };
+    }
+
+    const width = Number(staticStats.ACTIVE_MATRIX_WIDTH || staticStats.CONFIGURED_MATRIX_WIDTH || 1);
+    const height = Number(staticStats.ACTIVE_MATRIX_HEIGHT || staticStats.CONFIGURED_MATRIX_HEIGHT || 1);
+    const availableWidth = Math.max(1, (canvas.parentElement ? canvas.parentElement.clientWidth : 0) || width);
+    const pixelWidth = availableWidth / Math.max(1, width);
+    const pixelHeight = Math.max(pixelWidth, 4);
+    return {
+      width,
+      height,
+      displayWidth: Math.max(1, Math.round(availableWidth)),
+      displayHeight: Math.max(1, Math.round(height * pixelHeight)),
+      pixelWidth,
+      pixelHeight
+    };
+  }
+
+  function refreshPreviewVisibility() {
+    const hasFrame = !!(state.preview.connected && state.preview.frame && state.preview.frame.length > 0);
+    if (els.previewWrap) {
+      els.previewWrap.classList.toggle("is-empty", !hasFrame);
+    }
+  }
+
+  function miniIconButton(label, title, handler, disabled) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "mini-button";
+    button.className = "mini-button mini-icon-button";
     button.textContent = label;
+    button.title = title;
+    button.setAttribute("aria-label", title);
     button.disabled = !!disabled;
     button.addEventListener("click", handler);
     return button;
@@ -878,7 +1448,23 @@
     if (!response.ok) {
       throw await buildHttpError(response);
     }
-    return response.json();
+    return parseJsonResponse(response);
+  }
+
+  async function postJson(path, payload) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    if (!response.ok) {
+      throw await buildHttpError(response);
+    }
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json") || contentType.includes("text/json")) {
+      return parseJsonResponse(response);
+    }
+    return null;
   }
 
   async function postForm(path, payload) {
@@ -907,9 +1493,15 @@
     }
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("application/json") || contentType.includes("text/json")) {
-      return response.json();
+      return parseJsonResponse(response);
     }
     return null;
+  }
+
+  async function parseJsonResponse(response) {
+    const text = await response.text();
+    const sanitized = text.replace(/\u0000+$/g, "").trim();
+    return JSON.parse(sanitized);
   }
 
   async function buildHttpError(response) {
@@ -1004,6 +1596,116 @@
     return "";
   }
 
+  function getColorOrderOptions() {
+    return (((state.unifiedSchema || {}).outputs || {}).ws281x || {}).allowedColorOrders || COLOR_ORDER_OPTIONS;
+  }
+
+  function getTimeZoneOptions() {
+    const options = normalizeTimeZoneOptions(state.timezones);
+    if (options.length > 0) {
+      return options;
+    }
+
+    const currentTimeZone = state.settings && state.settings.timeZone ? state.settings.timeZone : "";
+    return currentTimeZone ? [currentTimeZone] : [];
+  }
+
+  function normalizeTimeZoneOptions(source) {
+    if (!source) {
+      return [];
+    }
+
+    let values = [];
+    if (Array.isArray(source)) {
+      values = source.slice();
+    } else if (Array.isArray(source.timezones)) {
+      values = source.timezones.slice();
+    } else if (typeof source === "object") {
+      values = Object.keys(source);
+    }
+
+    return values
+      .filter((value) => typeof value === "string" && value.length > 0)
+      .filter((value) => value.includes("/") || value === "UTC" || value.startsWith("Etc/"))
+      .sort((left, right) => left.localeCompare(right));
+  }
+
+  function getOutputDriverOptions() {
+    const allowed = (((state.unifiedSchema || {}).outputs || {}).allowedDrivers) || [];
+    return allowed.map((value) => ({
+      value,
+      label: value === "ws281x" ? "WS281x" : value === "hub75" ? "HUB75" : value
+    }));
+  }
+
+  function getChannelCountOptions() {
+    const compiledMax = Number((((state.unifiedSchema || {}).outputs || {}).ws281x || {}).compiledMaxChannels || 8);
+    const maxChannels = Math.max(1, Math.min(8, compiledMax));
+    const options = [];
+    for (let channel = 1; channel <= maxChannels; channel += 1) {
+      options.push({ value: String(channel), label: String(channel) });
+    }
+    return options;
+  }
+
+  function splitDeviceDraftPayloads(draft) {
+    const legacyPayload = { ...draft };
+    const unifiedPayload = {};
+    const topology = {};
+    const outputs = {};
+    const ws281x = {};
+
+    moveDraftValue(legacyPayload, topology, "matrixWidth", "width");
+    moveDraftValue(legacyPayload, topology, "matrixHeight", "height");
+    moveDraftValue(legacyPayload, topology, "matrixSerpentine", "serpentine");
+    moveDraftValue(legacyPayload, outputs, "outputDriver", "driver");
+    moveDraftValue(legacyPayload, ws281x, "ws281xChannelCount", "channelCount");
+    moveDraftValue(legacyPayload, ws281x, "ws281xColorOrder", "colorOrder");
+
+    const pinValues = collectDraftWs281xPins(legacyPayload);
+    if (pinValues !== null) {
+      ws281x.pins = pinValues;
+    }
+
+    if (Object.keys(topology).length > 0) {
+      unifiedPayload.topology = topology;
+    }
+    if (Object.keys(ws281x).length > 0) {
+      outputs.ws281x = ws281x;
+    }
+    if (Object.keys(outputs).length > 0) {
+      unifiedPayload.outputs = outputs;
+    }
+
+    return { legacyPayload, unifiedPayload };
+  }
+
+  function moveDraftValue(from, to, sourceKey, targetKey) {
+    if (!Object.prototype.hasOwnProperty.call(from, sourceKey)) {
+      return;
+    }
+    to[targetKey] = from[sourceKey];
+    delete from[sourceKey];
+  }
+
+  function collectDraftWs281xPins(payload) {
+    const pins = (((state.unifiedSettings || {}).outputs || {}).ws281x || {}).pins || [];
+    const nextPins = pins.slice();
+    let changed = false;
+
+    Object.keys(payload).forEach((key) => {
+      const pinIndex = syntheticWs281xPinIndex(key);
+      if (pinIndex === null) {
+        return;
+      }
+      nextPins[pinIndex] = payload[key];
+      delete payload[key];
+      changed = true;
+    });
+
+    return changed ? nextPins : null;
+  }
+
   function colorIntToHex(value) {
     const numeric = clampInt(value, 0, 16777215, 0);
     return `#${numeric.toString(16).padStart(6, "0")}`;
@@ -1013,6 +1715,16 @@
     return parseInt(String(value || "#000000").replace("#", ""), 16) || 0;
   }
 
+  function rawBrightnessToDisplay(value) {
+    const raw = clampInt(value, 0, 255, 255);
+    return Math.max(5, Math.min(100, Math.round((raw / 255) * 100)));
+  }
+
+  function displayBrightnessToRaw(value) {
+    const display = clampInt(value, 5, 100, 100);
+    return Math.max(0, Math.min(255, Math.round((display / 100) * 255)));
+  }
+
   function escapeHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -1020,5 +1732,56 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
+  }
+
+  function buildCountryOptions() {
+    const options = [];
+    let displayNames = null;
+
+    if (typeof Intl !== "undefined" && typeof Intl.DisplayNames === "function") {
+      try {
+        displayNames = new Intl.DisplayNames(["en"], { type: "region" });
+      } catch (_error) {
+        displayNames = null;
+      }
+    }
+
+    for (let first = 65; first <= 90; first += 1) {
+      for (let second = 65; second <= 90; second += 1) {
+        const code = String.fromCharCode(first) + String.fromCharCode(second);
+        let label = code;
+        if (displayNames) {
+          try {
+            label = displayNames.of(code) || code;
+          } catch (_error) {
+            label = code;
+          }
+        }
+        if (label === code) {
+          continue;
+        }
+        options.push({ value: code, label: `${code} — ${label}` });
+      }
+    }
+
+    return options.sort((left, right) => left.label.localeCompare(right.label));
+  }
+
+  async function ensureTimezonesLoaded() {
+    if (state.timezones || state.timezonesLoading) {
+      return;
+    }
+
+    state.timezonesLoading = true;
+    try {
+      state.timezones = await fetchJson("/timezones.json");
+      if (state.settings && state.settingsSpecs) {
+        renderSettingsForm();
+      }
+    } catch (error) {
+      handleError("Failed to load timezones", error);
+    } finally {
+      state.timezonesLoading = false;
+    }
   }
 })();

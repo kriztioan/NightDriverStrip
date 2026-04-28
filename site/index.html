@@ -1,3 +1,48 @@
+<!--
+Abandon all hope, all ye who enter.  Here be AI code that even the author doesn't understand.  You've been warned.
+
+                          ud$$$**$$$$$$$bc.
+                       u@**"        4$$$$$$$Nu
+                     J                ""#$$$$$$r
+                    @                       $$$$b
+                  .F                        ^*3$$$
+                 :% 4                         J$$$N
+                 $  :F                       :$$$$$
+                4F  9                       J$$$$$$$
+                4$   k             4$$$$bed$$$$$$$$$
+                $$r  'F            $$$$$$$$$$$$$$$$$r
+                $$$   b.           $$$$$$$$$$$$$$$$$N
+                $$$$$k 3eeed$$b    $$$Euec."$$$$$$$$$
+ .@$**N.        $$$$$" $$$$$$F'L $$$$$$$$$$$  $$$$$$$
+ :$$L  'L       $$$$$ 4$$$$$$  * $$$$$$$$$$F  $$$$$$F         edNc
+@$$$$N  ^k      $$$$$  3$$$$*%   $F4$$$$$$$   $$$$$"        d"  z$N
+$$$$$$   ^k     '$$$"   #$$$F   .$  $$$$$c.u@$$$          J"  @$$$$r
+$$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
+ ^$$$$$$.    "NL   "N. z@*     $$$  $$$$$$$$$$$$$P      $P  d$$$$$$$
+    ^"*$$$$b   '*L   9$E      4$$$  d$$$$$$$$$$$"     d*   J$$$$$r
+         ^$$$$u  '$.  $$$L     "#" d$$$$$$".@$$    .@$"  z$$$$*"
+           ^$$$$. ^$N.3$$$       4u$$$$$$$ 4$$$  u$*" z$$$"
+             '*$$$$$$$$ *$b      J$$$$$$$b u$$P $"  d$$P
+                #$$$$$$ 4$ 3*$"$*$ $"$'c@@$$$$ .u@$$$P
+                  "$$$$  ""F~$ $uNr$$$^&J$$$$F $$$$#
+                    "$$    "$$$bd$.$W$$$$$$$$F $$"
+                      ?k         ?$$$$$$$$$$$F'*
+                       9$$bL     z$$$$$$$$$$$F
+                        $$$$    $$$$$$$$$$$$$
+                         '#$$c  '$$$$$$$$$"
+                          .@"#$$$$$$$$$$$$b
+                        z*      $$$$$$$$$$$$N.
+                      e"      z$$"  #$$$k  '*$$.
+                  .u*      u@$P"      '#$$c   "$$c
+           u@$*"""       d$$"            "$$$u  ^*$$b.
+         :$F           J$P"                ^$$$c   '"$$$$$$bL
+        d$$  ..      @$#                      #$$b         '#$
+        9$$$$$$b   4$$                          ^$$k         '$
+         "$$6""$b u$$                             '$    d$$$$$P
+           '$F $$$$$"                              ^b  ^$$$$b$
+            '$W$$$$"                                'b@$$$$"
+                                                     ^$$$*
+-->
 <!doctype html>
 <html lang="en">
 <head>
@@ -15,7 +60,6 @@
       <div class="title-block">
         <p class="eyebrow">ESP32 Control Surface</p>
         <h1>NightDriverStrip</h1>
-        <p class="subtitle">Static administration UI backed by the existing device API.</p>
       </div>
       <div class="status-cluster">
         <div class="status-pill" id="connectionStatus">
@@ -108,35 +152,43 @@
       </article>
     </section>
 
-    <section class="main-grid nds-main-grid">
-      <article class="panel table-panel card-green">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Runtime Effects</p>
-            <h2>Effects</h2>
-          </div>
-          <div class="panel-meta" id="effectsMeta">0 effects</div>
+    <section class="main-grid tabs-grid">
+      <div class="tab-shell">
+        <div class="tab-strip" role="tablist" aria-label="Main sections">
+          <button id="tabEffectsButton" class="tab-button tab-effects active" type="button" role="tab" aria-selected="true" aria-controls="tabEffectsPane">Effects</button>
+          <button id="tabSettingsButton" class="tab-button tab-settings" type="button" role="tab" aria-selected="false" aria-controls="tabSettingsPane">Settings</button>
+          <button id="tabStatisticsButton" class="tab-button tab-statistics" type="button" role="tab" aria-selected="false" aria-controls="tabStatisticsPane">Statistics</button>
         </div>
-        <div class="table-wrap">
-          <table class="canvas-table">
-            <thead>
-              <tr>
-                <th>On</th>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Core</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="effectsTableBody">
-              <tr><td colspan="5" class="empty-cell">Loading effects...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </article>
 
-      <div class="stack-grid">
-        <article class="panel card-blue">
+        <article id="tabBodyPanel" class="panel tab-body-panel card-green">
+          <section id="tabEffectsPane" class="tab-pane active" role="tabpanel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Runtime Effects</p>
+              <h2>Effects</h2>
+            </div>
+            <div class="panel-meta" id="effectsMeta">0 effects</div>
+          </div>
+          <div class="table-wrap">
+            <table class="canvas-table">
+              <thead>
+                <tr>
+                  <th class="grip-cell"></th>
+                  <th>On</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Core</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="effectsTableBody">
+                <tr><td colspan="6" class="empty-cell">Loading effects...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          </section>
+
+          <section id="tabSettingsPane" class="tab-pane" role="tabpanel" hidden>
           <div class="panel-header">
             <div>
               <p class="eyebrow">Device</p>
@@ -151,9 +203,9 @@
           <form id="deviceSettingsForm" class="settings-grid">
             <div class="empty-cell">Loading settings...</div>
           </form>
-        </article>
+          </section>
 
-        <article class="panel card-purple">
+          <section id="tabStatisticsPane" class="tab-pane" role="tabpanel" hidden>
           <div class="panel-header">
             <div>
               <p class="eyebrow">Runtime</p>
@@ -162,10 +214,8 @@
             <div class="panel-meta" id="statsTimestamp">--</div>
           </div>
           <div class="stats-grid" id="statsGrid"></div>
-        </article>
 
-        <article class="panel card-cyan">
-          <div class="panel-header">
+          <div class="panel-header preview-header">
             <div>
               <p class="eyebrow">Websocket</p>
               <h2>Frame Preview</h2>
@@ -178,9 +228,10 @@
           <div class="preview-meta">
             <span id="previewStatus">Preview offline</span>
           </div>
-          <div class="preview-wrap">
+          <div id="previewWrap" class="preview-wrap is-empty">
             <canvas id="previewCanvas" width="640" height="320"></canvas>
           </div>
+          </section>
         </article>
       </div>
     </section>

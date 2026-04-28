@@ -369,6 +369,7 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
     float                       _musicFactor;
     CRGB                         _skyColor;
     uint32_t                    _lastMusicBeatSequence = 0;
+    size_t                      _pendingMusicStars = 0;
 
   public:
 
@@ -439,25 +440,16 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
     virtual void CreateStars()
     {
         #if ENABLE_AUDIO
-            // MusicStar is now a direct beat-detector validation effect: new stars
-            // are only born from the shared beat event sequence.
+            // MusicStar creation is driven exclusively from OnBeat(). Draw-time
+            // polling and VU-based probability scaling are intentionally bypassed.
             if constexpr (std::is_same_v<StarType, MusicStar>)
             {
-                const auto& beat = g_Analyzer.LastBeat();
-                if (beat.sequence == 0 || beat.sequence == _lastMusicBeatSequence)
-                    return;
-
-                _lastMusicBeatSequence = beat.sequence;
-                const size_t burstCount = std::clamp<size_t>(
-                    static_cast<size_t>(6 + beat.confidence * 12.0f + beat.strength * 6.0f + (beat.major ? 6.0f : 0.0f)),
-                    6,
-                    30);
-
-                for (size_t i = 0; i < burstCount && _allParticles.size() < cMaxStars; ++i)
+                while (_pendingMusicStars > 0 && _allParticles.size() < cMaxStars)
                 {
                     StarType newstar(_palette, _blendType, _maxSpeed * std::max(1.0f, _musicFactor), _starSize);
                     newstar._iPos = (int) random_range(0U, LEDStripEffect::_cLEDs - 1 - starWidth);
                     _allParticles.push_back(newstar);
+                    --_pendingMusicStars;
                 }
                 return;
             }
@@ -497,6 +489,20 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
     void OnBeat(const BeatInfo& beat) override
     {
         LEDStripEffect::OnBeat(beat);
+
+        #if ENABLE_AUDIO
+            if constexpr (std::is_same_v<StarType, MusicStar>)
+            {
+                if (beat.sequence == 0 || beat.sequence == _lastMusicBeatSequence)
+                    return;
+
+                _lastMusicBeatSequence = beat.sequence;
+                _pendingMusicStars = std::clamp<size_t>(
+                    static_cast<size_t>(6 + beat.confidence * 12.0f + beat.strength * 6.0f + (beat.major ? 6.0f : 0.0f)),
+                    6,
+                    30);
+            }
+        #endif
     }
 
     virtual void Update()

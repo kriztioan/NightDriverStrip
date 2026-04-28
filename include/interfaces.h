@@ -93,6 +93,23 @@ inline bool operator==(const psram_allocator<T>&, const psram_allocator<U>&) { r
 template <typename T, typename U>
 inline bool operator!=(const psram_allocator<T>&, const psram_allocator<U>&) { return false; }
 
+template<typename T>
+struct psram_array_deleter
+{
+    size_t count = 0;
+
+    void operator()(T* ptr) const
+    {
+        if (!ptr)
+            return;
+
+        for (size_t i = 0; i < count; ++i)
+            ptr[i].~T();
+
+        free(ptr);
+    }
+};
+
 // make_unique_psram
 //
 // Overload for single objects (non-array types)
@@ -115,6 +132,31 @@ make_unique_psram(size_t size)
     psram_allocator<U> allocator;
     U* ptr = allocator.allocate(size);
     return std::unique_ptr<T>(ptr);
+}
+
+// Overload for constructed arrays with a custom deleter so non-trivial element destructors run correctly.
+template<typename T>
+std::unique_ptr<T[], psram_array_deleter<T>> make_unique_psram_constructed(size_t size)
+{
+    psram_allocator<T> allocator;
+    T* ptr = allocator.allocate(size);
+    size_t constructed = 0;
+
+    try
+    {
+        for (; constructed < size; ++constructed)
+            new(ptr + constructed) T();
+    }
+    catch (...)
+    {
+        while (constructed > 0)
+            ptr[--constructed].~T();
+
+        free(ptr);
+        throw;
+    }
+
+    return std::unique_ptr<T[], psram_array_deleter<T>>(ptr, psram_array_deleter<T>{size});
 }
 
 // Overload for fixed-bound 2D arrays (like [W][H])

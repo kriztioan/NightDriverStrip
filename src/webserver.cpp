@@ -114,6 +114,8 @@ namespace
         auto ws281x = outputs["ws281x"].to<JsonObject>();
         ws281x["channelCount"] = deviceConfig.GetChannelCount();
         ws281x["compiledMaxChannels"] = DeviceConfig::GetCompiledChannelCount();
+        ws281x["colorOrder"] = DeviceConfig::GetColorOrderName(deviceConfig.GetWS281xColorOrder());
+        ws281x["compiledColorOrder"] = DeviceConfig::GetColorOrderName(DeviceConfig::GetCompiledWS281xColorOrder());
         AppendPins(ws281x["pins"].to<JsonArray>(), deviceConfig.GetWS281xPins());
 
         auto effects = root["effects"].to<JsonObject>();
@@ -150,7 +152,15 @@ namespace
         auto ws281x = outputs["ws281x"].to<JsonObject>();
         ws281x["compiledMaxChannels"] = DeviceConfig::GetCompiledChannelCount();
         ws281x["compiledMaxLEDs"] = DeviceConfig::GetCompiledLEDCount();
-        AppendPins(ws281x["compiledPins"].to<JsonArray>(), DeviceConfig::GetCompiledPins());
+        ws281x["compiledColorOrder"] = DeviceConfig::GetColorOrderName(DeviceConfig::GetCompiledWS281xColorOrder());
+        auto allowedColorOrders = ws281x["allowedColorOrders"].to<JsonArray>();
+        allowedColorOrders.add("RGB");
+        allowedColorOrders.add("RBG");
+        allowedColorOrders.add("GRB");
+        allowedColorOrders.add("GBR");
+        allowedColorOrders.add("BRG");
+        allowedColorOrders.add("BGR");
+        AppendPins(ws281x["compiledPins"].to<JsonArray>(), DeviceConfig::GetCompiledWS281xPins());
 
         auto device = root["device"].to<JsonObject>();
         auto remote = device["remote"].to<JsonObject>();
@@ -175,6 +185,66 @@ namespace
         audio["requiresReboot"] = !deviceConfig.SupportsLiveAudioInputReconfigure();
         audio["supportsPinOverride"] = deviceConfig.SupportsConfigurableAudioInputPin();
         audio["rejectMessage"] = "recompile needed";
+    }
+
+    // Normalizes the unified settings audio pin request into one optional value.
+    // The API currently accepts both the legacy flat device.audioInputPin field
+    // and the nested device.audio.inputPin field, so validation/apply can consume
+    // one resolved value instead of duplicating that lookup logic.
+    
+    std::optional<int> GetRequestedUnifiedAudioInputPin(JsonObjectConst device)
+    {
+        std::optional<int> requestedAudioInputPin;
+
+        if (device[DeviceConfig::AudioInputPinTag].is<int>())
+            requestedAudioInputPin = device[DeviceConfig::AudioInputPinTag].as<int>();
+
+        if (device["audio"].is<JsonObjectConst>())
+        {
+            auto audio = device["audio"].as<JsonObjectConst>();
+            if (audio["inputPin"].is<int>())
+                requestedAudioInputPin = audio["inputPin"].as<int>();
+        }
+
+        return requestedAudioInputPin;
+    }
+
+    // Applies a validated runtime topology/output change as one staged transaction.
+    //
+    // The flow is:
+    // 1. Update DeviceConfig in-memory without persisting it.
+    // 2. Ask SystemContainer to reconfigure live devices/buffers/effects.
+    // 3. If live apply fails, restore the previous runtime config and best-effort
+    //    re-apply that old state so the device is not left half-switched.
+    // 4. Only persist the new runtime config after the live reconfigure succeeds.
+    //
+    // This keeps unified settings requests from partially committing topology/output
+    // changes when the runtime apply path fails after validation.
+
+    bool ApplyRuntimeConfigTransaction(const DeviceConfig::RuntimeConfig& requestedConfig, String* errorMessage)
+    {
+        auto& system = *g_ptrSystem;
+        auto& deviceConfig = system.GetDeviceConfig();
+        const auto previousConfig = deviceConfig.GetRuntimeConfig();
+
+        if (!deviceConfig.SetRuntimeConfig(requestedConfig, true, errorMessage))
+            return false;
+
+        if (!system.ApplyRuntimeConfiguration(errorMessage))
+        {
+            deviceConfig.SetRuntimeConfig(previousConfig, true, nullptr);
+
+            String rollbackError;
+            if (!system.ApplyRuntimeConfiguration(&rollbackError))
+                debugE("Failed to roll back runtime configuration after apply error: %s", rollbackError.c_str());
+
+            return false;
+        }
+
+        if (!deviceConfig.SetRuntimeConfig(requestedConfig, false, errorMessage))
+            return false;
+
+        return true;
     }
 }
 
@@ -256,10 +326,14 @@ void CWebServer::begin()
     [[maybe_unused]] extern const uint8_t timezones_start[] asm("_binary_config_timezones_json_start");
     [[maybe_unused]] extern const uint8_t timezones_end[] asm("_binary_config_timezones_json_end");
 
+    auto trimmedTimezonesEnd = timezones_end;
+    while (trimmedTimezonesEnd > timezones_start && *(trimmedTimezonesEnd - 1) == 0)
+        --trimmedTimezonesEnd;
+
     EmbeddedWebFile html_file(html_start, html_end, "text/html", "gzip");
     EmbeddedWebFile css_file(css_start, css_end, "text/css", "gzip");
     EmbeddedWebFile js_file(js_start, js_end, "application/javascript", "gzip");
-    EmbeddedWebFile timezones_file(timezones_start, timezones_end - 1, "text/json"); // end - 1 because of zero-termination
+    EmbeddedWebFile timezones_file(timezones_start, trimmedTimezonesEnd, "text/json");
 
     debugI("Embedded html file size: %zu", (size_t)html_file.length);
     debugI("Embedded css file size: %zu", (size_t)css_file.length);
@@ -448,6 +522,8 @@ void CWebServer::GetStatistics(AsyncWebServerRequest * pRequest, StatisticsType 
         j["ACTIVE_NUM_CHANNELS"]        = deviceConfig.GetChannelCount();
         j["COMPILED_OUTPUT_DRIVER"]     = deviceConfig.GetCompiledDriverName();
         j["ACTIVE_OUTPUT_DRIVER"]       = deviceConfig.GetRuntimeDriverName();
+        j["COMPILED_WS281X_COLOR_ORDER"] = DeviceConfig::GetColorOrderName(DeviceConfig::GetCompiledWS281xColorOrder());
+        j["CONFIGURED_WS281X_COLOR_ORDER"] = DeviceConfig::GetColorOrderName(deviceConfig.GetWS281xColorOrder());
         j["COMPILED_AUDIO_INPUT_PIN"]   = DeviceConfig::GetCompiledAudioInputPin();
         j["CONFIGURED_AUDIO_INPUT_PIN"] = deviceConfig.GetAudioInputPin();
         j["AUDIO_INPUT_MODE"]           = deviceConfig.GetAudioInputModeName();
@@ -852,6 +928,14 @@ bool CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* 
     runtimeConfigChanged = PushPostParamIfPresent<bool>(pRequest, DeviceConfig::MatrixSerpentineTag, SET_VALUE(runtimeConfig.topology.serpentine = value)) || runtimeConfigChanged;
     runtimeConfigChanged = PushPostParamIfPresent<size_t>(pRequest, DeviceConfig::WS281xChannelCountTag, SET_VALUE(runtimeConfig.outputs.channelCount = value)) || runtimeConfigChanged;
     runtimeConfigChanged = PushPostParamIfPresent<String>(pRequest, DeviceConfig::OutputDriverTag, SET_VALUE(runtimeConfig.outputs.driver = value == "hub75" ? DeviceConfig::OutputDriver::HUB75 : DeviceConfig::OutputDriver::WS281x)) || runtimeConfigChanged;
+    runtimeConfigChanged = PushPostParamIfPresent<String>(pRequest, DeviceConfig::WS281xColorOrderTag, SET_VALUE(
+        if (value == "RGB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RGB;
+        else if (value == "RBG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RBG;
+        else if (value == "GRB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GRB;
+        else if (value == "GBR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GBR;
+        else if (value == "BRG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BRG;
+        else if (value == "BGR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BGR;
+    )) || runtimeConfigChanged;
 
     if (runtimeConfigChanged)
     {
@@ -860,6 +944,17 @@ bool CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* 
         {
             if (errorMessage)
                 *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (runtimeConfigChanged)
+    {
+        String runtimeErrorMessage;
+        if (!ApplyRuntimeConfigTransaction(runtimeConfig, &runtimeErrorMessage))
+        {
+            if (errorMessage)
+                *errorMessage = runtimeErrorMessage;
             return false;
         }
     }
@@ -892,18 +987,6 @@ bool CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* 
     deviceConfig.ApplyColorSettings(globalColor, secondColor,
                                     IsPostParamTrue(pRequest, DeviceConfig::ClearGlobalColorTag),
                                     IsPostParamTrue(pRequest, DeviceConfig::ApplyGlobalColorsTag));
-
-    if (runtimeConfigChanged)
-    {
-        String runtimeErrorMessage;
-        if (!deviceConfig.SetRuntimeConfig(runtimeConfig, false, &runtimeErrorMessage)
-            || !g_ptrSystem->ApplyRuntimeConfiguration(&runtimeErrorMessage))
-        {
-            if (errorMessage)
-                *errorMessage = runtimeErrorMessage;
-            return false;
-        }
-    }
 
     if (errorMessage)
         *errorMessage = "";
@@ -938,7 +1021,8 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
     auto root = json.as<JsonObjectConst>();
     auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
     auto& effectManager = g_ptrSystem->GetEffectManager();
-    auto runtimeConfig = deviceConfig.GetRuntimeConfig();
+    const auto previousRuntimeConfig = deviceConfig.GetRuntimeConfig();
+    auto runtimeConfig = previousRuntimeConfig;
 
     if (root["topology"].is<JsonObjectConst>())
     {
@@ -961,6 +1045,16 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
         {
             auto ws281x = outputs["ws281x"].as<JsonObjectConst>();
             if (ws281x["channelCount"].is<size_t>()) runtimeConfig.outputs.channelCount = ws281x["channelCount"].as<size_t>();
+            if (ws281x["colorOrder"].is<String>())
+            {
+                const auto colorOrder = ws281x["colorOrder"].as<String>();
+                if (colorOrder == "RGB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RGB;
+                else if (colorOrder == "RBG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RBG;
+                else if (colorOrder == "GRB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GRB;
+                else if (colorOrder == "GBR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GBR;
+                else if (colorOrder == "BRG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BRG;
+                else if (colorOrder == "BGR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BGR;
+            }
             if (ws281x["pins"].is<JsonArrayConst>())
             {
                 auto pins = ws281x["pins"].as<JsonArrayConst>();
@@ -989,7 +1083,27 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
             AddCORSHeaderAndSendBadRequest(pRequest, validationMessage);
             return;
         }
+    }
 
+    const bool runtimeConfigChanged =
+        previousRuntimeConfig.topology.width != runtimeConfig.topology.width
+        || previousRuntimeConfig.topology.height != runtimeConfig.topology.height
+        || previousRuntimeConfig.topology.serpentine != runtimeConfig.topology.serpentine
+        || previousRuntimeConfig.outputs.driver != runtimeConfig.outputs.driver
+        || previousRuntimeConfig.outputs.channelCount != runtimeConfig.outputs.channelCount
+        || previousRuntimeConfig.outputs.outputPins != runtimeConfig.outputs.outputPins
+        || previousRuntimeConfig.outputs.colorOrder != runtimeConfig.outputs.colorOrder;
+
+    String errorMessage;
+    if (runtimeConfigChanged && !ApplyRuntimeConfigTransaction(runtimeConfig, &errorMessage))
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
+        return;
+    }
+
+    if (root["device"].is<JsonObjectConst>())
+    {
+        auto device = root["device"].as<JsonObjectConst>();
         if (device[DeviceConfig::HostnameTag].is<String>()) deviceConfig.SetHostname(device[DeviceConfig::HostnameTag].as<String>());
         if (device[DeviceConfig::LocationTag].is<String>()) deviceConfig.SetLocation(device[DeviceConfig::LocationTag].as<String>());
         if (device[DeviceConfig::LocationIsZipTag].is<bool>()) deviceConfig.SetLocationIsZip(device[DeviceConfig::LocationIsZipTag].as<bool>());
@@ -1002,12 +1116,8 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
         if (device[DeviceConfig::RememberCurrentEffectTag].is<bool>()) deviceConfig.SetRememberCurrentEffect(device[DeviceConfig::RememberCurrentEffectTag].as<bool>());
         if (device[DeviceConfig::PowerLimitTag].is<int>()) deviceConfig.SetPowerLimit(device[DeviceConfig::PowerLimitTag].as<int>());
         if (device[DeviceConfig::BrightnessTag].is<int>()) deviceConfig.SetBrightness(device[DeviceConfig::BrightnessTag].as<int>());
-        if (device[DeviceConfig::AudioInputPinTag].is<int>()) deviceConfig.SetAudioInputPin(device[DeviceConfig::AudioInputPinTag].as<int>());
-        if (device["audio"].is<JsonObjectConst>())
-        {
-            auto audio = device["audio"].as<JsonObjectConst>();
-            if (audio["inputPin"].is<int>()) deviceConfig.SetAudioInputPin(audio["inputPin"].as<int>());
-        }
+        if (const auto requestedAudioInputPin = GetRequestedUnifiedAudioInputPin(device); requestedAudioInputPin.has_value())
+            deviceConfig.SetAudioInputPin(requestedAudioInputPin.value());
 
         std::optional<CRGB> globalColor = {};
         std::optional<CRGB> secondColor = {};
@@ -1023,19 +1133,6 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
         auto effects = root["effects"].as<JsonObjectConst>();
         if (effects["effectInterval"].is<size_t>())
             effectManager.SetInterval(effects["effectInterval"].as<size_t>());
-    }
-
-    String errorMessage;
-    if (!deviceConfig.SetRuntimeConfig(runtimeConfig, false, &errorMessage))
-    {
-        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
-        return;
-    }
-
-    if (!g_ptrSystem->ApplyRuntimeConfiguration(&errorMessage))
-    {
-        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
-        return;
     }
 
     GetUnifiedSettings(pRequest);
@@ -1219,7 +1316,8 @@ void CWebServer::Reset(AsyncWebServerRequest * pRequest)
     if (boardResetRequested)
     {
         debugW("Resetting device at API request!");
-        throw std::runtime_error("Resetting device at API request");
+        delay(250);
+        ESP.restart();
     }
 }
 
