@@ -432,6 +432,7 @@ namespace nd_network
     void NetworkHandlingLoopEntry(void *)
     {
         static unsigned long lastConnected = millis();
+        static unsigned long lastWebSocketCleanup = 0;
         if (!MDNS.begin("esp32")) Serial.println("Error starting mDNS");
 
         TickType_t notifyWait = 0;
@@ -445,7 +446,14 @@ namespace nd_network
                 {
                     lastConnected = millis();
                     #if WEB_SOCKETS_ANY_ENABLED
+                        // AsyncWebSocket client cleanup is useful, but doing it every second while
+                        // frame preview traffic is active can churn otherwise healthy clients. Keep
+                        // it periodic and infrequent so it only reaps genuinely stale connections.
+                        if (millis() - lastWebSocketCleanup >= 15000)
+                        {
+                            lastWebSocketCleanup = millis();
                         g_ptrSystem->GetWebSocketServer().CleanupClients();
+                        }
                     #endif
                 }
                 else
@@ -820,7 +828,7 @@ void IRAM_ATTR SocketServerTaskEntry(void *)
 // The thread which serves requests for color data.
 void IRAM_ATTR ColorDataTaskEntry(void *)
 {
-    constexpr uint32_t kPreviewMaxFps = 30;
+    constexpr uint32_t kPreviewMaxFps          = 30;
     constexpr uint32_t kPreviewFrameIntervalMs = 1000 / kPreviewMaxFps;
 
     LEDViewer _viewer(NetworkPort::ColorServer);
@@ -864,14 +872,14 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
         auto leds = graphics.leds;
         const auto activeLEDCount = graphics.GetLEDCount();
 
-        if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
-        {
 #if COLORDATA_WEB_SOCKET_ENABLED
-            wsListenersPresent = webSocketServer.HaveColorDataClients();
+        wsListenersPresent = webSocketServer.HaveColorDataClients();
 #else
-            wsListenersPresent = false;
+        wsListenersPresent = false;
 #endif
 
+        if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
+        {
             const auto previewActive = (socket >= 0) || wsListenersPresent;
             const auto now = millis();
             if (previewActive && now - lastPreviewSendMs >= kPreviewFrameIntervalMs)
@@ -895,12 +903,12 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
 #endif
                 if (socket >= 0)
                 {
+                    debugV("Sending color data packet");
                     const auto packetSize =
                         sizeof(previewPacket->header) +
                         sizeof(previewPacket->width) +
                         sizeof(previewPacket->height) +
                         sizeof(CRGB) * activeLEDCount;
-
                     const auto sendResult = _viewer.SendPacket(socket, previewPacket.get(), packetSize);
                     if (sendResult == LEDViewer::SendResult::Failed)
                     {
@@ -911,11 +919,6 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
                 }
             }
         }
-
-#if COLORDATA_WEB_SOCKET_ENABLED
-        if (!wsListenersPresent)
-            wsListenersPresent = webSocketServer.HaveColorDataClients();
-#endif
 
         if (socket >= 0 || wsListenersPresent)
             delay(10);

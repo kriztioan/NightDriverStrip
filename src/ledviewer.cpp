@@ -114,22 +114,24 @@ int LEDViewer::CheckForConnection()
         return -1;
     }
 
-    // The preview stream is best-effort only. A slow client should never block drawing or
-    // WiFi servicing, so keep accepted sockets non-blocking as well.
+    // Preview transport is strictly best-effort; keep the client socket non-blocking so
+    // a stalled viewer never back-pressures drawing or the WiFi servicing tasks.
     if (!nd_network::SetSocketBlockingEnabled(new_socket, false))
     {
         debugE("Unable to make color data client socket non-blocking!");
         close(new_socket);
         return -1;
     }
+
     Serial.println("Accepted new ColorData Client!");
     return new_socket;
 }
 
 LEDViewer::SendResult LEDViewer::SendPacket(int socket, const void * pData, size_t cbSize)
 {
-    // Best-effort preview send. If the client cannot take a whole frame immediately, either
-    // drop the frame (would-block) or fail the connection (partial frame corrupts the stream).
+    // Send data to the preview client without ever blocking the device. If the socket
+    // cannot accept a whole frame immediately, we either drop the frame (no bytes sent)
+    // or fail the connection (partial frame written, which corrupts the byte stream).
 
     const byte * pb = (byte *)pData;
     debugV("Sending Packet:  %02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X,...",
