@@ -57,13 +57,19 @@ typedef struct
 
 class LEDViewer
 {
+public:
+    enum class SendResult
+    {
+        Sent,
+        WouldBlock,
+        Failed
+    };
+
 private:
 
     int                         _port;
     int                         _server_fd;
     struct sockaddr_in          _address;
-
-    const int BUFFER_SIZE = 1024;
 
 public:
 
@@ -73,5 +79,5 @@ public:
     void release();
     bool begin();
     int CheckForConnection();
-    bool SendPacket(int socket, void * pData, size_t cbSize);
+    SendResult SendPacket(int socket, const void * pData, size_t cbSize);
 };

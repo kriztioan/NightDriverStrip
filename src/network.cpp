@@ -820,10 +820,15 @@ void IRAM_ATTR SocketServerTaskEntry(void *)
 // The thread which serves requests for color data.
 void IRAM_ATTR ColorDataTaskEntry(void *)
 {
+    constexpr uint32_t kPreviewMaxFps = 30;
+    constexpr uint32_t kPreviewFrameIntervalMs = 1000 / kPreviewMaxFps;
+
     LEDViewer _viewer(NetworkPort::ColorServer);
     int       socket = -1;
     bool      wsListenersPresent = false;
     BaseFrameEventListener frameEventListener;
+    uint32_t lastPreviewSendMs = 0;
+    std::unique_ptr<ColorDataPacket> previewPacket = std::make_unique<ColorDataPacket>();
 
     auto &effectManager = g_ptrSystem->GetEffectManager();
 #if COLORDATA_WEB_SOCKET_ENABLED
@@ -861,32 +866,55 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
 
         if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
         {
-            if (socket >= 0)
-            {
-                debugV("Sending color data packet");
-                // Potentially too large for the stack, so we allocate it on the heap instead
-                std::unique_ptr<ColorDataPacket> pPacket = std::make_unique<ColorDataPacket>();
-                pPacket->header = COLOR_DATA_PACKET_HEADER;
-                pPacket->width  = graphics.GetMatrixWidth();
-                pPacket->height = graphics.GetMatrixHeight();
-                memcpy(pPacket->colors, leds, sizeof(CRGB) * activeLEDCount);
+#if COLORDATA_WEB_SOCKET_ENABLED
+            wsListenersPresent = webSocketServer.HaveColorDataClients();
+#else
+            wsListenersPresent = false;
+#endif
 
-                if (!_viewer.SendPacket(socket, pPacket.get(), sizeof(pPacket->header) + sizeof(pPacket->width) + sizeof(pPacket->height) + sizeof(CRGB) * activeLEDCount))
+            const auto previewActive = (socket >= 0) || wsListenersPresent;
+            const auto now = millis();
+            if (previewActive && now - lastPreviewSendMs >= kPreviewFrameIntervalMs)
+            {
+                lastPreviewSendMs = now;
+
+                previewPacket->header = COLOR_DATA_PACKET_HEADER;
+                previewPacket->width  = graphics.GetMatrixWidth();
+                previewPacket->height = graphics.GetMatrixHeight();
+                memcpy(previewPacket->colors, leds, sizeof(CRGB) * activeLEDCount);
+
+                // Prefer the websocket preview transport used by the local UI. The legacy raw TCP
+                // preview socket remains available for external tools, but we do not drive both
+                // transports simultaneously for the same frame.
+#if COLORDATA_WEB_SOCKET_ENABLED
+                if (wsListenersPresent)
                 {
-                    // If anything goes wrong, we close the socket so it can accept new incoming attempts
-                    debugW("Error on color data socket, so closing");
-                    close(socket);
-                    socket = -1;
+                    webSocketServer.SendColorData(leds, activeLEDCount);
+                }
+                else
+#endif
+                if (socket >= 0)
+                {
+                    const auto packetSize =
+                        sizeof(previewPacket->header) +
+                        sizeof(previewPacket->width) +
+                        sizeof(previewPacket->height) +
+                        sizeof(CRGB) * activeLEDCount;
+
+                    const auto sendResult = _viewer.SendPacket(socket, previewPacket.get(), packetSize);
+                    if (sendResult == LEDViewer::SendResult::Failed)
+                    {
+                        debugW("Error on color data socket, so closing");
+                        close(socket);
+                        socket = -1;
+                    }
                 }
             }
-
-#if COLORDATA_WEB_SOCKET_ENABLED
-            webSocketServer.SendColorData(leds, activeLEDCount);
-#endif
         }
 
 #if COLORDATA_WEB_SOCKET_ENABLED
-        wsListenersPresent = webSocketServer.HaveColorDataClients();
+        if (!wsListenersPresent)
+            wsListenersPresent = webSocketServer.HaveColorDataClients();
 #endif
 
         if (socket >= 0 || wsListenersPresent)
