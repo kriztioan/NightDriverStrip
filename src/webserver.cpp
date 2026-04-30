@@ -40,12 +40,143 @@
 
 #include "deviceconfig.h"
 #include "effectmanager.h"
+#include "gfxbase.h"
 #include "improvserial.h"
 #include "ledstripeffect.h"
 #include "soundanalyzer.h"
 #include "systemcontainer.h"
 #include "taskmgr.h"
 #include "values.h"
+
+namespace
+{
+    void AppendPins(JsonArray target, const std::array<int8_t, NUM_CHANNELS>& pins)
+    {
+        for (auto pin : pins)
+            target.add(pin);
+    }
+
+    void FillUnifiedSettingsJson(JsonObject root)
+    {
+        auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
+        auto& effectManager = g_ptrSystem->GetEffectManager();
+
+        auto device = root["device"].to<JsonObject>();
+        device["hostname"] = deviceConfig.GetHostname();
+        device["location"] = deviceConfig.GetLocation();
+        device["locationIsZip"] = deviceConfig.IsLocationZip();
+        device["countryCode"] = deviceConfig.GetCountryCode();
+        device["timeZone"] = deviceConfig.GetTimeZone();
+        device["use24HourClock"] = deviceConfig.Use24HourClock();
+        device["useCelsius"] = deviceConfig.UseCelsius();
+        device["ntpServer"] = deviceConfig.GetNTPServer();
+        device["rememberCurrentEffect"] = deviceConfig.RememberCurrentEffect();
+        device["powerLimit"] = deviceConfig.GetPowerLimit();
+        device["brightness"] = deviceConfig.GetBrightness();
+        device["globalColor"] = deviceConfig.GlobalColor();
+        device["secondColor"] = deviceConfig.SecondColor();
+        device["applyGlobalColors"] = deviceConfig.ApplyGlobalColors();
+        #if ENABLE_REMOTE
+        auto remote = device["remote"].to<JsonObject>();
+        remote["enabled"] = true;
+        remote["pin"] = IR_REMOTE_PIN;
+        #else
+        auto remote = device["remote"].to<JsonObject>();
+        remote["enabled"] = false;
+        remote["pin"] = -1;
+        #endif
+        auto audio = device["audio"].to<JsonObject>();
+        audio["enabled"] =
+        #if ENABLE_AUDIO
+            true;
+        #else
+            false;
+        #endif
+        audio["inputPin"] = deviceConfig.GetAudioInputPin();
+        audio["compiledDefaultPin"] = DeviceConfig::GetCompiledAudioInputPin();
+        audio["mode"] = deviceConfig.GetAudioInputModeName();
+        audio["liveApply"] = deviceConfig.SupportsLiveAudioInputReconfigure();
+        audio["requiresReboot"] = !deviceConfig.SupportsLiveAudioInputReconfigure();
+        audio["supportsPinOverride"] = deviceConfig.SupportsConfigurableAudioInputPin();
+
+        auto topology = root["topology"].to<JsonObject>();
+        topology["width"] = deviceConfig.GetMatrixWidth();
+        topology["height"] = deviceConfig.GetMatrixHeight();
+        topology["serpentine"] = deviceConfig.IsMatrixSerpentine();
+        topology["ledCount"] = deviceConfig.GetActiveLEDCount();
+        topology["liveApply"] = deviceConfig.SupportsLiveTopology();
+
+        auto outputs = root["outputs"].to<JsonObject>();
+        outputs["driver"] = deviceConfig.GetRuntimeDriverName();
+        outputs["compiledDriver"] = deviceConfig.GetCompiledDriverName();
+        outputs["liveApply"] = deviceConfig.SupportsLiveOutputReconfigure();
+
+        auto ws281x = outputs["ws281x"].to<JsonObject>();
+        ws281x["channelCount"] = deviceConfig.GetChannelCount();
+        ws281x["compiledMaxChannels"] = DeviceConfig::GetCompiledChannelCount();
+        AppendPins(ws281x["pins"].to<JsonArray>(), deviceConfig.GetWS281xPins());
+
+        auto effects = root["effects"].to<JsonObject>();
+        effects["effectInterval"] = effectManager.GetInterval();
+    }
+
+    void FillUnifiedSettingsSchemaJson(JsonObject root)
+    {
+        auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
+
+        auto topology = root["topology"].to<JsonObject>();
+        topology["compiledMaxWidth"] =
+            DeviceConfig::GetCompiledOutputDriver() == DeviceConfig::OutputDriver::HUB75
+                ? DeviceConfig::GetCompiledMatrixWidth()
+                : DeviceConfig::GetCompiledLEDCount();
+        topology["compiledMaxHeight"] =
+            DeviceConfig::GetCompiledOutputDriver() == DeviceConfig::OutputDriver::HUB75
+                ? DeviceConfig::GetCompiledMatrixHeight()
+                : DeviceConfig::GetCompiledLEDCount();
+        topology["compiledNominalWidth"] = DeviceConfig::GetCompiledMatrixWidth();
+        topology["compiledNominalHeight"] = DeviceConfig::GetCompiledMatrixHeight();
+        topology["compiledMaxLEDs"] = DeviceConfig::GetCompiledLEDCount();
+        topology["liveApply"] = deviceConfig.SupportsLiveTopology();
+        topology["rejectMessage"] = "recompile needed";
+
+        auto outputs = root["outputs"].to<JsonObject>();
+        outputs["compiledDriver"] = deviceConfig.GetCompiledDriverName();
+        outputs["liveApply"] = deviceConfig.SupportsLiveOutputReconfigure();
+        outputs["rejectMessage"] = "recompile needed";
+
+        auto drivers = outputs["allowedDrivers"].to<JsonArray>();
+        drivers.add(deviceConfig.GetCompiledDriverName());
+
+        auto ws281x = outputs["ws281x"].to<JsonObject>();
+        ws281x["compiledMaxChannels"] = DeviceConfig::GetCompiledChannelCount();
+        ws281x["compiledMaxLEDs"] = DeviceConfig::GetCompiledLEDCount();
+        AppendPins(ws281x["compiledPins"].to<JsonArray>(), DeviceConfig::GetCompiledPins());
+
+        auto device = root["device"].to<JsonObject>();
+        auto remote = device["remote"].to<JsonObject>();
+        remote["enabled"] =
+        #if ENABLE_REMOTE
+            true;
+        #else
+            false;
+        #endif
+        remote["pin"] = IR_REMOTE_PIN;
+
+        auto audio = device["audio"].to<JsonObject>();
+        audio["enabled"] =
+        #if ENABLE_AUDIO
+            true;
+        #else
+            false;
+        #endif
+        audio["compiledDefaultPin"] = DeviceConfig::GetCompiledAudioInputPin();
+        audio["mode"] = deviceConfig.GetAudioInputModeName();
+        audio["liveApply"] = deviceConfig.SupportsLiveAudioInputReconfigure();
+        audio["requiresReboot"] = !deviceConfig.SupportsLiveAudioInputReconfigure();
+        audio["supportsPinOverride"] = deviceConfig.SupportsConfigurableAudioInputPin();
+        audio["rejectMessage"] = "recompile needed";
+    }
+}
 
 // Static member initializers
 
@@ -54,7 +185,8 @@ const std::map<String, CWebServer::ValueValidator> CWebServer::settingValidators
 {
     { DeviceConfig::OpenWeatherApiKeyTag, [](const String& value) { return g_ptrSystem->GetDeviceConfig().ValidateOpenWeatherAPIKey(value); } },
     { DeviceConfig::PowerLimitTag,        [](const String& value) { return g_ptrSystem->GetDeviceConfig().ValidatePowerLimit(value); } },
-    { DeviceConfig::BrightnessTag,        [](const String& value) { return g_ptrSystem->GetDeviceConfig().ValidateBrightness(value); } }
+    { DeviceConfig::BrightnessTag,        [](const String& value) { return g_ptrSystem->GetDeviceConfig().ValidateBrightness(value); } },
+    { DeviceConfig::AudioInputPinTag,     [](const String& value) { return g_ptrSystem->GetDeviceConfig().ValidateAudioInputPin(value.toInt()); } }
 };
 
 std::vector<SettingSpec, psram_allocator<SettingSpec>> CWebServer::mySettingSpecs = {};
@@ -186,6 +318,16 @@ void CWebServer::begin()
     _server.on("/settings/specs",        HTTP_GET,  GetSettingSpecs);
     _server.on("/settings",              HTTP_GET,  GetSettings);
     _server.on("/settings",              HTTP_POST, SetSettings);
+    _server.on("/api/v1/settings/schema",HTTP_GET,  GetUnifiedSettingsSchema);
+    _server.on("/api/v1/settings",       HTTP_GET,  GetUnifiedSettings);
+
+    auto settingsHandler = new AsyncCallbackJsonWebHandler("/api/v1/settings",
+        [](AsyncWebServerRequest* pRequest, JsonVariant& json)
+        {
+            SetUnifiedSettings(pRequest, json.as<JsonVariantConst>());
+        });
+    settingsHandler->setMethod(HTTP_POST);
+    _server.addHandler(settingsHandler);
 
     _server.on("/reset",                 HTTP_POST, Reset);
 
@@ -286,23 +428,41 @@ void CWebServer::GetStatistics(AsyncWebServerRequest * pRequest, StatisticsType 
 
     auto response = new AsyncJsonResponse();
     auto& j = response->getRoot();
+    const auto& deviceConfig  = g_ptrSystem->GetDeviceConfig();
+    const auto activeWidth    = g_ptrSystem->HasEffectManager() ? g_ptrSystem->GetEffectManager().g().GetMatrixWidth() : deviceConfig.GetMatrixWidth();
+    const auto activeHeight   = g_ptrSystem->HasEffectManager() ? g_ptrSystem->GetEffectManager().g().GetMatrixHeight() : deviceConfig.GetMatrixHeight();
+    const auto activeLEDCount = g_ptrSystem->HasEffectManager() ? g_ptrSystem->GetEffectManager().g().GetLEDCount() : deviceConfig.GetActiveLEDCount();
 
     if ((statsType & StatisticsType::Static) != StatisticsType::None)
     {
-        j["MATRIX_WIDTH"]          = MATRIX_WIDTH;
-        j["MATRIX_HEIGHT"]         = MATRIX_HEIGHT;
-        j["FRAMES_SOCKET"]         = !!COLORDATA_WEB_SOCKET_ENABLED;
-        j["EFFECTS_SOCKET"]        = !!EFFECTS_WEB_SOCKET_ENABLED;
-        j["CHIP_MODEL"]            = _staticStats.ChipModel;
-        j["CHIP_CORES"]            = _staticStats.ChipCores;
-        j["CHIP_SPEED"]            = _staticStats.CpuFreqMHz;
-        j["PROG_SIZE"]             = _staticStats.SketchSize;
-        j["CODE_SIZE"]             = _staticStats.SketchSize;
-        j["FLASH_SIZE"]            = _staticStats.FlashChipSize;
-        j["HEAP_SIZE"]             = _staticStats.HeapSize;
-        j["DMA_SIZE"]              = _staticStats.DmaHeapSize;
-        j["PSRAM_SIZE"]            = _staticStats.PsramSize;
-        j["CODE_FREE"]             = _staticStats.FreeSketchSpace;
+        j["MATRIX_WIDTH"]               = MATRIX_WIDTH;
+        j["MATRIX_HEIGHT"]              = MATRIX_HEIGHT;
+        j["CONFIGURED_MATRIX_WIDTH"]    = deviceConfig.GetMatrixWidth();
+        j["CONFIGURED_MATRIX_HEIGHT"]   = deviceConfig.GetMatrixHeight();
+        j["CONFIGURED_NUM_LEDS"]        = deviceConfig.GetActiveLEDCount();
+        j["ACTIVE_MATRIX_WIDTH"]        = activeWidth;
+        j["ACTIVE_MATRIX_HEIGHT"]       = activeHeight;
+        j["ACTIVE_NUM_LEDS"]            = activeLEDCount;
+        j["COMPILED_NUM_LEDS"]          = DeviceConfig::GetCompiledLEDCount();
+        j["COMPILED_NUM_CHANNELS"]      = DeviceConfig::GetCompiledChannelCount();
+        j["ACTIVE_NUM_CHANNELS"]        = deviceConfig.GetChannelCount();
+        j["COMPILED_OUTPUT_DRIVER"]     = deviceConfig.GetCompiledDriverName();
+        j["ACTIVE_OUTPUT_DRIVER"]       = deviceConfig.GetRuntimeDriverName();
+        j["COMPILED_AUDIO_INPUT_PIN"]   = DeviceConfig::GetCompiledAudioInputPin();
+        j["CONFIGURED_AUDIO_INPUT_PIN"] = deviceConfig.GetAudioInputPin();
+        j["AUDIO_INPUT_MODE"]           = deviceConfig.GetAudioInputModeName();
+        j["FRAMES_SOCKET"]              = !!COLORDATA_WEB_SOCKET_ENABLED;
+        j["EFFECTS_SOCKET"]             = !!EFFECTS_WEB_SOCKET_ENABLED;
+        j["CHIP_MODEL"]                 = _staticStats.ChipModel;
+        j["CHIP_CORES"]                 = _staticStats.ChipCores;
+        j["CHIP_SPEED"]                 = _staticStats.CpuFreqMHz;
+        j["PROG_SIZE"]                  = _staticStats.SketchSize;
+        j["CODE_SIZE"]                  = _staticStats.SketchSize;
+        j["FLASH_SIZE"]                 = _staticStats.FlashChipSize;
+        j["HEAP_SIZE"]                  = _staticStats.HeapSize;
+        j["DMA_SIZE"]                   = _staticStats.DmaHeapSize;
+        j["PSRAM_SIZE"]                 = _staticStats.PsramSize;
+        j["CODE_FREE"]                  = _staticStats.FreeSketchSpace;
     }
 
     if ((statsType & StatisticsType::Dynamic) != StatisticsType::None)
@@ -516,12 +676,193 @@ void CWebServer::GetSettings(AsyncWebServerRequest * pRequest)
     AddCORSHeaderAndSendResponse(pRequest, response);
 }
 
-// Support function that silently sets whatever settings are included in the request passed.
-//   Composing a response is left to the invoker!
-void CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest)
+void CWebServer::GetUnifiedSettings(AsyncWebServerRequest * pRequest)
+{
+    auto response = new AsyncJsonResponse();
+    auto root = response->getRoot().to<JsonObject>();
+    FillUnifiedSettingsJson(root);
+    AddCORSHeaderAndSendResponse(pRequest, response);
+}
+
+void CWebServer::GetUnifiedSettingsSchema(AsyncWebServerRequest * pRequest)
+{
+    auto response = new AsyncJsonResponse();
+    auto root = response->getRoot().to<JsonObject>();
+    FillUnifiedSettingsSchemaJson(root);
+    AddCORSHeaderAndSendResponse(pRequest, response);
+}
+
+bool CWebServer::ValidateLegacyDeviceSettings(AsyncWebServerRequest * pRequest, String* errorMessage)
+{
+    auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
+
+    // Validate the constrained settings first so the legacy POST path behaves like the unified JSON API:
+    // either the nontrivial request is coherent as a whole, or we reject it before any setters persist a
+    // partially applied config.
+    
+    if (pRequest->hasParam(DeviceConfig::OpenWeatherApiKeyTag, true, false))
+    {
+        auto [isValid, validationMessage] =
+            deviceConfig.ValidateOpenWeatherAPIKey(pRequest->getParam(DeviceConfig::OpenWeatherApiKeyTag, true, false)->value());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (pRequest->hasParam(DeviceConfig::PowerLimitTag, true, false))
+    {
+        auto [isValid, validationMessage] =
+            deviceConfig.ValidatePowerLimit(pRequest->getParam(DeviceConfig::PowerLimitTag, true, false)->value().toInt());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (pRequest->hasParam(DeviceConfig::BrightnessTag, true, false))
+    {
+        auto [isValid, validationMessage] =
+            deviceConfig.ValidateBrightness(pRequest->getParam(DeviceConfig::BrightnessTag, true, false)->value().toInt());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (pRequest->hasParam(DeviceConfig::AudioInputPinTag, true, false))
+    {
+        auto [isValid, validationMessage] =
+            deviceConfig.ValidateAudioInputPin(pRequest->getParam(DeviceConfig::AudioInputPinTag, true, false)->value().toInt());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (errorMessage)
+        *errorMessage = "";
+
+    return true;
+}
+
+bool CWebServer::ValidateUnifiedDeviceSettings(JsonObjectConst device, String* errorMessage)
+{
+    auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
+
+    if (device[DeviceConfig::OpenWeatherApiKeyTag].is<String>())
+    {
+        auto [isValid, validationMessage] = deviceConfig.ValidateOpenWeatherAPIKey(device[DeviceConfig::OpenWeatherApiKeyTag].as<String>());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (device[DeviceConfig::PowerLimitTag].is<int>())
+    {
+        auto [isValid, validationMessage] = deviceConfig.ValidatePowerLimit(device[DeviceConfig::PowerLimitTag].as<int>());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (device[DeviceConfig::BrightnessTag].is<int>())
+    {
+        auto [isValid, validationMessage] = deviceConfig.ValidateBrightness(device[DeviceConfig::BrightnessTag].as<int>());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    std::optional<int> requestedAudioInputPin;
+
+    if (device[DeviceConfig::AudioInputPinTag].is<int>())
+        requestedAudioInputPin = device[DeviceConfig::AudioInputPinTag].as<int>();
+
+    if (device["audio"].is<JsonObjectConst>())
+    {
+        auto audio = device["audio"].as<JsonObjectConst>();
+        if (audio["inputPin"].is<int>())
+        {
+            const int nestedAudioInputPin = audio["inputPin"].as<int>();
+            // The API still accepts both the legacy flat key and the structured audio object. Reject
+            // conflicting requests explicitly so callers do not get a half-legacy, half-modern winner
+            // picked implicitly by field order.
+            if (requestedAudioInputPin.has_value() && requestedAudioInputPin.value() != nestedAudioInputPin)
+            {
+                if (errorMessage)
+                    *errorMessage = "Malformed request";
+                return false;
+            }
+
+            requestedAudioInputPin = nestedAudioInputPin;
+        }
+    }
+
+    if (requestedAudioInputPin.has_value())
+    {
+        auto [isValid, validationMessage] = deviceConfig.ValidateAudioInputPin(requestedAudioInputPin.value());
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (errorMessage)
+        *errorMessage = "";
+
+    return true;
+}
+
+// Support function that applies whatever settings are included in the request passed after validating the
+// nontrivial ones up front. Returning false lets the caller report a single coherent bad-request error
+// instead of half-applying device config and then discovering a later constraint violation.
+bool CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* errorMessage)
 {
     auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
     auto& effectManager = g_ptrSystem->GetEffectManager();
+
+    if (!ValidateLegacyDeviceSettings(pRequest, errorMessage))
+        return false;
+
+    auto runtimeConfig = deviceConfig.GetRuntimeConfig();
+    bool runtimeConfigChanged = false;
+
+    runtimeConfigChanged = PushPostParamIfPresent<size_t>(pRequest, DeviceConfig::MatrixWidthTag, SET_VALUE(runtimeConfig.topology.width = value)) || runtimeConfigChanged;
+    runtimeConfigChanged = PushPostParamIfPresent<size_t>(pRequest, DeviceConfig::MatrixHeightTag, SET_VALUE(runtimeConfig.topology.height = value)) || runtimeConfigChanged;
+    runtimeConfigChanged = PushPostParamIfPresent<bool>(pRequest, DeviceConfig::MatrixSerpentineTag, SET_VALUE(runtimeConfig.topology.serpentine = value)) || runtimeConfigChanged;
+    runtimeConfigChanged = PushPostParamIfPresent<size_t>(pRequest, DeviceConfig::WS281xChannelCountTag, SET_VALUE(runtimeConfig.outputs.channelCount = value)) || runtimeConfigChanged;
+    runtimeConfigChanged = PushPostParamIfPresent<String>(pRequest, DeviceConfig::OutputDriverTag, SET_VALUE(runtimeConfig.outputs.driver = value == "hub75" ? DeviceConfig::OutputDriver::HUB75 : DeviceConfig::OutputDriver::WS281x)) || runtimeConfigChanged;
+
+    if (runtimeConfigChanged)
+    {
+        auto [isValid, validationMessage] = deviceConfig.ValidateRuntimeConfig(runtimeConfig);
+        if (!isValid)
+        {
+            if (errorMessage)
+                *errorMessage = validationMessage;
+            return false;
+        }
+    }
 
     PushPostParamIfPresent<size_t>(pRequest,"effectInterval", SET_VALUE(effectManager.SetInterval(value)));
     PushPostParamIfPresent<String>(pRequest, DeviceConfig::HostnameTag, SET_VALUE(deviceConfig.SetHostname(value)));
@@ -536,6 +877,7 @@ void CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest)
     PushPostParamIfPresent<bool>(pRequest, DeviceConfig::RememberCurrentEffectTag, SET_VALUE(deviceConfig.SetRememberCurrentEffect(value)));
     PushPostParamIfPresent<int>(pRequest, DeviceConfig::PowerLimitTag, SET_VALUE(deviceConfig.SetPowerLimit(value)));
     PushPostParamIfPresent<int>(pRequest, DeviceConfig::BrightnessTag, SET_VALUE(deviceConfig.SetBrightness(value)));
+    PushPostParamIfPresent<int>(pRequest, DeviceConfig::AudioInputPinTag, SET_VALUE(deviceConfig.SetAudioInputPin(value)));
 
     #if SHOW_VU_METER
     PushPostParamIfPresent<bool>(pRequest, DeviceConfig::ShowVUMeterTag, SET_VALUE(effectManager.ShowVU(value)));
@@ -550,6 +892,23 @@ void CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest)
     deviceConfig.ApplyColorSettings(globalColor, secondColor,
                                     IsPostParamTrue(pRequest, DeviceConfig::ClearGlobalColorTag),
                                     IsPostParamTrue(pRequest, DeviceConfig::ApplyGlobalColorsTag));
+
+    if (runtimeConfigChanged)
+    {
+        String runtimeErrorMessage;
+        if (!deviceConfig.SetRuntimeConfig(runtimeConfig, false, &runtimeErrorMessage)
+            || !g_ptrSystem->ApplyRuntimeConfiguration(&runtimeErrorMessage))
+        {
+            if (errorMessage)
+                *errorMessage = runtimeErrorMessage;
+            return false;
+        }
+    }
+
+    if (errorMessage)
+        *errorMessage = "";
+
+    return true;
 }
 
 // Set settings and return resulting config
@@ -557,10 +916,129 @@ void CWebServer::SetSettings(AsyncWebServerRequest * pRequest)
 {
     debugV("SetSettings");
 
-    SetSettingsIfPresent(pRequest);
+    String errorMessage;
+    if (!SetSettingsIfPresent(pRequest, &errorMessage))
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
+        return;
+    }
 
     // We return the current config in response
     GetSettings(pRequest);
+}
+
+void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVariantConst json)
+{
+    if (!json.is<JsonObjectConst>())
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, "Malformed request");
+        return;
+    }
+
+    auto root = json.as<JsonObjectConst>();
+    auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
+    auto& effectManager = g_ptrSystem->GetEffectManager();
+    auto runtimeConfig = deviceConfig.GetRuntimeConfig();
+
+    if (root["topology"].is<JsonObjectConst>())
+    {
+        auto topology = root["topology"].as<JsonObjectConst>();
+        if (topology["width"].is<uint16_t>()) runtimeConfig.topology.width = topology["width"].as<uint16_t>();
+        if (topology["height"].is<uint16_t>()) runtimeConfig.topology.height = topology["height"].as<uint16_t>();
+        if (topology["serpentine"].is<bool>()) runtimeConfig.topology.serpentine = topology["serpentine"].as<bool>();
+    }
+
+    if (root["outputs"].is<JsonObjectConst>())
+    {
+        auto outputs = root["outputs"].as<JsonObjectConst>();
+        if (outputs["driver"].is<String>())
+        {
+            const auto driver = outputs["driver"].as<String>();
+            runtimeConfig.outputs.driver = driver == "hub75" ? DeviceConfig::OutputDriver::HUB75 : DeviceConfig::OutputDriver::WS281x;
+        }
+
+        if (outputs["ws281x"].is<JsonObjectConst>())
+        {
+            auto ws281x = outputs["ws281x"].as<JsonObjectConst>();
+            if (ws281x["channelCount"].is<size_t>()) runtimeConfig.outputs.channelCount = ws281x["channelCount"].as<size_t>();
+            if (ws281x["pins"].is<JsonArrayConst>())
+            {
+                auto pins = ws281x["pins"].as<JsonArrayConst>();
+                for (size_t i = 0; i < runtimeConfig.outputs.outputPins.size() && i < pins.size(); ++i)
+                {
+                    if (pins[i].is<int>())
+                        runtimeConfig.outputs.outputPins[i] = pins[i].as<int>();
+                }
+            }
+        }
+    }
+
+    auto [runtimeConfigValid, runtimeConfigMessage] = deviceConfig.ValidateRuntimeConfig(runtimeConfig);
+    if (!runtimeConfigValid)
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, runtimeConfigMessage);
+        return;
+    }
+
+    if (root["device"].is<JsonObjectConst>())
+    {
+        auto device = root["device"].as<JsonObjectConst>();
+        String validationMessage;
+        if (!ValidateUnifiedDeviceSettings(device, &validationMessage))
+        {
+            AddCORSHeaderAndSendBadRequest(pRequest, validationMessage);
+            return;
+        }
+
+        if (device[DeviceConfig::HostnameTag].is<String>()) deviceConfig.SetHostname(device[DeviceConfig::HostnameTag].as<String>());
+        if (device[DeviceConfig::LocationTag].is<String>()) deviceConfig.SetLocation(device[DeviceConfig::LocationTag].as<String>());
+        if (device[DeviceConfig::LocationIsZipTag].is<bool>()) deviceConfig.SetLocationIsZip(device[DeviceConfig::LocationIsZipTag].as<bool>());
+        if (device[DeviceConfig::CountryCodeTag].is<String>()) deviceConfig.SetCountryCode(device[DeviceConfig::CountryCodeTag].as<String>());
+        if (device[DeviceConfig::OpenWeatherApiKeyTag].is<String>()) deviceConfig.SetOpenWeatherAPIKey(device[DeviceConfig::OpenWeatherApiKeyTag].as<String>());
+        if (device[DeviceConfig::TimeZoneTag].is<String>()) deviceConfig.SetTimeZone(device[DeviceConfig::TimeZoneTag].as<String>());
+        if (device[DeviceConfig::Use24HourClockTag].is<bool>()) deviceConfig.Set24HourClock(device[DeviceConfig::Use24HourClockTag].as<bool>());
+        if (device[DeviceConfig::UseCelsiusTag].is<bool>()) deviceConfig.SetUseCelsius(device[DeviceConfig::UseCelsiusTag].as<bool>());
+        if (device[DeviceConfig::NTPServerTag].is<String>()) deviceConfig.SetNTPServer(device[DeviceConfig::NTPServerTag].as<String>());
+        if (device[DeviceConfig::RememberCurrentEffectTag].is<bool>()) deviceConfig.SetRememberCurrentEffect(device[DeviceConfig::RememberCurrentEffectTag].as<bool>());
+        if (device[DeviceConfig::PowerLimitTag].is<int>()) deviceConfig.SetPowerLimit(device[DeviceConfig::PowerLimitTag].as<int>());
+        if (device[DeviceConfig::BrightnessTag].is<int>()) deviceConfig.SetBrightness(device[DeviceConfig::BrightnessTag].as<int>());
+        if (device[DeviceConfig::AudioInputPinTag].is<int>()) deviceConfig.SetAudioInputPin(device[DeviceConfig::AudioInputPinTag].as<int>());
+        if (device["audio"].is<JsonObjectConst>())
+        {
+            auto audio = device["audio"].as<JsonObjectConst>();
+            if (audio["inputPin"].is<int>()) deviceConfig.SetAudioInputPin(audio["inputPin"].as<int>());
+        }
+
+        std::optional<CRGB> globalColor = {};
+        std::optional<CRGB> secondColor = {};
+        if (device[DeviceConfig::GlobalColorTag].is<CRGB>()) globalColor = device[DeviceConfig::GlobalColorTag].as<CRGB>();
+        if (device[DeviceConfig::SecondColorTag].is<CRGB>()) secondColor = device[DeviceConfig::SecondColorTag].as<CRGB>();
+        deviceConfig.ApplyColorSettings(globalColor, secondColor,
+                                        device[DeviceConfig::ClearGlobalColorTag].is<bool>() && device[DeviceConfig::ClearGlobalColorTag].as<bool>(),
+                                        device[DeviceConfig::ApplyGlobalColorsTag].is<bool>() && device[DeviceConfig::ApplyGlobalColorsTag].as<bool>());
+    }
+
+    if (root["effects"].is<JsonObjectConst>())
+    {
+        auto effects = root["effects"].as<JsonObjectConst>();
+        if (effects["effectInterval"].is<size_t>())
+            effectManager.SetInterval(effects["effectInterval"].as<size_t>());
+    }
+
+    String errorMessage;
+    if (!deviceConfig.SetRuntimeConfig(runtimeConfig, false, &errorMessage))
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
+        return;
+    }
+
+    if (!g_ptrSystem->ApplyRuntimeConfiguration(&errorMessage))
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
+        return;
+    }
+
+    GetUnifiedSettings(pRequest);
 }
 
 bool CWebServer::CheckAndGetSettingsEffect(AsyncWebServerRequest * pRequest, std::shared_ptr<LEDStripEffect> & effect, bool post)
@@ -695,7 +1173,12 @@ void CWebServer::ValidateAndSetSetting(AsyncWebServerRequest * pRequest)
     }
 
     // Process the setting as per usual
-    SetSettingsIfPresent(pRequest);
+    String errorMessage;
+    if (!SetSettingsIfPresent(pRequest, &errorMessage))
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
+        return;
+    }
     AddCORSHeaderAndSendOKResponse(pRequest);
 }
 

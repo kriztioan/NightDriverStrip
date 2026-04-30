@@ -183,6 +183,29 @@ void AudioSerialTaskEntry(void *);
 // Replace previous PeakData class with a direct alias to std::array
 using PeakData = std::array<float, NUM_BANDS>;
 
+// BeatInfo
+//
+// Beat detection is computed once in the analyzer and published as a compact
+// event record so effects can react without rescanning the FFT themselves.
+struct BeatInfo
+{
+    uint32_t sequence = 0;
+    uint32_t timestampMs = 0;
+    float intervalMs = 0.0f;
+    float bpm = 0.0f;
+    float msPerBeat = 0.0f;
+    float confidence = 0.0f;
+    float strength = 0.0f;
+    float bass = 0.0f;
+    float mid = 0.0f;
+    float treble = 0.0f;
+    float flux = 0.0f;
+    float vu = 0.0f;
+    float vuRatio = 0.0f;
+    bool major = false;
+    bool simulated = false;
+};
+
 // Interface for SoundAnalyzer (audio and non-audio variants)
 class ISoundAnalyzer
 {
@@ -211,6 +234,8 @@ class ISoundAnalyzer
     virtual float Peak1Decay(int band) const = 0;
     virtual float Peak2Decay(int band) const = 0;
     virtual unsigned long LastPeak1Time(int band) const = 0;
+    virtual const BeatInfo & LastBeat() const = 0;
+    virtual const BeatInfo & LastNearBeat() const = 0;
 
     // --- Simulation & Testing ---
     virtual void SetSimulateBeat(bool) = 0;
@@ -228,6 +253,7 @@ class ISoundAnalyzer
 class SoundAnalyzer : public ISoundAnalyzer // Non-audio case stub
 {
     PeakData _emptyPeaks; // zero-initialized
+    BeatInfo _beatInfo{};
   public:
     float VURatio() const override
     {
@@ -287,6 +313,16 @@ class SoundAnalyzer : public ISoundAnalyzer // Non-audio case stub
     unsigned long LastPeak1Time(int) const override
     {
         return 0;
+    }
+
+    const BeatInfo & LastBeat() const override
+    {
+        return _beatInfo;
+    }
+
+    const BeatInfo & LastNearBeat() const override
+    {
+        return _beatInfo;
     }
 
     void SetPeakDecayRates(float, float) override
@@ -405,22 +441,23 @@ class SoundAnalyzerBase : public ISoundAnalyzer
 
     // Returns the faster-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
-    float Peak1Decay(int band) const override
-    {
-        return (band >= 0 && band < NUM_BANDS) ? _peak1Decay[band] : 0.0f;
-    }
+    float Peak1Decay(int band) const override;
 
     // Returns the slower-decay overlay level for the given band (0..1).
     // Used by some visuals to draw trailing bars/dots.
-    float Peak2Decay(int band) const override
-    {
-        return (band >= 0 && band < NUM_BANDS) ? _peak2Decay[band] : 0.0f;
-    }
+    float Peak2Decay(int band) const override;
 
     // Returns the timestamp of the last time the primary peak for this band was updated.
-    unsigned long LastPeak1Time(int band) const override
+    unsigned long LastPeak1Time(int band) const override;
+
+    const BeatInfo & LastBeat() const override
     {
-        return (band >= 0 && band < NUM_BANDS) ? _lastPeak1Time[band] : 0;
+        return _lastBeatInfo;
+    }
+
+    const BeatInfo & LastNearBeat() const override
+    {
+        return _lastNearBeatInfo;
     }
 
     void SetSimulateBeat(bool b) override
@@ -490,6 +527,7 @@ class SoundAnalyzerBase : public ISoundAnalyzer
     PeakData _vPeaks{};                // Normalized band energies 0..1
     PeakData _livePeaks{};             // Attack-limited display peaks per band
     PeakData _Peaks{};                 // cached last normalized peaks
+    PeakData _beatPeaks{};             // Beat-only peaks derived before display autoscale/attack limiting
     std::array<int, NUM_BANDS> _bandBinStart{};
     std::array<int, NUM_BANDS> _bandBinEnd{};
     float _energyMaxEnv = 0.01f;       // adaptive envelope for autoscaling (start low for fast adaptation)
@@ -507,6 +545,22 @@ class SoundAnalyzerBase : public ISoundAnalyzer
     std::array<float, NUM_BANDS> _peak2Decay{};
     float _peak1DecayRate = 1.25f;
     float _peak2DecayRate = 1.25f;
+
+    // Keep beat state next to the analyzer so effects observe one shared pulse.
+    BeatInfo _lastBeatInfo{};
+    BeatInfo _lastNearBeatInfo{};
+    PeakData _previousBeatPeaks{};
+    float _beatScoreBaseline = 0.0f;
+    float _beatFluxBaseline = 0.0f;
+    float _beatBassBaseline = 0.0f;
+    float _beatScoreDeviation = 0.0f;
+    float _beatFluxDeviation = 0.0f;
+    float _beatBassDeviation = 0.0f;
+    float _previousBeatIntervalMs = 500.0f;
+    uint32_t _lastBeatDetectedMs = 0;
+    uint32_t _lastBeatDebugMs = 0;
+    uint32_t _lastSimulatedBeatIndex = 0;
+    bool _hasSimulatedBeat = false;
 
     static constexpr int kBandOffset = 2; // number of lowest source bands to skip in layout (skip bins 0,1,2)
     std::array<float, MAX_SAMPLES> _vReal{};
@@ -527,6 +581,11 @@ class SoundAnalyzerBase : public ISoundAnalyzer
     void SampleAudio();
     void UpdateVU(float newval);
     void ComputeBandLayout();
+    void ResetFrameState();
+    void ResetBeatDetection();
+    void UpdateBeatDetection();
+    void RecordBeat(uint32_t now, float confidence, float strength, float bass, float mid, float treble, float flux, bool simulated);
+    void RecordNearBeat(uint32_t now, float score, float strength, float bass, float mid, float treble, float flux);
 
     // Energy spectrum processing (implemented inline or in template)
     //

@@ -100,7 +100,10 @@ extern const uint8_t thunderstorm_night_end[]       asm("_binary_assets_bmp_thun
 
 static constexpr auto pszDaysOfWeek = to_array( { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" } );
 
-static std::map<const String, EmbeddedFile, std::less<const String>, psram_allocator<std::pair<const String, EmbeddedFile>>> weatherIcons =
+// This lookup table is tiny and constructed during global initialization, before the system has
+// completed its normal startup path. Keep it on the regular heap so boot does not depend on PSRAM.
+
+static std::map<const String, EmbeddedFile> weatherIcons =
 {
     { "01d", EmbeddedFile(clearsky_start, clearsky_end) },
     { "02d", EmbeddedFile(fewclouds_start, fewclouds_end) },

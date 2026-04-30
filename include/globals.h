@@ -693,20 +693,20 @@ extern const int g_aRingSizeTable[];
 // The M5 mic is on Pin34, but when I wire up my own microphone module I usually put it on pin 36.
 
 #if ENABLE_AUDIO
-    #ifndef INPUT_PIN
+    #ifndef AUDIO_INPUT_PIN
         #if TTGO
-            #define INPUT_PIN (36)
+            #define AUDIO_INPUT_PIN (36)
         #elif ELECROW
-            #define INPUT_PIN (41)
+            #define AUDIO_INPUT_PIN (41)
         #elif USE_M5
-            #define INPUT_PIN (34)
+            #define AUDIO_INPUT_PIN (34)
             #define IO_PIN (0)
         #else
-            #define INPUT_PIN (36)    // Audio line input, ADC #1, input line 0 (GPIO pin 36)
+            #define AUDIO_INPUT_PIN (36)    // Audio line input, ADC #1, input line 0 (GPIO pin 36)
         #endif
     #endif
 #else
-    #define INPUT_PIN 0
+    #define AUDIO_INPUT_PIN 0
 #endif
 
 #ifndef IR_REMOTE_PIN
@@ -726,7 +726,7 @@ extern const int g_aRingSizeTable[];
   #endif
 
   #ifndef I2S_DATA_PIN
-    #define I2S_DATA_PIN     INPUT_PIN
+    #define I2S_DATA_PIN     AUDIO_INPUT_PIN
   #endif
 #endif
 

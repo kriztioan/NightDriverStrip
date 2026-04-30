@@ -76,6 +76,7 @@ class LEDBuffer
     bool UpdateFromWire(std::unique_ptr<uint8_t []> & payloadData, size_t payloadLength);
 
     void DrawBuffer();
+    void Reconfigure(std::shared_ptr<GFXBase> pStrand);
 };
 
 // LEDBufferManager
@@ -138,6 +139,8 @@ class LEDBufferManager
     // Take a "peek" at the newest buffer, or nullptr if empty
 
     std::shared_ptr<LEDBuffer> PeekOldestBuffer() const;
+
+    void Reconfigure(const std::shared_ptr<GFXBase>& pGFX);
 
     // operator[]
     //

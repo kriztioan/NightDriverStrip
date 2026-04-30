@@ -31,6 +31,9 @@
 #include "globals.h"
 
 #include <HTTPClient.h>
+#include <algorithm>
+#include <array>
+#include <driver/gpio.h>
 #include <memory>
 #include <optional>
 #include <UrlEncode.h>
@@ -41,6 +44,38 @@
 #include "systemcontainer.h"
 
 extern const char timezones_start[] asm("_binary_config_timezones_json_start");
+
+namespace
+{
+    constexpr const char* kRecompileNeededMessage = "recompile needed";
+
+    constexpr std::array<int8_t, NUM_CHANNELS> kCompiledWS281xPins = {
+        #if NUM_CHANNELS >= 1
+        LED_PIN0,
+        #endif
+        #if NUM_CHANNELS >= 2
+        LED_PIN1,
+        #endif
+        #if NUM_CHANNELS >= 3
+        LED_PIN2,
+        #endif
+        #if NUM_CHANNELS >= 4
+        LED_PIN3,
+        #endif
+        #if NUM_CHANNELS >= 5
+        LED_PIN4,
+        #endif
+        #if NUM_CHANNELS >= 6
+        LED_PIN5,
+        #endif
+        #if NUM_CHANNELS >= 7
+        LED_PIN6,
+        #endif
+        #if NUM_CHANNELS >= 8
+        LED_PIN7,
+        #endif
+    };
+}
 
 // DeviceConfig holds, persists and loads device-wide configuration settings. Effect-specific settings should
 // be managed using overrides of the respective methods in LEDStripEffect (mainly FillSettingSpecs(),
@@ -66,8 +101,58 @@ void DeviceConfig::SaveToJSON() const
     g_ptrSystem->GetJSONWriter().FlagWriter(writerIndex);
 }
 
+std::array<int8_t, NUM_CHANNELS> DeviceConfig::GetCompiledWS281xPins()
+{
+    return kCompiledWS281xPins;
+}
+
+const char* DeviceConfig::DriverName(OutputDriver driver)
+{
+    switch (driver)
+    {
+        case OutputDriver::HUB75:
+            return "hub75";
+
+        case OutputDriver::WS281x:
+        default:
+            return "ws281x";
+    }
+}
+
+bool DeviceConfig::IsHub75Build()
+{
+    return GetCompiledOutputDriver() == OutputDriver::HUB75;
+}
+
+void DeviceConfig::LogRuntimeConfig(const char* reason) const
+{
+    String activePins;
+    for (size_t i = 0; i < runtimeOutputs.channelCount && i < runtimeOutputs.outputPins.size(); ++i)
+    {
+        if (!activePins.isEmpty())
+            activePins += ',';
+        activePins += String(runtimeOutputs.outputPins[i]);
+    }
+
+    debugI("Runtime config (%s): driver=%s matrix=%ux%u leds=%u serpentine=%d channels=%u audioPin=%d",
+           reason,
+           DriverName(runtimeOutputs.driver),
+           runtimeTopology.width,
+           runtimeTopology.height,
+           static_cast<unsigned>(GetActiveLEDCount()),
+           runtimeTopology.serpentine,
+           static_cast<unsigned>(runtimeOutputs.channelCount),
+           audioInputPin);
+    debugI("Runtime config pins (%s): activeChannels=%s", reason, activePins.c_str());
+}
+
 DeviceConfig::DeviceConfig()
 {
+    runtimeTopology.serpentine = !IsHub75Build();
+    runtimeOutputs.driver = GetCompiledOutputDriver();
+    runtimeOutputs.channelCount = NUM_CHANNELS;
+    runtimeOutputs.outputPins = GetCompiledWS281xPins();
+
     writerIndex = g_ptrSystem->GetJSONWriter().RegisterWriter(
         [this] { assert(SaveToJSONFile(DEVICE_CONFIG_FILE, *this)); }
     );
@@ -88,6 +173,8 @@ DeviceConfig::DeviceConfig()
 
         SaveToJSON();
     }
+
+    LogRuntimeConfig("init");
 }
 
 bool DeviceConfig::SerializeToJSON(JsonObject& jsonObject)
@@ -118,6 +205,16 @@ bool DeviceConfig::SerializeToJSON(JsonObject& jsonObject, bool includeSensitive
     jsonDoc[GlobalColorTag] = globalColor;
     jsonDoc[ApplyGlobalColorsTag] = applyGlobalColors;
     jsonDoc[SecondColorTag] = secondColor;
+    jsonDoc[AudioInputPinTag] = audioInputPin;
+    jsonDoc[MatrixWidthTag] = runtimeTopology.width;
+    jsonDoc[MatrixHeightTag] = runtimeTopology.height;
+    jsonDoc[MatrixSerpentineTag] = runtimeTopology.serpentine;
+    jsonDoc[OutputDriverTag] = DriverName(runtimeOutputs.driver);
+    jsonDoc[WS281xChannelCountTag] = runtimeOutputs.channelCount;
+
+    auto ws281xPins = jsonDoc[WS281xPinsTag].to<JsonArray>();
+    for (auto pin : runtimeOutputs.outputPins)
+        ws281xPins.add(pin);
 
     if (includeSensitive)
         jsonDoc[OpenWeatherApiKeyTag] = openWeatherApiKey;
@@ -148,6 +245,10 @@ bool DeviceConfig::DeserializeFromJSON(const JsonObjectConst& jsonObject, bool s
     SetIfPresentIn(jsonObject, rememberCurrentEffect, RememberCurrentEffectTag);
     SetIfPresentIn(jsonObject, powerLimit, PowerLimitTag);
     SetIfPresentIn(jsonObject, brightness, BrightnessTag);
+    // Persisted config predates the newer brightness guardrails in some installs, so treat an invalid
+    // saved brightness as "unset" and fall back to the normal 100% default instead of booting dark.
+    if (brightness < BRIGHTNESS_MIN || brightness > BRIGHTNESS_MAX)
+        brightness = BRIGHTNESS_MAX;
     // Only deserialize showVUMeter if the VU meter is enabled in the build
     #if SHOW_VU_METER
     SetIfPresentIn(jsonObject, showVUMeter, ShowVUMeterTag);
@@ -155,12 +256,50 @@ bool DeviceConfig::DeserializeFromJSON(const JsonObjectConst& jsonObject, bool s
     SetIfPresentIn(jsonObject, globalColor, GlobalColorTag);
     SetIfPresentIn(jsonObject, applyGlobalColors, ApplyGlobalColorsTag);
     SetIfPresentIn(jsonObject, secondColor, SecondColorTag);
+    if (jsonObject[AudioInputPinTag].is<int>())
+    {
+        const int persistedAudioInputPin = jsonObject[AudioInputPinTag].as<int>();
+        auto [pinValid, _] = ValidateAudioInputPin(persistedAudioInputPin);
+        audioInputPin = pinValid ? persistedAudioInputPin : GetCompiledAudioInputPin();
+    }
+
+    RuntimeConfig updated = GetRuntimeConfig();
+
+    SetIfPresentIn(jsonObject, updated.topology.width, MatrixWidthTag);
+    SetIfPresentIn(jsonObject, updated.topology.height, MatrixHeightTag);
+    SetIfPresentIn(jsonObject, updated.topology.serpentine, MatrixSerpentineTag);
+
+    if (jsonObject[OutputDriverTag].is<String>())
+    {
+        const auto driverName = jsonObject[OutputDriverTag].as<String>();
+        if (driverName == DriverName(OutputDriver::HUB75))
+            updated.outputs.driver = OutputDriver::HUB75;
+        else if (driverName == DriverName(OutputDriver::WS281x))
+            updated.outputs.driver = OutputDriver::WS281x;
+    }
+
+    if (jsonObject[WS281xChannelCountTag].is<size_t>())
+        updated.outputs.channelCount = jsonObject[WS281xChannelCountTag].as<size_t>();
+
+    if (jsonObject[WS281xPinsTag].is<JsonArrayConst>())
+    {
+        auto pinArray = jsonObject[WS281xPinsTag].as<JsonArrayConst>();
+        for (size_t i = 0; i < updated.outputs.outputPins.size() && i < pinArray.size(); ++i)
+        {
+            if (pinArray[i].is<int>())
+                updated.outputs.outputPins[i] = pinArray[i].as<int>();
+        }
+    }
+
+    String runtimeConfigError;
+    if (!SetRuntimeConfig(updated, true, &runtimeConfigError))
+        debugW("Ignoring invalid persisted runtime config: %s", runtimeConfigError.c_str());
 
     if (ntpServer.isEmpty())
         ntpServer = NTP_SERVER_DEFAULT;
 
     if (jsonObject[TimeZoneTag].is<String>())
-        return SetTimeZone(jsonObject[TimeZoneTag], true);
+        return SetTimeZoneInternal(jsonObject[TimeZoneTag], true);
 
     if (!skipWrite)
         SaveToJSON();
@@ -301,6 +440,51 @@ const std::vector<std::reference_wrapper<SettingSpec>>& DeviceConfig::GetSetting
             "by some effects. Defaults to the <em>previous</em> global color if not explicitly set.",
             SettingSpec::SettingType::Color
         );
+        settingSpecs.emplace_back(
+            MatrixWidthTag,
+            "Matrix width",
+            "Active matrix width. WS281x builds validate this by total LED capacity, so width * height must stay within the compiled LED budget.",
+            SettingSpec::SettingType::PositiveBigInteger,
+            1,
+            GetCompiledLEDCount()
+        );
+        settingSpecs.emplace_back(
+            MatrixHeightTag,
+            "Matrix height",
+            "Active matrix height. WS281x builds validate this by total LED capacity, so width * height must stay within the compiled LED budget.",
+            SettingSpec::SettingType::PositiveBigInteger,
+            1,
+            GetCompiledLEDCount()
+        );
+        settingSpecs.emplace_back(
+            MatrixSerpentineTag,
+            "Serpentine layout",
+            "Controls the logical XY mapping for strip-based matrices. HUB75 ignores this because its panel mapping is build-defined.",
+            SettingSpec::SettingType::Boolean
+        );
+        auto& audioInputPinSpec = settingSpecs.emplace_back(
+            AudioInputPinTag,
+            "Audio input pin",
+            "External microphone input pin. This is boot-applied today because the audio task still owns the active DMA/I2S handles once sampling starts.",
+            SettingSpec::SettingType::Integer,
+            -1,
+            48
+        );
+        audioInputPinSpec.HasValidation = true;
+        settingSpecs.emplace_back(
+            OutputDriverTag,
+            "Output driver",
+            "Runtime-selected driver. If this differs from the firmware's compiled driver, the API reports recompile required.",
+            SettingSpec::SettingType::String
+        );
+        settingSpecs.emplace_back(
+            WS281xChannelCountTag,
+            "WS281x channel count",
+            "Number of active strip channels within the compiled maximum. Live updates are limited to WS281x builds.",
+            SettingSpec::SettingType::PositiveBigInteger,
+            1,
+            GetCompiledChannelCount()
+        );
 
         settingSpecReferences.insert(settingSpecReferences.end(), settingSpecs.begin(), settingSpecs.end());
     }
@@ -358,17 +542,20 @@ void DeviceConfig::SetRememberCurrentEffect(bool newRememberCurrentEffect)
     SetAndSave(rememberCurrentEffect, newRememberCurrentEffect);
 }
 
-DeviceConfig::ValidateResponse DeviceConfig::ValidateBrightness(const String& newBrightness)
+DeviceConfig::ValidateResponse DeviceConfig::ValidateBrightness(int newBrightness)
 {
-    auto newNumericBrightness = newBrightness.toInt();
-
-    if (newNumericBrightness < BRIGHTNESS_MIN)
+    if (newBrightness < BRIGHTNESS_MIN)
         return { false, String("brightness is below minimum value of ") + BRIGHTNESS_MIN };
 
-    if (newNumericBrightness > BRIGHTNESS_MAX)
+    if (newBrightness > BRIGHTNESS_MAX)
         return { false, String("brightness is above maximum value of ") + BRIGHTNESS_MAX };
 
     return { true, "" };
+}
+
+DeviceConfig::ValidateResponse DeviceConfig::ValidateBrightness(const String& newBrightness)
+{
+    return ValidateBrightness(newBrightness.toInt());
 }
 
 void DeviceConfig::SetBrightness(int newBrightness)
@@ -386,12 +573,17 @@ void DeviceConfig::SetShowVUMeter(bool newShowVUMeter)
     #endif
 }
 
-DeviceConfig::ValidateResponse DeviceConfig::ValidatePowerLimit(const String& newPowerLimit)
+DeviceConfig::ValidateResponse DeviceConfig::ValidatePowerLimit(int newPowerLimit)
 {
-    if (newPowerLimit.toInt() < POWER_LIMIT_MIN)
+    if (newPowerLimit < POWER_LIMIT_MIN)
         return { false, String("powerLimit is below minimum value of ") + POWER_LIMIT_MIN };
 
     return { true, "" };
+}
+
+DeviceConfig::ValidateResponse DeviceConfig::ValidatePowerLimit(const String& newPowerLimit)
+{
+    return ValidatePowerLimit(newPowerLimit.toInt());
 }
 
 void DeviceConfig::SetPowerLimit(int newPowerLimit)
@@ -420,8 +612,46 @@ void DeviceConfig::SetSecondColor(const CRGB& newSecondColor)
     SetAndSave(secondColor, newSecondColor);
 }
 
+DeviceConfig::ValidateResponse DeviceConfig::ValidateAudioInputPin(int pin) const
+{
+    if (pin < -1)
+        return { false, "audio input pin must be -1 or a valid GPIO" };
+
+    if (pin == GetCompiledAudioInputPin())
+        return { true, "" };
+
+    // The settings API now separates "compiled default" from "active value". External I2S mics can
+    // move their DIN pin at boot, but the M5 onboard mic path and the current ADC path are still fixed.
+    if (!SupportsConfigurableAudioInputPin())
+        return { false, kRecompileNeededMessage };
+
+    if (pin == -1)
+        return { true, "" };
+
+    if (!GPIO_IS_VALID_GPIO(static_cast<gpio_num_t>(pin)))
+        return { false, "audio input pin must be a valid GPIO" };
+
+    return { true, "" };
+}
+
+void DeviceConfig::SetAudioInputPin(int newAudioInputPin)
+{
+    auto [isValid, _] = ValidateAudioInputPin(newAudioInputPin);
+    if (!isValid)
+        return;
+
+    if (audioInputPin == newAudioInputPin)
+        return;
+
+    SetAndSave(audioInputPin, static_cast<int8_t>(newAudioInputPin));
+    LogRuntimeConfig("audio input pin changed");
+}
+
+// This helper separates "apply the timezone to the running process" from "persist a user edit".
+// Startup/config-load needs to set TZ immediately so localtime() is correct, but it must not
+// immediately rewrite device.cfg just because we re-applied the already-persisted value.
 // The timezone JSON file used by this logic is generated using tools/gen-tz-json.py
-bool DeviceConfig::SetTimeZone(const String& newTimeZone, bool skipWrite)
+bool DeviceConfig::SetTimeZoneInternal(const String& newTimeZone, bool skipWrite)
 {
     String quotedTZ = "\n\"" + newTimeZone + '"';
 
@@ -459,6 +689,11 @@ bool DeviceConfig::SetTimeZone(const String& newTimeZone, bool skipWrite)
         SaveToJSON();
 
     return true;
+}
+
+bool DeviceConfig::SetTimeZone(const String& newTimeZone, bool skipWrite)
+{
+    return SetTimeZoneInternal(newTimeZone, skipWrite);
 }
 
 #if ENABLE_WIFI
@@ -557,4 +792,116 @@ void DeviceConfig::ApplyColorSettings(std::optional<CRGB> newGlobalColor, std::o
         // ...otherwise, apply the "set global color" logic if we were asked to do so
         g_ptrSystem->GetEffectManager().ApplyGlobalColor(finalGlobalColor);
     }
+}
+
+DeviceConfig::ValidateResponse DeviceConfig::ValidateTopology(uint16_t width, uint16_t height, bool serpentine) const
+{
+    if (width == 0 || height == 0)
+        return { false, "matrix dimensions must be greater than zero" };
+
+    // The strip path sizes its live buffers from total LED capacity, not the original compile-time aspect ratio.
+    // That keeps reshaping flexible while still refusing requests that would outgrow the compiled backing store.
+    if (static_cast<size_t>(width) * height > GetCompiledLEDCount())
+        return { false, kRecompileNeededMessage };
+
+    if (IsHub75Build())
+    {
+        if (width != GetCompiledMatrixWidth() || height != GetCompiledMatrixHeight())
+            return { false, kRecompileNeededMessage };
+
+        if (serpentine != runtimeTopology.serpentine)
+            return { false, kRecompileNeededMessage };
+    }
+
+    return { true, "" };
+}
+
+DeviceConfig::ValidateResponse DeviceConfig::ValidateOutputDriver(OutputDriver driver) const
+{
+    if (driver != GetCompiledOutputDriver())
+        return { false, kRecompileNeededMessage };
+
+    return { true, "" };
+}
+
+DeviceConfig::ValidateResponse DeviceConfig::ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins) const
+{
+    if (channelCount == 0)
+        return { false, "channel count must be greater than zero" };
+
+    if (channelCount > GetCompiledChannelCount())
+        return { false, kRecompileNeededMessage };
+
+    if (IsHub75Build())
+    {
+        if (channelCount != GetCompiledChannelCount())
+            return { false, kRecompileNeededMessage };
+
+        if (pins != GetCompiledWS281xPins())
+            return { false, kRecompileNeededMessage };
+    }
+
+    for (size_t i = 0; i < channelCount; ++i)
+    {
+        if (pins[i] < 0)
+            return { false, "active channels require valid GPIO pins" };
+
+        for (size_t j = i + 1; j < channelCount; ++j)
+        {
+            if (pins[i] == pins[j])
+                return { false, "WS281x channel pins must be unique" };
+        }
+    }
+
+    return { true, "" };
+}
+
+DeviceConfig::ValidateResponse DeviceConfig::ValidateRuntimeConfig(const RuntimeConfig& config) const
+{
+    auto [driverValid, driverMessage] = ValidateOutputDriver(config.outputs.driver);
+    if (!driverValid)
+        return { false, driverMessage };
+
+    auto [topologyValid, topologyMessage] = ValidateTopology(config.topology.width, config.topology.height, config.topology.serpentine);
+    if (!topologyValid)
+        return { false, topologyMessage };
+
+    auto [ws281xValid, ws281xMessage] = ValidateWS281xSettings(config.outputs.channelCount, config.outputs.outputPins);
+    if (!ws281xValid)
+        return { false, ws281xMessage };
+
+    return { true, "" };
+}
+
+bool DeviceConfig::SetRuntimeConfig(const RuntimeConfig& config, bool skipWrite, String* errorMessage)
+{
+    auto [isValid, validationMessage] = ValidateRuntimeConfig(config);
+    if (!isValid)
+    {
+        if (errorMessage)
+            *errorMessage = validationMessage;
+        return false;
+    }
+
+    const bool changed =
+        runtimeTopology.width != config.topology.width
+        || runtimeTopology.height != config.topology.height
+        || runtimeTopology.serpentine != config.topology.serpentine
+        || runtimeOutputs.driver != config.outputs.driver
+        || runtimeOutputs.channelCount != config.outputs.channelCount
+        || runtimeOutputs.outputPins != config.outputs.outputPins;
+
+    runtimeTopology = config.topology;
+    runtimeOutputs = config.outputs;
+
+    if (!skipWrite)
+        SaveToJSON();
+
+    if (changed && !skipWrite)
+        LogRuntimeConfig("runtime config changed");
+
+    if (errorMessage)
+        *errorMessage = "";
+
+    return true;
 }

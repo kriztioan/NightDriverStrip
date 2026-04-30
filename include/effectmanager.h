@@ -119,6 +119,7 @@ class  EffectManager : public IJSONSerializable
     bool _clearTempEffectWhenExpired = false;
     std::atomic_bool _newFrameAvailable = false;
     String _effectSetHashString = "";
+    uint32_t _lastBeatSequence = 0;
 
     std::vector<std::shared_ptr<GFXBase>> _gfx;
     std::shared_ptr<LEDStripEffect> _tempEffect;
@@ -126,6 +127,7 @@ class  EffectManager : public IJSONSerializable
     std::vector<std::reference_wrapper<IEffectEventListener>> _effectEventListeners;
 
     void construct(bool clearTempEffect);
+    void DispatchBeatIfNeeded();
 
     // Implementation is in effects.cpp
     void LoadJSONEffects(const JsonArrayConst& effectsArray);

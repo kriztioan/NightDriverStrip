@@ -15,7 +15,7 @@ LEDBuffer::LEDBuffer(std::shared_ptr<GFXBase> pStrand) :
              _timeStampMicroseconds(0),
              _timeStampSeconds(0)
 {
-    _leds.reset(psram_allocator<CRGB>().allocate(NUM_LEDS));
+    _leds.reset(psram_allocator<CRGB>().allocate(_pStrand->GetLEDCount()));
 }
 
 uint64_t LEDBuffer::Seconds()      const  { return _timeStampSeconds;      }
@@ -69,7 +69,7 @@ bool LEDBuffer::UpdateFromWire(std::unique_ptr<uint8_t []> & payloadData, size_t
         debugW("Data size mismatch");
         return false;
     }
-    if (length32 > NUM_LEDS)
+    if (length32 > _pStrand->GetLEDCount())
     {
         debugW("More data than we have LEDs\n");
         return false;
@@ -89,6 +89,15 @@ void LEDBuffer::DrawBuffer()
     _timeStampMicroseconds = 0;
     _timeStampSeconds      = 0;
     _pStrand->fillLeds(_leds);
+}
+
+void LEDBuffer::Reconfigure(std::shared_ptr<GFXBase> pStrand)
+{
+    _pStrand = std::move(pStrand);
+    _leds.reset(psram_allocator<CRGB>().allocate(_pStrand->GetLEDCount()));
+    _pixelCount = 0;
+    _timeStampMicroseconds = 0;
+    _timeStampSeconds = 0;
 }
 
 // LEDBufferManager
@@ -218,6 +227,18 @@ std::shared_ptr<LEDBuffer> LEDBufferManager::PeekOldestBuffer() const
         return nullptr;
 
     return (*_ppBuffers)[_iLastBuffer];
+}
+
+void LEDBufferManager::Reconfigure(const std::shared_ptr<GFXBase>& pGFX)
+{
+    // Runtime topology changes should not leave stale-sized WiFi buffers behind. Resetting the circular
+    // queue here makes the active transport size match the active graphics context immediately.
+    for (auto& buffer : *_ppBuffers)
+        buffer->Reconfigure(pGFX);
+
+    _iNextBuffer = 0;
+    _iLastBuffer = 0;
+    _pLastBufferAdded.reset();
 }
 
 // operator[]

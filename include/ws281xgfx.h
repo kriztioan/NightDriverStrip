@@ -35,6 +35,8 @@
 
 #include "gfxbase.h"
 
+class DeviceConfig;
+
 // WS281xGfx
 //
 // A derivation of GFXBase that adds LED-strip-specific functionality
@@ -42,8 +44,6 @@
 class WS281xGFX : public GFXBase
 {
 protected:
-    static void AddLEDs(std::vector<std::shared_ptr<GFXBase>>& devices);
-
 public:
 
     WS281xGFX(size_t w, size_t h);
@@ -51,6 +51,8 @@ public:
     ~WS281xGFX() override;
 
     static void InitializeHardware(std::vector<std::shared_ptr<GFXBase>>& devices);
+    static void ApplyCompiledTransportConfiguration(const DeviceConfig& deviceConfig, const std::vector<std::shared_ptr<GFXBase>>& devices, const char* reason);
+    void ConfigureTopology(size_t width, size_t height, bool serpentine) override;
 
     // PostProcessFrame
     //

@@ -102,6 +102,8 @@ public:
     void release();
     bool begin();
     void ResetReadBuffer();
+    void SetLEDCount(size_t numLeds) { _numLeds = numLeds; }
+    size_t GetLEDCount() const { return _numLeds; }
 
     // ReadUntilNBytesReceived
     //

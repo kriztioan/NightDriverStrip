@@ -45,6 +45,7 @@
 #include "websocketserver.h"
 
 #include "effects/strip/misceffects.h"
+#include "effects/strip/musiceffect.h"
 #if USE_HUB75
 #include "hub75gfx.h"
 #endif
@@ -140,7 +141,24 @@ void EffectManager::StartEffect()
     #endif
 
     effect->Start();
+    _lastBeatSequence = g_Analyzer.LastBeat().sequence;
     _effectStartTime = millis();
+}
+
+void EffectManager::DispatchBeatIfNeeded()
+{
+#if ENABLE_AUDIO
+    const auto& beat = g_Analyzer.LastBeat();
+    if (beat.sequence == 0 || beat.sequence == _lastBeatSequence)
+        return;
+
+    // Beat callbacks are sequenced here so every active effect sees the same
+    // detector output, including BeatEffectBase-derived effects via OnBeat().
+    auto& currentEffect = GetCurrentEffect();
+    currentEffect.OnBeat(beat);
+
+    _lastBeatSequence = beat.sequence;
+#endif
 }
 
 #ifndef NO_EFFECT_PERSISTENCE
@@ -996,6 +1014,7 @@ void EffectManager::Update()
         return;
 
     CheckEffectTimerExpired();
+    DispatchBeatIfNeeded();
 
     if (_tempEffect)
         _tempEffect->Draw();
