@@ -304,8 +304,12 @@ struct SettingSpec
     // value and the displayed value (e.g. 1000 if stored in ms, displayed in s).
     int IntervalUnitDivisor = 1;
 
-    // Label for the off state of an interval toggle (raw value 0 == "pinned").
-    // If null, the off state is hidden.
+    // Verb-form label for the toggle that turns the interval on (rendered next
+    // to the switch in the form, e.g. "Rotate effects").
+    const char* IntervalOnLabel = nullptr;
+
+    // Noun-form label for the displayed value when raw is 0 (rendered in
+    // status panels and summaries, e.g. "Pinned").
     const char* IntervalOffLabel = nullptr;
 
     // Suffix shown next to the interval value when the toggle is on.

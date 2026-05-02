@@ -81,6 +81,10 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     },
     autoRefresh: true,
     statsRefreshSeconds: Number(localStorage.getItem("nd.statsRefreshSeconds") || 3),
+    // True from the moment the user types into the hero's effect-interval
+    // input until the next successful save, so the periodic effects refresh
+    // doesn't snap their unsaved edit back to the device's current value.
+    effectIntervalDirty: false,
     timers: {
       stats: null,
       effects: null,
@@ -140,6 +144,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     els.nextEffectButton.addEventListener("click", () => postForm("/nextEffect").then(loadEffectsOnly));
     els.refreshEffectsButton.addEventListener("click", () => loadEffectsOnly());
     els.saveIntervalButton.addEventListener("click", applyEffectInterval);
+    els.effectIntervalInput.addEventListener("input", () => { state.effectIntervalDirty = true; });
     els.reloadSettingsButton.addEventListener("click", () => loadSettingsOnly());
     els.applySettingsButton.addEventListener("click", () => applyDeviceSettings(false));
     els.applySettingsRebootButton.addEventListener("click", () => applyDeviceSettings(true));
@@ -411,7 +416,13 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     els.summaryHeap.textContent = formatBytes(dynamicStats.HEAP_FREE);
     els.summaryPsram.textContent = `PSRAM ${formatBytes(dynamicStats.PSRAM_FREE)}`;
 
-    els.effectIntervalInput.value = String(Math.round(intervalMs / intervalScale.divisor));
+    // Don't clobber the user's in-progress edit. The dirty flag is set on
+    // every keystroke and cleared only by a successful save, so a refresh
+    // tick that fires while the user is typing — or after they've blurred
+    // but before they hit Save — leaves their value alone.
+    if (!state.effectIntervalDirty && document.activeElement !== els.effectIntervalInput) {
+      els.effectIntervalInput.value = String(Math.round(intervalMs / intervalScale.divisor));
+    }
     els.effectsMeta.textContent = `${effectList.length} effects / active ${currentIndex}`;
   }
 
@@ -770,15 +781,17 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     return wrapper;
   }
 
-  // Composite "rotate-on-toggle + numeric value" widget. The unitDivisor and
-  // labels come from spec.widget.interval; raw value 0 means "off" (the
-  // displayed input is disabled and the stored value stays at 0).
+  // Composite "verb-toggle + numeric value" widget. The unitDivisor and labels
+  // come from spec.widget.interval. Raw value 0 means "off" (the numeric input
+  // is disabled and the stored value stays at 0); when off, the on-label
+  // describes the action the toggle would perform if enabled, and the off-label
+  // is the noun used elsewhere to display the off state ("Pinned").
   function renderIntervalToggleWidget(ctx) {
     const { spec, widget, valueWrap, currentDraft, currentValue, readOnly, setDraftValue, setFieldError } = ctx;
     const interval = widget.interval || {};
     const divisor = Number(interval.unitDivisor) || 1;
     const unitLabel = interval.unitLabel || "";
-    const offLabel = interval.offLabel || "Off";
+    const onLabel = interval.onLabel || "Enable";
 
     const rawDraft = Number(currentDraft || 0);
     const rawCurrent = Number(currentValue || 0);
@@ -800,9 +813,9 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     switchLabel.appendChild(toggle);
     switchLabel.appendChild(track);
 
-    const rotateLabel = document.createElement("span");
-    rotateLabel.className = "interval-switch-label";
-    rotateLabel.textContent = offLabel ? `Enable (${offLabel} when off)` : "Enable";
+    const verbLabel = document.createElement("span");
+    verbLabel.className = "interval-switch-label";
+    verbLabel.textContent = onLabel;
 
     const valueField = document.createElement("label");
     valueField.className = "inline-field";
@@ -832,7 +845,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     valueInput.addEventListener("change", sync);
 
     row.appendChild(switchLabel);
-    row.appendChild(rotateLabel);
+    row.appendChild(verbLabel);
     row.appendChild(valueField);
     valueWrap.appendChild(row);
   }
@@ -1172,6 +1185,8 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
       } else {
         await postForm("/settings", { [spec.name]: rawValue });
       }
+      // Edit successfully landed; release the input back to auto-refresh.
+      state.effectIntervalDirty = false;
       const unit = interval.unitLabel || "";
       toast(`Effect interval set to ${displayedValue} ${unit}.`.trim(), "success");
       await Promise.all([loadEffectsOnly(), loadSettingsOnly()]);

@@ -772,6 +772,8 @@ void CWebServer::SendSettingSpecsResponse(AsyncWebServerRequest * pRequest, cons
                 interval["unitDivisor"] = spec.IntervalUnitDivisor;
                 if (spec.IntervalUnitLabel)
                     interval["unitLabel"] = spec.IntervalUnitLabel;
+                if (spec.IntervalOnLabel)
+                    interval["onLabel"] = spec.IntervalOnLabel;
                 if (spec.IntervalOffLabel)
                     interval["offLabel"] = spec.IntervalOffLabel;
             }
@@ -845,7 +847,8 @@ const std::vector<std::reference_wrapper<SettingSpec>> & CWebServer::LoadDeviceS
             spec.Widget = SettingSpec::WidgetKind::IntervalToggle;
             spec.IntervalUnitDivisor = 1000;
             spec.IntervalUnitLabel = "seconds";
-            spec.IntervalOffLabel = "Pin current effect";
+            spec.IntervalOnLabel  = "Rotate effects";
+            spec.IntervalOffLabel = "Off";
         }
 
         deviceSettingSpecs.insert(deviceSettingSpecs.end(), mySettingSpecs.begin(), mySettingSpecs.end());
