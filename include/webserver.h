@@ -110,6 +110,11 @@ class CWebServer
 
     static std::vector<SettingSpec, psram_allocator<SettingSpec>> mySettingSpecs;
     static std::vector<std::reference_wrapper<SettingSpec>> deviceSettingSpecs;
+    // Per-channel pin specs synthesized at first /settings/specs request from
+    // the compiled channel maximum, with stable backing storage for the
+    // const char* fields they hold.
+    static std::vector<SettingSpec, psram_allocator<SettingSpec>> synthesizedPinSpecs;
+    static std::vector<String> synthesizedPinSpecStrings;
     static const std::map<String, ValueValidator> settingValidators;
 
     AsyncWebServer _server;

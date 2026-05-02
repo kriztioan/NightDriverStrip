@@ -150,9 +150,16 @@ namespace
         drivers.add(deviceConfig.GetCompiledDriverName());
 
         auto ws281x = outputs["ws281x"].to<JsonObject>();
-        ws281x["compiledMaxChannels"] = DeviceConfig::GetCompiledChannelCount();
+        const auto compiledChannels = DeviceConfig::GetCompiledChannelCount();
+        ws281x["compiledMaxChannels"] = compiledChannels;
         ws281x["compiledMaxLEDs"] = DeviceConfig::GetCompiledLEDCount();
         ws281x["compiledColorOrder"] = DeviceConfig::GetColorOrderName(DeviceConfig::GetCompiledWS281xColorOrder());
+        // Concrete list of valid channel counts. Specs that drive a select for
+        // channel count point here so the UI doesn't have to derive a range
+        // from a bare integer.
+        auto allowedChannelCounts = ws281x["allowedChannelCounts"].to<JsonArray>();
+        for (size_t channel = 1; channel <= compiledChannels; ++channel)
+            allowedChannelCounts.add(channel);
         auto allowedColorOrders = ws281x["allowedColorOrders"].to<JsonArray>();
         allowedColorOrders.add("RGB");
         allowedColorOrders.add("RBG");
@@ -185,6 +192,35 @@ namespace
         audio["requiresReboot"] = !deviceConfig.SupportsLiveAudioInputReconfigure();
         audio["supportsPinOverride"] = deviceConfig.SupportsConfigurableAudioInputPin();
         audio["rejectMessage"] = "recompile needed";
+
+        // Section catalog. The UI groups settings by spec.section and uses
+        // these entries (matched on id) for the section heading and subtitle.
+        // Sections without any settings are still listed so the UI can decide
+        // whether to render an empty placeholder or skip them.
+        struct SectionInfo
+        {
+            const char* id;
+            const char* title;
+            const char* description;
+        };
+        static constexpr SectionInfo kSections[] =
+        {
+            { "topology",   "Topology",          "Active matrix dimensions and layout." },
+            { "output",     "Output",            "LED driver, channel count, color order, and per-channel pin assignments." },
+            { "appearance", "Appearance",        "Brightness, colors, effect rotation, and visual preferences." },
+            { "audio",      "Audio",             "Microphone input pin and audio capture configuration." },
+            { "location",   "Location",          "Where the device is for weather and timezone defaults." },
+            { "clock",      "Clock & Weather",   "Time display, NTP, and weather API options." },
+            { "system",     "System",            "Identification, power limits, and other system-wide options." },
+        };
+        auto sections = root["sections"].to<JsonArray>();
+        for (const auto& info : kSections)
+        {
+            auto entry = sections.add<JsonObject>();
+            entry["id"] = info.id;
+            entry["title"] = info.title;
+            entry["description"] = info.description;
+        }
     }
 
     // Normalizes the unified settings audio pin request into one optional value.
@@ -261,6 +297,8 @@ const std::map<String, CWebServer::ValueValidator> CWebServer::settingValidators
 
 std::vector<SettingSpec, psram_allocator<SettingSpec>> CWebServer::mySettingSpecs = {};
 std::vector<std::reference_wrapper<SettingSpec>> CWebServer::deviceSettingSpecs{};
+std::vector<SettingSpec, psram_allocator<SettingSpec>> CWebServer::synthesizedPinSpecs{};
+std::vector<String> CWebServer::synthesizedPinSpecStrings{};
 
 // Member function template specializations
 
@@ -700,6 +738,81 @@ void CWebServer::SendSettingSpecsResponse(AsyncWebServerRequest * pRequest, cons
                 break;
         }
 
+        // ---- UI metadata: section, priority, requiresReboot, apiPath, widget ----
+
+        if (spec.Section)
+            jsonDoc["section"] = spec.Section;
+        if (spec.Priority.has_value())
+            jsonDoc["priority"] = spec.Priority.value();
+        if (spec.RequiresReboot)
+            jsonDoc["requiresReboot"] = true;
+        if (spec.ApiPath)
+            jsonDoc["apiPath"] = spec.ApiPath;
+
+        if (spec.Widget != SettingSpec::WidgetKind::Default)
+        {
+            auto widget = jsonDoc["widget"].to<JsonObject>();
+            widget["kind"] = spec.WidgetName();
+
+            if (spec.Widget == SettingSpec::WidgetKind::Slider
+                && spec.DisplayRawMin.has_value() && spec.DisplayRawMax.has_value()
+                && spec.DisplayMin.has_value()    && spec.DisplayMax.has_value())
+            {
+                auto scale = widget["displayScale"].to<JsonObject>();
+                scale["rawMin"]     = spec.DisplayRawMin.value();
+                scale["rawMax"]     = spec.DisplayRawMax.value();
+                scale["displayMin"] = spec.DisplayMin.value();
+                scale["displayMax"] = spec.DisplayMax.value();
+                if (spec.DisplaySuffix)
+                    scale["suffix"] = spec.DisplaySuffix;
+            }
+            else if (spec.Widget == SettingSpec::WidgetKind::IntervalToggle)
+            {
+                auto interval = widget["interval"].to<JsonObject>();
+                interval["unitDivisor"] = spec.IntervalUnitDivisor;
+                if (spec.IntervalUnitLabel)
+                    interval["unitLabel"] = spec.IntervalUnitLabel;
+                if (spec.IntervalOffLabel)
+                    interval["offLabel"] = spec.IntervalOffLabel;
+            }
+            else if (spec.Widget == SettingSpec::WidgetKind::Select)
+            {
+                auto options = widget["options"].to<JsonObject>();
+                options["source"] = spec.OptionsSourceName();
+
+                if (spec.Options == SettingSpec::OptionsSource::Inline)
+                {
+                    auto values = options["values"].to<JsonArray>();
+                    auto labels = options["labels"].to<JsonArray>();
+                    for (size_t i = 0; i < spec.InlineOptionValues.size(); ++i)
+                    {
+                        if (spec.InlineOptionValues[i])
+                            values.add(spec.InlineOptionValues[i]);
+                    }
+                    for (size_t i = 0; i < spec.InlineOptionLabels.size(); ++i)
+                    {
+                        if (spec.InlineOptionLabels[i])
+                            labels.add(spec.InlineOptionLabels[i]);
+                    }
+                }
+                else if (spec.OptionsSchemaPath)
+                {
+                    options["schemaPath"] = spec.OptionsSchemaPath;
+                }
+
+                if (spec.OptionsExternalUrl)
+                    options["url"] = spec.OptionsExternalUrl;
+
+                if (spec.OptionLabelMapJson)
+                {
+                    JsonDocument labelMap;
+                    auto err = deserializeJson(labelMap, spec.OptionLabelMapJson);
+                    if (!err)
+                        options["labelOverrides"] = labelMap.as<JsonObjectConst>();
+                }
+            }
+        }
+
         if (jsonDoc.overflowed() || !specObject.set(jsonDoc.as<JsonObjectConst>()))
         {
             debugV("JSON response buffer overflow!");
@@ -715,16 +828,62 @@ const std::vector<std::reference_wrapper<SettingSpec>> & CWebServer::LoadDeviceS
 {
     if (deviceSettingSpecs.empty())
     {
-        mySettingSpecs.emplace_back(
-            "effectInterval",
-            "Effect interval",
-            "The duration in milliseconds that an individual effect runs, before the next effect is activated.",
-            SettingSpec::SettingType::PositiveBigInteger
-        );
+        // effectInterval lives on the EffectManager rather than DeviceConfig,
+        // so its spec is owned here. The Widget metadata mirrors the legacy
+        // composite "Rotate effects toggle + seconds input" UX in a way the
+        // front-end can render generically.
+        {
+            auto& spec = mySettingSpecs.emplace_back(
+                "effectInterval",
+                "Effect interval",
+                "The duration in milliseconds that an individual effect runs, before the next effect is activated. "
+                "Disable rotation to keep the current effect active indefinitely.",
+                SettingSpec::SettingType::PositiveBigInteger
+            );
+            spec.Section = "appearance";
+            spec.ApiPath = "effects.effectInterval";
+            spec.Widget = SettingSpec::WidgetKind::IntervalToggle;
+            spec.IntervalUnitDivisor = 1000;
+            spec.IntervalUnitLabel = "seconds";
+            spec.IntervalOffLabel = "Pin current effect";
+        }
+
         deviceSettingSpecs.insert(deviceSettingSpecs.end(), mySettingSpecs.begin(), mySettingSpecs.end());
 
         auto deviceConfigSpecs = g_ptrSystem->GetDeviceConfig().GetSettingSpecs();
         deviceSettingSpecs.insert(deviceSettingSpecs.end(), deviceConfigSpecs.begin(), deviceConfigSpecs.end());
+
+        // Synthesize one ws281xPin{N} spec per compiled channel. These are not
+        // individually persisted in DeviceConfig (they are stored as an array
+        // inside RuntimeConfig.outputs.outputPins), but the UI needs per-channel
+        // editable entries with stable names and apiPaths. We reserve up front
+        // so vector growth never reallocates and invalidates the references
+        // that deviceSettingSpecs holds and the c_str() pointers the spec uses.
+        const auto compiledChannelCount = DeviceConfig::GetCompiledChannelCount();
+        constexpr size_t kStringsPerPin = 4;        // name, friendly, description, apiPath
+        synthesizedPinSpecs.reserve(compiledChannelCount);
+        synthesizedPinSpecStrings.reserve(compiledChannelCount * kStringsPerPin);
+        const auto stableCStr = [](const String& s) { return s.c_str(); };
+
+        for (size_t pinIndex = 0; pinIndex < compiledChannelCount; ++pinIndex)
+        {
+            const auto& nameStr        = synthesizedPinSpecStrings.emplace_back(str_sprintf("ws281xPin%zu", pinIndex));
+            const auto& friendlyStr    = synthesizedPinSpecStrings.emplace_back(str_sprintf("WS281x pin %zu", pinIndex + 1));
+            const auto& descriptionStr = synthesizedPinSpecStrings.emplace_back(str_sprintf("GPIO assigned to WS281x channel %zu.", pinIndex + 1));
+            const auto& apiPathStr     = synthesizedPinSpecStrings.emplace_back(str_sprintf("outputs.ws281x.pins[%zu]", pinIndex));
+
+            auto& spec = synthesizedPinSpecs.emplace_back();
+            spec.Name         = stableCStr(nameStr);
+            spec.FriendlyName = stableCStr(friendlyStr);
+            spec.Description  = stableCStr(descriptionStr);
+            spec.Type         = SettingSpec::SettingType::Integer;
+            spec.MinimumValue = -1;
+            spec.MaximumValue = 48;
+            spec.Section      = "output";
+            spec.Priority     = 3 + static_cast<int>(pinIndex);
+            spec.ApiPath      = stableCStr(apiPathStr);
+            deviceSettingSpecs.emplace_back(spec);
+        }
     }
 
     return deviceSettingSpecs;

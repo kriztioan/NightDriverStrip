@@ -158,6 +158,31 @@ String SettingSpec::TypeName() const
     }
 }
 
+const char* SettingSpec::WidgetName() const
+{
+    switch (Widget)
+    {
+        case WidgetKind::Slider:           return "slider";
+        case WidgetKind::Select:           return "select";
+        case WidgetKind::IntervalToggle:   return "intervalToggle";
+        case WidgetKind::Color:            return "color";
+        case WidgetKind::Default:          return "default";
+        default:                           return "default";
+    }
+}
+
+const char* SettingSpec::OptionsSourceName() const
+{
+    switch (Options)
+    {
+        case OptionsSource::Inline:             return "inline";
+        case OptionsSource::SchemaPath:         return "schemaPath";
+        case OptionsSource::IntlCountryCodes:   return "intlCountryCodes";
+        case OptionsSource::ExternalTimeZones:  return "externalTimeZones";
+        default:                                return "inline";
+    }
+}
+
 // PreferPSRAMAlloc
 //
 // Will return PSRAM if it's available, regular ram otherwise
