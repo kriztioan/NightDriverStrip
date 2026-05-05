@@ -67,6 +67,8 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     unifiedSettings: null,
     unifiedSchema: null,
     effects: null,
+    effectIntervalInputDirty: false,
+    effectIntervalPendingMs: null,
     effectDraft: {},
     deviceDraft: {},
     deviceErrors: new Set(),
@@ -150,7 +152,14 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     els.nextEffectButton.addEventListener("click", () => postForm("/nextEffect").then(loadEffectsOnly));
     els.refreshEffectsButton.addEventListener("click", () => loadEffectsOnly());
     els.saveIntervalButton.addEventListener("click", applyEffectInterval);
-    els.effectIntervalInput.addEventListener("input", () => { state.effectIntervalDirty = true; });
+    els.effectIntervalInput.addEventListener("input", () => {
+      state.effectIntervalInputDirty = true;
+      state.effectIntervalPendingMs = null;
+    });
+    els.effectIntervalInput.addEventListener("change", () => {
+      state.effectIntervalInputDirty = true;
+      state.effectIntervalPendingMs = null;
+    });
     els.reloadSettingsButton.addEventListener("click", () => loadSettingsOnly());
     els.applySettingsButton.addEventListener("click", () => applyDeviceSettings(false));
     els.applySettingsRebootButton.addEventListener("click", () => applyDeviceSettings(true));
@@ -422,14 +431,27 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     els.summaryHeap.textContent = formatBytes(dynamicStats.HEAP_FREE);
     els.summaryPsram.textContent = `PSRAM ${formatBytes(dynamicStats.PSRAM_FREE)}`;
 
-    // Don't clobber the user's in-progress edit. The dirty flag is set on
-    // every keystroke and cleared only by a successful save, so a refresh
-    // tick that fires while the user is typing — or after they've blurred
-    // but before they hit Save — leaves their value alone.
-    if (!state.effectIntervalDirty && document.activeElement !== els.effectIntervalInput) {
-      els.effectIntervalInput.value = String(Math.round(intervalMs / intervalScale.divisor));
-    }
+    syncEffectIntervalInput(intervalMs);
     els.effectsMeta.textContent = `${effectList.length} effects / active ${currentIndex}`;
+  }
+
+  function syncEffectIntervalInput(serverIntervalMs) {
+    const serverSeconds = Math.round(serverIntervalMs / 1000);
+
+    if (state.effectIntervalPendingMs !== null) {
+      const pendingSeconds = Math.round(state.effectIntervalPendingMs / 1000);
+      if (pendingSeconds === serverSeconds) {
+        state.effectIntervalPendingMs = null;
+        state.effectIntervalInputDirty = false;
+      } else if (!state.effectIntervalInputDirty && document.activeElement !== els.effectIntervalInput) {
+        els.effectIntervalInput.value = String(pendingSeconds);
+      }
+      return;
+    }
+
+    if (!state.effectIntervalInputDirty && document.activeElement !== els.effectIntervalInput) {
+      els.effectIntervalInput.value = String(serverSeconds);
+    }
   }
 
   function renderEffects() {
@@ -1174,34 +1196,18 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
   }
 
   async function applyEffectInterval() {
-    // The standalone "rotate every N seconds" control on the effects tab posts
-    // through the same path the full settings form does: it looks up the
-    // effectInterval spec, uses its widget metadata to convert displayed
-    // units to the raw stored value, and writes via the spec's apiPath.
-    const spec = (state.settingsSpecs || []).find((entry) => entry && entry.name === "effectInterval");
-    if (!spec) {
-      toast("Effect interval spec is not available yet.", "error");
-      return;
-    }
-    const interval = (spec.widget && spec.widget.interval) || {};
-    const divisor = Number(interval.unitDivisor) || 1;
-    const displayedValue = clampInt(els.effectIntervalInput.value, 0, 2147483, 0);
-    const rawValue = displayedValue * divisor;
-
+    const seconds = clampInt(els.effectIntervalInput.value, 0, 2147483, 0);
+    const intervalMs = seconds * 1000;
+    els.effectIntervalInput.value = String(seconds);
+    state.effectIntervalPendingMs = intervalMs;
+    state.effectIntervalInputDirty = false;
     try {
-      if (spec.apiPath) {
-        const body = {};
-        writeJsonPath(body, spec.apiPath, rawValue);
-        await postJson("/api/v1/settings", body);
-      } else {
-        await postForm("/settings", { [spec.name]: rawValue });
-      }
-      // Edit successfully landed; release the input back to auto-refresh.
-      state.effectIntervalDirty = false;
-      const unit = interval.unitLabel || "";
-      toast(`Effect interval set to ${displayedValue} ${unit}.`.trim(), "success");
+      await postForm("/settings", { effectInterval: intervalMs });
+      toast(`Effect interval set to ${seconds} sec.`, "success");
       await Promise.all([loadEffectsOnly(), loadSettingsOnly()]);
     } catch (error) {
+      state.effectIntervalPendingMs = null;
+      state.effectIntervalInputDirty = true;
       handleError("Failed to set effect interval", error);
     }
   }

@@ -47,13 +47,8 @@
 
 static DRAM_ATTR CRGB l_SinglePixel = CRGB::Blue;
 static DRAM_ATTR uint64_t l_usLastWifiDraw = 0;
-
-// Counters backing g_Values.FPS. They live in the draw thread and are read
-// from the stats endpoint without locking — both are uint32_t writes/reads
-// which are atomic on ESP32, and a single torn read worst-case shows the
-// previous second's tally.
-static uint32_t g_FrameCountThisSecond = 0;
-static uint32_t g_LastSecondBoundaryMs = 0;
+static uint32_t l_FrameCountThisSecond = 0;
+static uint32_t l_LastSecondBoundaryMs = 0;
 
 // The g_buffer_mutex is a global mutex used to protect access while adding or removing frames
 // from the led buffer.
@@ -321,22 +316,21 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
                 ShowOnboardPixel();
                 ShowOnboardRGBLED();
 
-                ++g_FrameCountThisSecond;
+                ++l_FrameCountThisSecond;
                 g_ptrSystem->GetEffectManager().ReportNewFrameAvailable();
             }
 
-            // Frames-per-clock-second tally, independent of whether we drew a
-            // frame in this iteration so an idle chip reports 0 once a full
-            // second of inactivity has rolled past. g_Values.FPS holds the
-            // count from the most-recently-completed clock-second window.
+            // Count actual frames emitted by the draw loop over completed
+            // clock-second windows. This avoids FastLED's internal estimate
+            // and lets an idle device report 0 after a full second passes.
             const uint32_t nowMs = millis();
-            if (g_LastSecondBoundaryMs == 0)
-                g_LastSecondBoundaryMs = nowMs;
-            while (nowMs - g_LastSecondBoundaryMs >= 1000)
+            if (l_LastSecondBoundaryMs == 0)
+                l_LastSecondBoundaryMs = nowMs;
+            while (nowMs - l_LastSecondBoundaryMs >= MILLIS_PER_SECOND)
             {
-                g_Values.FPS = g_FrameCountThisSecond;
-                g_FrameCountThisSecond = 0;
-                g_LastSecondBoundaryMs += 1000;
+                g_Values.FPS = l_FrameCountThisSecond;
+                l_FrameCountThisSecond = 0;
+                l_LastSecondBoundaryMs += MILLIS_PER_SECOND;
             }
 
             graphics.PostProcessFrame(localPixelsDrawn, wifiPixelsDrawn);
