@@ -373,8 +373,12 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
     bool                         _useBeatColorCoding = false;
     std::deque<int16_t>          _pendingMusicStarColors;
 
-    #if ENABLE_AUDIO
+    // Effect name is referenced by the constructors regardless of ENABLE_AUDIO so it must
+    // remain visible on audio-less builds (demo). The indices below are only used by the
+    // audio-driven beat path and stay behind the guard.
     static constexpr const char* kRgbMusicBlendStarsName = "RGB Music Blend Stars";
+
+    #if ENABLE_AUDIO
     static constexpr int16_t kMusicStarRandomIndex = -1;
     static constexpr uint8_t kMusicStarRedIndex = 0;
     static constexpr uint8_t kMusicStarGreenIndex = 16;
