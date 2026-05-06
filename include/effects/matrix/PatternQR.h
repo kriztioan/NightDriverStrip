@@ -36,11 +36,13 @@
 
 #include "qrcode.h"
 
+#include <memory>
+
 class PatternQR : public EffectWithId<PatternQR>
 {
     void construct()
     {
-        qrcodeData = (uint8_t *) PreferPSRAMAlloc(qrcode_getBufferSize(qrVersion));
+        qrcodeData = std::make_unique<uint8_t[]>(qrcode_getBufferSize(qrVersion));
         lastData = "";
     }
 
@@ -48,7 +50,7 @@ protected:
 
     String lastData;
     QRCode qrcode;
-    uint8_t * qrcodeData = nullptr;
+    std::unique_ptr<uint8_t[]> qrcodeData;
     const int qrVersion = 2;
 
 public:
@@ -63,10 +65,7 @@ public:
         construct();
     }
 
-    virtual ~PatternQR()
-    {
-        free(qrcodeData);
-    }
+    virtual ~PatternQR() = default;
 
     void Start() override
     {
@@ -83,7 +82,7 @@ public:
         if (sIP != lastData)
         {
             lastData = sIP;
-            qrcode_initText(&qrcode, qrcodeData, qrVersion, ECC_LOW, sIP.c_str());
+            qrcode_initText(&qrcode, qrcodeData.get(), qrVersion, ECC_LOW, sIP.c_str());
         }
         g().fillScreen(g().to16bit(CRGB::DarkBlue));
         const int leftMargin = MATRIX_CENTER_X - qrcode.size / 2;

@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <esp_heap_caps.h>
 #include <esp_idf_version.h>
 #include <driver/rmt.h>
 #include <esp_err.h>
@@ -234,16 +235,25 @@ bool WS281xOutputManager::RecreateChannel(size_t channelIndex, int8_t pin, size_
 
     if (!state.outputBytes || state.byteCount != byteCount)
     {
-        auto nextOutputBytes = std::make_unique<uint8_t[]>(byteCount);
-        if (!nextOutputBytes)
+        // The RMT driver DMAs from this buffer, so it MUST live in DMA-capable
+        // internal RAM. With the PSRAM-by-default policy in main.cpp, plain
+        // std::make_unique<uint8_t[]>(byteCount) lands buffers above the
+        // threshold in PSRAM, which fails as
+        //   "rmt: Using buffer allocated from psram"  -> ESP_ERR_INVALID_ARG
+        // every frame. heap_caps_malloc with DMA+INTERNAL pins it correctly.
+        auto* mem = static_cast<uint8_t*>(heap_caps_malloc(byteCount,
+                            MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (!mem)
         {
             if (errorMessage)
-                *errorMessage = "failed to allocate WS281x byte buffer";
+                *errorMessage = "failed to allocate DMA-capable WS281x byte buffer";
             return false;
         }
 
-        std::fill_n(nextOutputBytes.get(), byteCount, 0);
-        state.outputBytes = std::move(nextOutputBytes);
+        std::fill_n(mem, byteCount, 0);
+        // unique_ptr<uint8_t[]> default deleter calls free(), which is the
+        // correct deallocator for heap_caps_malloc'd memory on ESP-IDF.
+        state.outputBytes.reset(mem);
         state.byteCount = byteCount;
     }
 

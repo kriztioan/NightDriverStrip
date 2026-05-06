@@ -1076,6 +1076,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
 
     void GFXBase::NoiseVariablesSetup() const
     {
+        EnsureNoise();
         _ptrNoise->noisesmoothing = 200;
 
         _ptrNoise->noise_x = random16();
@@ -1087,6 +1088,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
 
     void GFXBase::SetNoise(uint32_t nx, uint32_t ny, uint32_t nz, uint32_t sx, uint32_t sy)
     {
+        EnsureNoise();
         _ptrNoise->noise_x += nx;
         _ptrNoise->noise_y += ny;
         _ptrNoise->noise_z += nx;
@@ -1096,6 +1098,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
 
     void GFXBase::FillGetNoise() const
     {
+        EnsureNoise();
         // Subtracting the center offset before scaling ensures the noise pattern radiates
         // outwards from the center of the display (exactly as #803 intended).
         //
@@ -1120,7 +1123,8 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
     template<>
     void GFXBase::MoveFractionalNoiseX<NoiseApproach::MRI>(uint8_t amt, uint8_t shift)
     {
-        std::unique_ptr<CRGB[]> ledsTemp = make_unique_psram<CRGB[]>(_ledcount);
+        EnsureNoise();
+        std::unique_ptr<CRGB[]> ledsTemp = std::make_unique<CRGB[]>(_ledcount);
 
         // move delta pixelwise
         for (uint32_t y = 0; y < _height; y++)
@@ -1171,6 +1175,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
     template<>
     void GFXBase::MoveFractionalNoiseX<NoiseApproach::General>(uint8_t amt, uint8_t shift)
     {
+        EnsureNoise();
         // Aligning with Approach::One while keeping the "Approach::Two" optimized behavior.
         // We use int32_t for the 'amount' and 'delta' as they can be large or negative.
         for (uint32_t y = 0; y < _height; y++)
@@ -1211,7 +1216,8 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
     template<>
     void GFXBase::MoveFractionalNoiseY<NoiseApproach::MRI>(uint8_t amt, uint8_t shift)
     {
-        std::unique_ptr<CRGB[]> ledsTemp = make_unique_psram<CRGB[]>(_ledcount);
+        EnsureNoise();
+        std::unique_ptr<CRGB[]> ledsTemp = std::make_unique<CRGB[]>(_ledcount);
 
         // move delta pixelwise
         for (uint32_t x = 0; x < _width; x++)
@@ -1263,6 +1269,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
     template<>
     void GFXBase::MoveFractionalNoiseY<NoiseApproach::General>(uint8_t amt, uint8_t shift)
     {
+        EnsureNoise();
         for (uint32_t x = 0; x < _width; x++)
         {
             int32_t amount = ((int32_t)_ptrNoise->noise[x][0] - 128) * 2 * amt + shift * 256;
@@ -1368,7 +1375,7 @@ GFXBase::GFXBase(int w, int h) : Adafruit_GFX(w, h),
     #if MATRIX_HEIGHT > 1
         debugV("Allocating boids for matrix effects");
         // Boid state scales with width and can become large on matrix targets, so keep it in PSRAM.
-        _boids = make_unique_psram_constructed<Boid>(_width);
+        _boids = std::make_unique<Boid[]>(_width);
         assert(_boids);
     #endif
 
@@ -1386,7 +1393,7 @@ void GFXBase::ConfigureTopology(size_t width, size_t height, bool serpentine)
     {
         debugV("Resizing boid state to match runtime topology width");
         // Topology changes invalidate width-sized boid caches. Rebuild them in PSRAM before effects restart.
-        _boids = make_unique_psram_constructed<Boid>(width);
+        _boids = std::make_unique<Boid[]>(width);
         assert(_boids);
     }
     #endif
@@ -1439,7 +1446,7 @@ const GFXBase::PolarMapArray& GFXBase::getPolarMap()
         if (!rMap_ptr)
         {
             // Allocate from PSRAM using the project's helper
-            rMap_ptr = make_unique_psram<PolarMapArray>();
+            rMap_ptr = std::make_unique<PolarMapArray>();
 
             auto& rMap = *rMap_ptr;
             const uint16_t C_X = kMatrixWidth / 2;

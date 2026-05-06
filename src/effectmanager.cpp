@@ -68,7 +68,7 @@ static DRAM_ATTR size_t l_CurrentEffectWriterIndex = SIZE_MAX;
     {
         debugW("InitSplashEffectManager");
 
-        g_ptrSystem->SetupEffectManager(make_shared_psram<SplashLogoEffect>(), g_ptrSystem->GetDevices());
+        g_ptrSystem->SetupEffectManager(std::make_shared<SplashLogoEffect>(), g_ptrSystem->GetDevices());
     }
 
 #endif
@@ -601,7 +601,7 @@ std::shared_ptr<LEDStripEffect> GetSpectrumAnalyzer(CRGB color)
 {
     CHSV hueColor = rgb2hsv_approximate(color);
     CRGB color2 = CRGB(CHSV(hueColor.hue + 64, 255, 255));
-    auto object = make_shared_psram<SpectrumAnalyzerEffect>("Spectrum Clr", 24, CRGBPalette16(color, color2), true);
+    auto object = std::make_shared<SpectrumAnalyzerEffect>("Spectrum Clr", 24, CRGBPalette16(color, color2), true);
     if (object->Init(g_ptrSystem->GetDevices()))
         return object;
     throw std::runtime_error("Could not initialize new spectrum analyzer, one color version!");

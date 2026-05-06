@@ -37,9 +37,6 @@
 #include <memory>
 #include <vector>
 
-template<typename T>
-class psram_allocator;
-
 class GFXBase;
 class EffectManager;
 class LEDStripEffect;
@@ -71,7 +68,7 @@ class SystemContainer
 {
   public:
     using DeviceContainer = std::vector<std::shared_ptr<GFXBase>>;
-    using BufferManagerContainer = std::vector<LEDBufferManager, psram_allocator<LEDBufferManager>>;
+    using BufferManagerContainer = std::vector<LEDBufferManager>;
 
   private:
     std::unique_ptr<DeviceContainer> _ptrDevices;

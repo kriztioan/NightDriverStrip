@@ -64,7 +64,7 @@ SocketServer::SocketServer(int port, int numLeds) :
     _numLeds(numLeds),
     _cbReceived(0)
 {
-    _abOutputBuffer.reset( psram_allocator<uint8_t>().allocate(MAXIMUM_PACKET_SIZE+1) );        // +1 for uzlib one byte overreach bug
+    _abOutputBuffer = std::make_unique<uint8_t[]>(MAXIMUM_PACKET_SIZE + 1);                    // +1 for uzlib one byte overreach bug
     memset(&_address, 0, sizeof(_address));
 }
 
@@ -139,7 +139,7 @@ void SocketServer::release()
 
 bool SocketServer::begin()
 {
-    _pBuffer.reset( psram_allocator<uint8_t>().allocate(MAXIMUM_PACKET_SIZE) );
+    _pBuffer = std::make_unique<uint8_t[]>(MAXIMUM_PACKET_SIZE);
     _cbReceived = 0;
 
     // Build the socket on a local fd and only publish it into the atomic

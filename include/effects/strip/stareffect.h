@@ -370,9 +370,12 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
     CRGB                         _skyColor;
     uint32_t                    _lastMusicBeatSequence = 0;
     uint32_t                    _lastMusicNearBeatSequence = 0;
-    std::deque<uint8_t>          _pendingMusicStarColors;
+    bool                         _useBeatColorCoding = false;
+    std::deque<int16_t>          _pendingMusicStarColors;
 
     #if ENABLE_AUDIO
+    static constexpr const char* kRgbMusicBlendStarsName = "RGB Music Blend Stars";
+    static constexpr int16_t kMusicStarRandomIndex = -1;
     static constexpr uint8_t kMusicStarRedIndex = 0;
     static constexpr uint8_t kMusicStarGreenIndex = 16;
     static constexpr uint8_t kMusicStarBlueIndex = 32;
@@ -384,12 +387,15 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
             const float confidence = std::clamp(beat.confidence, 0.0f, 1.5f);
             const float strength = std::clamp(beat.strength, 0.0f, 2.5f);
             const float scale = acceptedBeat ? 1.0f : 0.45f;
-            const float majorBonus = (acceptedBeat && beat.major) ? 8.0f : 0.0f;
+            const bool strongBeat = acceptedBeat && strength >= 2.40f && confidence >= 1.20f;
+            const float majorBonus = strongBeat ? 8.0f : 0.0f;
             const size_t minStars = acceptedBeat ? 5U : 1U;
             const size_t maxStars = acceptedBeat ? 36U : 14U;
-            const uint8_t colorIndex = acceptedBeat
-                ? ((beat.major || strength >= 1.90f) ? kMusicStarRedIndex : kMusicStarGreenIndex)
-                : kMusicStarBlueIndex;
+            const int16_t colorIndex = _useBeatColorCoding
+                ? (acceptedBeat
+                    ? (strongBeat ? kMusicStarRedIndex : kMusicStarGreenIndex)
+                    : kMusicStarBlueIndex)
+                : kMusicStarRandomIndex;
             const size_t stars = std::clamp<size_t>(
                 static_cast<size_t>((acceptedBeat ? 4.0f : 1.0f)
                     + confidence * 8.0f * scale
@@ -423,7 +429,8 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
         _maxSpeed(maxSpeed),
         _blurFactor(blurFactor),
         _musicFactor(musicFactor),
-        _skyColor(skyColor)
+        _skyColor(skyColor),
+        _useBeatColorCoding(strName == kRgbMusicBlendStarsName)
     {
     }
 
@@ -436,7 +443,8 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
         _maxSpeed(jsonObject[PTY_MAXSPEED]),
         _blurFactor(jsonObject[PTY_BLUR]),
         _musicFactor(jsonObject["msf"]),
-        _skyColor(jsonObject[PTY_COLOR].as<CRGB>())
+        _skyColor(jsonObject[PTY_COLOR].as<CRGB>()),
+        _useBeatColorCoding(jsonObject["fn"].as<String>() == kRgbMusicBlendStarsName)
     {
     }
 
@@ -480,7 +488,8 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
                 while (!_pendingMusicStarColors.empty() && _allParticles.size() < cMaxStars)
                 {
                     StarType newstar(_palette, _blendType, _maxSpeed * std::max(1.0f, _musicFactor), _starSize);
-                    newstar.SetColorIndex(_pendingMusicStarColors.front());
+                    if (_pendingMusicStarColors.front() >= 0)
+                        newstar.SetColorIndex(static_cast<uint8_t>(_pendingMusicStarColors.front()));
                     newstar._iPos = (int) random_range(0U, LEDStripEffect::_cLEDs - 1 - starWidth);
                     _allParticles.push_back(newstar);
                     _pendingMusicStarColors.pop_front();

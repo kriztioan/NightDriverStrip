@@ -299,7 +299,7 @@ const std::map<String, CWebServer::ValueValidator> CWebServer::settingValidators
     { DeviceConfig::AudioInputPinTag,     [](const String& value) { return g_ptrSystem->GetDeviceConfig().ValidateAudioInputPin(value.toInt()); } }
 };
 
-std::vector<SettingSpec, psram_allocator<SettingSpec>> CWebServer::mySettingSpecs = {};
+std::vector<SettingSpec> CWebServer::mySettingSpecs = {};
 std::vector<std::reference_wrapper<SettingSpec>> CWebServer::deviceSettingSpecs{};
 
 // Member function template specializations

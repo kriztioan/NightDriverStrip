@@ -67,6 +67,7 @@
 #include "globals.h"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <mutex>
 
@@ -188,10 +189,12 @@ public:
 
     CRGB *leds = nullptr;
     #if MATRIX_HEIGHT > 1
-        std::unique_ptr<Boid[], psram_array_deleter<Boid>> _boids;
+        std::unique_ptr<Boid[]> _boids;
     #endif
 
-    using PolarMapArray = PolarMap[kMatrixWidth][kMatrixHeight];
+    // std::array nesting (rather than a raw C 2D array) so std::make_unique<PolarMapArray>()
+    // works — the standard library deletes the make_unique overload for fixed-bound arrays.
+    using PolarMapArray = std::array<std::array<PolarMap, kMatrixHeight>, kMatrixWidth>;
 
     // Definition moved to GFXBase.cpp because it uses the FillGetNoise() function template
     GFXBase(int w, int h);

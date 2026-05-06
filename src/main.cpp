@@ -346,12 +346,37 @@ void setup()
     if (!SPIFFS.begin(true))
         Serial.println("WARNING: SPIFFS could not be initialized!");
 
-    // Enabling PSRAM allows us to use the extra 4MB of RAM on the ESP32-WROVER chip, but it caused
-    // problems with the S3 rebooting when WiFi connected, so for now, I've limited the default
-    // allocator to be PSRAM only on the MESMERIZER project where it's well tested.
+    // PSRAM-by-default policy
+    //
+    // Route any allocation above PSRAM_DEFAULT_THRESHOLD bytes through PSRAM
+    // automatically, leaving small allocations (and DMA-capable buffers, which
+    // explicitly request MALLOC_CAP_DMA elsewhere) in internal SRAM. This makes
+    // std::make_unique / std::make_shared / std::vector "do the right thing"
+    // for the common case without explicit *_psram helpers at every call site.
+    //
+    // On builds that don't define USE_PSRAM, the call below is a no-op (the
+    // ESP-IDF heap stays in internal-SRAM-only mode for that build).
+    //
+    // Originally limited to MESMERIZER because the S3 + WiFi-connect path was
+    // observed to crash with default-PSRAM enabled. The dynamic-services
+    // refactor reworked the start order and lifetimes that were implicated;
+    // we expect the issue is resolved, but per-environment opt-out remains
+    // possible by setting NO_PSRAM_DEFAULT in build_flags.
 
-    #if MESMERIZER
-        heap_caps_malloc_extmem_enable(96);
+    // Threshold is 96 because that's the value Mesmerizer ran with for years
+    // before this refactor. Dropping it lower (we tried 64) panicked on the
+    // mesmerizer build with a cache-disabled-region SPI flash crash during
+    // EffectManager construction — some object in the 64-95 byte size range
+    // ends up in PSRAM and gets touched while SPIFFS is mid-flash-op. 96 is
+    // the proven working value; raise it (e.g. 128, 256) per environment if
+    // a board surfaces a similar issue.
+
+    #if USE_PSRAM && !defined(NO_PSRAM_DEFAULT)
+        #ifndef PSRAM_DEFAULT_THRESHOLD
+            #define PSRAM_DEFAULT_THRESHOLD 32
+        #endif
+        heap_caps_malloc_extmem_enable(PSRAM_DEFAULT_THRESHOLD);
+        debugI("PSRAM-default routing enabled at threshold %d bytes", (int)PSRAM_DEFAULT_THRESHOLD);
     #endif
 
     // Initialize LZ library for decompressing compressed wifi packets
@@ -360,7 +385,7 @@ void setup()
 #endif
 
     // Create the SystemContainer that holds primary device management objects.
-    g_ptrSystem = make_unique_psram<SystemContainer>();
+    g_ptrSystem = std::make_unique<SystemContainer>();
 
     // Start the Task Manager which takes over the watchdog role and measures CPU usage
     auto& taskManager = g_ptrSystem->SetupTaskManager();
@@ -456,7 +481,7 @@ void setup()
         // Updated automatically every compile via __DATE__ / __TIME__.
         static const String improv_version = String(FLASH_VERSION_NAME) + " (" + __DATE__ + " " + __TIME__ + ")";
 
-        g_pImprovSerial = make_unique_psram<ImprovSerial<typeof(Serial)>>();
+        g_pImprovSerial = std::make_unique<ImprovSerial<typeof(Serial)>>();
         g_pImprovSerial->setup(PROJECT_NAME, improv_version, family, name.c_str(), &Serial);
 
         // Improv will feed unknown bytes to the Serial session's CLI processor

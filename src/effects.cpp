@@ -164,7 +164,7 @@ void LoadEffectFactories()
     if (g_ptrEffectFactories)
         return;
 
-    g_ptrEffectFactories = make_unique_psram<EffectFactories>();
+    g_ptrEffectFactories = std::make_unique<EffectFactories>();
 
     // Include custom effects header if available - it overrides whatever the effect set flags
     // would otherwise include.

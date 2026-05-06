@@ -180,37 +180,5 @@ const char* SettingSpec::OptionsSourceName() const
     }
 }
 
-// PreferPSRAMAlloc
-//
-// Will return PSRAM if it's available, regular ram otherwise
 
-// Cache PSRAM availability and prefer it when allocating large buffers.
-void * PreferPSRAMAlloc(size_t s)
-{
-    // Compute PSRAM availability once in a thread-safe way (I believe C++11+ guarantees thread-safe initialization of function-local statics).
-    static const int s_psramAvailable = []() noexcept -> int {
-        return psramInit() ? 1 : 0;
-    }();
 
-    if (s_psramAvailable)
-    {
-        debugV("PSRAM Array Request for %zu bytes\n", s);
-        auto p = ps_malloc(s);
-        if (!p)
-        {
-            debugE("PSRAM Allocation failed for %zu bytes\n", s);
-            throw std::bad_alloc();
-        }
-        return p;
-    }
-    else
-    {
-        auto p = malloc(s);
-        if (!p)
-        {
-            debugE("RAM Allocation failed for %zu bytes\n", s);
-            throw std::bad_alloc();
-        }
-        return p;
-    }
-}
