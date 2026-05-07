@@ -142,7 +142,7 @@ AudioConfig AudioConfig::FromCompileDefaults()
     AudioConfig cfg{};
     cfg.enabled    = true;
     cfg.sampleRate = 24000; // matches SoundAnalyzerBase::SAMPLING_FREQUENCY
-    cfg.inputPin   = AUDIO_INPUT_PIN;
+    cfg.audioInputPin   = AUDIO_INPUT_PIN;
 
     #if USE_M5
         cfg.mode = AudioConfig::Mode::M5Onboard;
@@ -176,7 +176,7 @@ AudioConfig AudioConfig::FromCurrentSettings()
     {
         const int persistedPin = g_ptrSystem->GetDeviceConfig().GetAudioInputPin();
         if (persistedPin >= 0)
-            cfg.inputPin = persistedPin;
+            cfg.audioInputPin = persistedPin;
     }
     return cfg;
 }
@@ -224,12 +224,12 @@ bool AudioService::OnBeforeStart()
     if (!_config.enabled)
     {
         debugI("Audio: Start() called but config marks audio disabled (pin=%d mode=%s)",
-               _config.inputPin, _config.ModeName());
+               _config.audioInputPin, _config.ModeName());
         return false;
     }
 
     debugI("Audio: starting (pin=%d mode=%s rate=%d)",
-           _config.inputPin, _config.ModeName(), _config.sampleRate);
+           _config.audioInputPin, _config.ModeName(), _config.sampleRate);
     return true;
 }
 
@@ -312,13 +312,13 @@ void AudioService::Run()
 bool AudioService::Reconfigure(const AudioConfig& newConfig)
 {
     debugI("Audio: reconfigure requested (pin=%d mode=%s enabled=%d)",
-           newConfig.inputPin, newConfig.ModeName(), (int)newConfig.enabled);
+           newConfig.audioInputPin, newConfig.ModeName(), (int)newConfig.enabled);
 
     auto sameConfig = [](const AudioConfig& a, const AudioConfig& b)
     {
         return a.enabled    == b.enabled
             && a.mode       == b.mode
-            && a.inputPin   == b.inputPin
+            && a.audioInputPin   == b.audioInputPin
             && a.bclkPin    == b.bclkPin
             && a.wsPin      == b.wsPin
             && a.dataPin    == b.dataPin

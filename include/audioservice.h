@@ -75,10 +75,10 @@ struct AudioConfig
 
     bool   enabled       = false;
     Mode   mode          = Mode::Disabled;
-    int    inputPin      = -1;     // ADC pin, or I2S DIN pin in I2S mode. -1 disables hardware.
+    int    audioInputPin = -1;     // ADC pin, or I2S DIN pin in I2S mode. -1 disables hardware.
     int    bclkPin       = -1;     // I2S only
     int    wsPin         = -1;     // I2S only
-    int    dataPin       = -1;     // I2S only (typically equal to inputPin)
+    int    dataPin       = -1;     // I2S only (typically equal to audioInputPin)
     int    sampleRate    = 24000;  // SoundAnalyzerBase::SAMPLING_FREQUENCY
 
     // Build a config that mirrors the existing compile-time defaults.

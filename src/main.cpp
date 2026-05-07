@@ -364,16 +364,21 @@ void setup()
     // possible by setting NO_PSRAM_DEFAULT in build_flags.
 
     // Threshold is 96 because that's the value Mesmerizer ran with for years
-    // before this refactor. Dropping it lower (we tried 64) panicked on the
-    // mesmerizer build with a cache-disabled-region SPI flash crash during
-    // EffectManager construction — some object in the 64-95 byte size range
-    // ends up in PSRAM and gets touched while SPIFFS is mid-flash-op. 96 is
-    // the proven working value; raise it (e.g. 128, 256) per environment if
-    // a board surfaces a similar issue.
+    // before this refactor. Dropping it lower panicked on the mesmerizer
+    // build with cache-disabled-region SPI flash crashes:
+    //   - 64 broke EffectManager construction (some object in the 64-95
+    //     byte size range ended up in PSRAM and got touched mid-SPIFFS op)
+    //   - 32 broke wifi_nvs_init / wifi_nvs_validate_sta_listen_interval
+    //     (some WiFi/NVS scratch buffer in the 32-95 byte size range ended
+    //     up in PSRAM and got touched while flash was being read at
+    //     boot-time WiFi setup)
+    // 96 is the proven working value across all LX6+PSRAM boards; raise it
+    // further (e.g. 128, 256) per environment if a board surfaces a similar
+    // issue, but do NOT lower it below 96 without testing every PSRAM env.
 
     #if USE_PSRAM && !defined(NO_PSRAM_DEFAULT)
         #ifndef PSRAM_DEFAULT_THRESHOLD
-            #define PSRAM_DEFAULT_THRESHOLD 32
+            #define PSRAM_DEFAULT_THRESHOLD 96
         #endif
         heap_caps_malloc_extmem_enable(PSRAM_DEFAULT_THRESHOLD);
         debugI("PSRAM-default routing enabled at threshold %d bytes", (int)PSRAM_DEFAULT_THRESHOLD);
@@ -574,6 +579,16 @@ void setup()
         // the screen task and layout code agree on width/height from the start.
         M5.Lcd.setRotation(1);
         g_ptrSystem->SetupHardwareDisplay(M5.Lcd.width(), M5.Lcd.height());
+
+        #if M5STICKS3 && ENABLE_REMOTE
+            // The StickS3's AW8737 audio amp emits enough EMI to swamp the
+            // built-in IR receiver on G42. M5Stack's own IR-NEC sample
+            // documents the requirement: "When using the IR receive function,
+            // the SPK amplifier must be turned off; otherwise, reception will
+            // not work properly." NightDriver doesn't currently route audio
+            // out through this speaker, so leaving the amp off is harmless.
+            M5.Speaker.end();
+        #endif
 
     #elif ELECROW
 

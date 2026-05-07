@@ -96,7 +96,7 @@ namespace
         #else
             false;
         #endif
-        audio["inputPin"] = deviceConfig.GetAudioInputPin();
+        audio["audioInputPin"] = deviceConfig.GetAudioInputPin();
         audio["compiledDefaultPin"] = DeviceConfig::GetCompiledAudioInputPin();
         audio["mode"] = deviceConfig.GetAudioInputModeName();
         audio["liveApply"] = deviceConfig.SupportsLiveAudioInputReconfigure();
@@ -229,7 +229,7 @@ namespace
 
     // Normalizes the unified settings audio pin request into one optional value.
     // The API currently accepts both the legacy flat device.audioInputPin field
-    // and the nested device.audio.inputPin field, so validation/apply can consume
+    // and the nested device.audio.audioInputPin field, so validation/apply can consume
     // one resolved value instead of duplicating that lookup logic.
 
     std::optional<int> GetRequestedUnifiedAudioInputPin(JsonObjectConst device)
@@ -242,8 +242,8 @@ namespace
         if (device["audio"].is<JsonObjectConst>())
         {
             auto audio = device["audio"].as<JsonObjectConst>();
-            if (audio["inputPin"].is<int>())
-                requestedAudioInputPin = audio["inputPin"].as<int>();
+            if (audio["audioInputPin"].is<int>())
+                requestedAudioInputPin = audio["audioInputPin"].as<int>();
         }
 
         return requestedAudioInputPin;
@@ -1073,9 +1073,9 @@ bool CWebServer::ValidateUnifiedDeviceSettings(JsonObjectConst device, String* e
     if (device["audio"].is<JsonObjectConst>())
     {
         auto audio = device["audio"].as<JsonObjectConst>();
-        if (audio["inputPin"].is<int>())
+        if (audio["audioInputPin"].is<int>())
         {
-            const int nestedAudioInputPin = audio["inputPin"].as<int>();
+            const int nestedAudioInputPin = audio["audioInputPin"].as<int>();
             // The API still accepts both the legacy flat key and the structured audio object. Reject
             // conflicting requests explicitly so callers do not get a half-legacy, half-modern winner
             // picked implicitly by field order.

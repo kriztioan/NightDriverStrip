@@ -157,7 +157,7 @@ extern std::recursive_mutex g_effect_manager_mutex;
 // of the OLED/LCD is now controlled separately, but M5 is always equipped
 // with one (but it doesn't have to be used!).
 
-#if M5STICKC || M5STICKCPLUS || M5STICKCPLUS2 || M5STACKCORE2 || M5TAB
+#if M5STICKC || M5STICKCPLUS || M5STICKCPLUS2 || M5STICKS3 || M5STACKCORE2 || M5TAB
     #define USE_M5 1
 #endif
 
@@ -668,6 +668,10 @@ extern const int g_aRingSizeTable[];
 
 #ifndef M5STICKCPLUS2
 #define M5STICKCPLUS2 0
+#endif
+
+#ifndef M5STICKS3
+#define M5STICKS3 0
 #endif
 
 #ifndef M5STACKCORE2

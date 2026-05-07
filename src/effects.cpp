@@ -318,6 +318,7 @@ void LoadEffectFactories()
             Effect<PatternCube>(),
             Effect<PatternAnimatedGIF>("Tesseract", GIFIdentifier::Tesseract),
             Effect<PatternAnimatedGIF>("Nyancat", GIFIdentifier::Nyancat),
+            Effect<PatternAnimatedGIF>("On Air", GIFIdentifier::OnAir),
             Effect<PatternLife>(),
             Effect<PatternCircuit>(),
             Effect<SpectrumAnalyzerEffect>("USA", NUM_BANDS, USAColors_p, true, 0, 0, 0.75, 0.75),

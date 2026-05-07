@@ -23,6 +23,7 @@
 #include "deviceconfig.h"
 
 class GFXBase;
+class Transport;
 
 class WS281xOutputManager
 {
@@ -40,12 +41,13 @@ class WS281xOutputManager
     size_t _activeChannelCount = 0;
     size_t _activeLEDCount = 0;
     DeviceConfig::WS281xColorOrder _colorOrder = DeviceConfig::GetCompiledWS281xColorOrder();
+    std::unique_ptr<Transport> _transport;
 
     bool RecreateChannel(size_t channelIndex, int8_t pin, size_t ledCount, String* errorMessage);
     void ReleaseChannel(size_t channelIndex);
 
   public:
-    WS281xOutputManager() = default;
+    WS281xOutputManager();
     ~WS281xOutputManager();
 
     bool ApplyConfig(const DeviceConfig& config, const std::vector<std::shared_ptr<GFXBase>>& devices, String* errorMessage = nullptr);
