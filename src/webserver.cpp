@@ -824,22 +824,20 @@ const std::vector<std::reference_wrapper<SettingSpec>> & CWebServer::LoadDeviceS
         // so its spec is owned here. The Widget metadata mirrors the legacy
         // composite "Rotate effects toggle + seconds input" UX in a way the
         // front-end can render generically.
-        {
-            SettingSpec::FinishGuard spec(mySettingSpecs.emplace_back(
-                "effectInterval",
-                "Effect interval",
-                "The duration in milliseconds that an individual effect runs, before the next effect is activated. "
-                "Disable rotation to keep the current effect active indefinitely.",
-                SettingSpec::SettingType::PositiveBigInteger
-            ));
-            spec->Section = "appearance";
-            spec->ApiPath = "effects.effectInterval";
-            spec->Widget = SettingSpec::WidgetKind::IntervalToggle;
-            spec->IntervalUnitDivisor = 1000;
-            spec->IntervalUnitLabel = "seconds";
-            spec->IntervalOnLabel  = "Rotate effects";
-            spec->IntervalOffLabel = "Off";
-        }
+        mySettingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name                = "effectInterval",
+            .FriendlyName        = "Effect interval",
+            .Description         = "The duration in milliseconds that an individual effect runs, before the next effect is activated. "
+                                   "Disable rotation to keep the current effect active indefinitely.",
+            .Type                = SettingSpec::SettingType::PositiveBigInteger,
+            .Section             = "appearance",
+            .ApiPath             = "effects.effectInterval",
+            .Widget              = SettingSpec::WidgetKind::IntervalToggle,
+            .IntervalUnitDivisor = 1000,
+            .IntervalOnLabel     = "Rotate effects",
+            .IntervalOffLabel    = "Off",
+            .IntervalUnitLabel   = "seconds"
+        }));
 
         deviceSettingSpecs.insert(deviceSettingSpecs.end(), mySettingSpecs.begin(), mySettingSpecs.end());
 

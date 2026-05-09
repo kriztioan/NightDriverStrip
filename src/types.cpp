@@ -96,14 +96,12 @@ double CAppTime::LastFrameTime() const
     return _deltaTime;
 }
 
-// Finishes the initialization of the spec, and then validates the consistency of its overall contents.
-// Note that it does the latter quite rudely: it uses assert() on things it feels should be in order.
-// This function is called by this struct's constructors that initialize values, but this being a struct
-// allows itself to be called from the outside as well.
+// Validates the consistency of the spec's contents after all fields have been assigned.
+// Called by Construct(); can also be called directly if needed.
 void SettingSpec::FinishAndValidateInitialization()
 {
     // Default to front-end rejection of empty Strings, but only if the caller hasn't already
-    // set EmptyAllowed explicitly (so FinishGuard re-runs don't clobber an intentional override)
+    // set EmptyAllowed explicitly.
     if (Type == SettingType::String && !EmptyAllowed.has_value())
         EmptyAllowed = false;
 
@@ -138,169 +136,11 @@ void SettingSpec::FinishAndValidateInitialization()
     }
 }
 
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type)
+SettingSpec SettingSpec::Validate(SettingSpec spec)
 {
-    FinishAndValidateInitialization();
+    spec.FinishAndValidateInitialization();
+    return spec;
 }
-
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type) : SettingSpec(name, friendlyName, nullptr, type)
-{}
-
-// Constructor that sets both minimum and maximum values
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type, double min, double max)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type),
-    MinimumValue(min),
-    MaximumValue(max)
-{
-    FinishAndValidateInitialization();
-}
-
-// Constructor that sets both minimum and maximum values
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type, double min, double max)
-    : SettingSpec(name, friendlyName, nullptr, type, min, max)
-{}
-
-// Constructor A: basic positioned spec (section + apiPath, optional priority)
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                         const char* section, const char* apiPath, std::optional<int> priority)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type),
-    Section(section),
-    Priority(priority),
-    ApiPath(apiPath)
-{
-    FinishAndValidateInitialization();
-}
-
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                         const char* section, const char* apiPath, std::optional<int> priority)
-    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, priority)
-{}
-
-// Constructor B: positioned spec with non-default access and optional hasValidation
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                         const char* section, const char* apiPath, SettingAccess access, bool hasValidation)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type),
-    HasValidation(hasValidation),
-    Access(access),
-    Section(section),
-    ApiPath(apiPath)
-{
-    FinishAndValidateInitialization();
-}
-
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                         const char* section, const char* apiPath, SettingAccess access, bool hasValidation)
-    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, access, hasValidation)
-{}
-
-// Constructor C: positioned spec with min/max range
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                         double min, double max, const char* section, const char* apiPath, std::optional<int> priority)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type),
-    MinimumValue(min),
-    MaximumValue(max),
-    Section(section),
-    Priority(priority),
-    ApiPath(apiPath)
-{
-    FinishAndValidateInitialization();
-}
-
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                         double min, double max, const char* section, const char* apiPath, std::optional<int> priority)
-    : SettingSpec(name, friendlyName, nullptr, type, min, max, section, apiPath, priority)
-{}
-
-// Constructor D: positioned SchemaPath Select widget
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                         const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type),
-    Section(section),
-    Priority(priority),
-    ApiPath(apiPath),
-    Widget(WidgetKind::Select),
-    Options(OptionsSource::SchemaPath),
-    OptionsSchemaPath(optionsSchemaPath)
-{
-    FinishAndValidateInitialization();
-}
-
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                         const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority)
-    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, optionsSchemaPath, priority)
-{}
-
-// Constructor E: positioned Select widget with non-Inline source
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                         const char* section, const char* apiPath, OptionsSource optionsSource,
-                         const char* optionsExternalUrl)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type),
-    Section(section),
-    ApiPath(apiPath),
-    Widget(WidgetKind::Select),
-    Options(optionsSource),
-    OptionsExternalUrl(optionsExternalUrl)
-{
-    FinishAndValidateInitialization();
-}
-
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                         const char* section, const char* apiPath, OptionsSource optionsSource,
-                         const char* optionsExternalUrl)
-    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, optionsSource, optionsExternalUrl)
-{}
-
-// Constructor F: positioned Slider widget with display scale
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                         const char* section, const char* apiPath,
-                         double displayRawMin, double displayRawMax, double displayMin, double displayMax,
-                         const char* displaySuffix, bool hasValidation)
-    : Name(name),
-    FriendlyName(friendlyName),
-    Description(description),
-    Type(type),
-    HasValidation(hasValidation),
-    Section(section),
-    ApiPath(apiPath),
-    Widget(WidgetKind::Slider),
-    DisplayRawMin(displayRawMin),
-    DisplayRawMax(displayRawMax),
-    DisplayMin(displayMin),
-    DisplayMax(displayMax),
-    DisplaySuffix(displaySuffix)
-{
-    FinishAndValidateInitialization();
-}
-
-SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                         const char* section, const char* apiPath,
-                         double displayRawMin, double displayRawMax, double displayMin, double displayMax,
-                         const char* displaySuffix, bool hasValidation)
-    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath,
-                  displayRawMin, displayRawMax, displayMin, displayMax, displaySuffix, hasValidation)
-{}
 
 String SettingSpec::TypeName() const
 {

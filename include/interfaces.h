@@ -336,87 +336,27 @@ struct SettingSpec
     // spec keeps the UI from having to bake a path like "/timezones.json".
     const char* OptionsExternalUrl = nullptr;
 
-    // Finishes the initialization of the spec, and then validates the consistency of its overall contents.
-    // Note that it does the latter quite rudely: it uses assert() on things it feels should be in order.
-    // All call sites must call this after all fields have been assigned. The FinishGuard RAII helper
-    // below is the preferred way to ensure that: construction happens inside the guard, all post-
-    // constructor field assignments are made in the enclosing block body, and the destructor fires
-    // FinishAndValidateInitialization() automatically when the block ends.
+    // Validates the consistency of the spec's contents. Called by Construct(); can also be
+    // called directly when constructing specs without using Construct().
     void FinishAndValidateInitialization();
 
-    // RAII wrapper that calls FinishAndValidateInitialization() when the enclosing scope exits.
-    // Usage:
-    //   {
-    //       SettingSpec::FinishGuard spec(mySpecs.emplace_back(name, friendlyName, type));
-    //       spec->Widget = WidgetKind::Select;
-    //       spec->OptionsSchemaPath = "some.path";
-    //   } // ← FinishAndValidateInitialization() fires here, after all fields are set
-    struct FinishGuard
-    {
-        SettingSpec& ref;
-        explicit FinishGuard(SettingSpec& s) : ref(s) {}
-        ~FinishGuard() { ref.FinishAndValidateInitialization(); }
-        SettingSpec* operator->() const { return &ref; }
-        SettingSpec& operator*()  const { return ref; }
-        FinishGuard(const FinishGuard&)            = delete;
-        FinishGuard& operator=(const FinishGuard&) = delete;
-    };
+    // Factory method: construct a SettingSpec via C++20 designated initializers, then call
+    // FinishAndValidateInitialization() and return the validated spec. Use this for specs
+    // that need no post-construction field assignments:
+    //
+    //   settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+    //       .Name         = "myName",
+    //       .FriendlyName = "My Name",
+    //       .Type         = SettingType::String,
+    //       .Section      = "section",
+    //       .ApiPath      = "path.to.setting"
+    //   }));
+    //
+    // Fields not listed receive their in-class defaults. Designated initializers must appear
+    // in the same order as the members are declared in this struct (C++20 requirement).
+    static SettingSpec Validate(SettingSpec spec);
 
-    // ---- Base constructors (type only) ----
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type);
-    SettingSpec(const char* name, const char* friendlyName, SettingType type);
-
-    // Base constructors with min/max range
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type, double min, double max);
-    SettingSpec(const char* name, const char* friendlyName, SettingType type, double min, double max);
-
-    // ---- Constructors for UI-positioned specs (type + section + apiPath) ----
-    // Constructor A: basic positioned spec (Boolean, Color, String, etc.)
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                const char* section, const char* apiPath, std::optional<int> priority = {});
-    SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                const char* section, const char* apiPath, std::optional<int> priority = {});
-
-    // Constructor B: positioned spec with non-default access (ReadOnly or WriteOnly)
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                const char* section, const char* apiPath, SettingAccess access, bool hasValidation = false);
-    SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                const char* section, const char* apiPath, SettingAccess access, bool hasValidation = false);
-
-    // Constructor C: positioned spec with range (min/max)
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                double min, double max, const char* section, const char* apiPath, std::optional<int> priority = {});
-    SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                double min, double max, const char* section, const char* apiPath, std::optional<int> priority = {});
-
-    // Constructor D: positioned SchemaPath Select widget
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority = {});
-    SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority = {});
-
-    // Constructor E: positioned Select widget with non-Inline source (IntlCountryCodes or ExternalTimeZones)
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                const char* section, const char* apiPath, OptionsSource optionsSource,
-                const char* optionsExternalUrl = nullptr);
-    SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                const char* section, const char* apiPath, OptionsSource optionsSource,
-                const char* optionsExternalUrl = nullptr);
-
-    // Constructor F: positioned Slider widget with display scale
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
-                const char* section, const char* apiPath,
-                double displayRawMin, double displayRawMax, double displayMin, double displayMax,
-                const char* displaySuffix = nullptr, bool hasValidation = false);
-    SettingSpec(const char* name, const char* friendlyName, SettingType type,
-                const char* section, const char* apiPath,
-                double displayRawMin, double displayRawMax, double displayMin, double displayMax,
-                const char* displaySuffix = nullptr, bool hasValidation = false);
-
-    SettingSpec() = default;
-    virtual ~SettingSpec() = default;
-
-    virtual String TypeName() const;
+    String TypeName() const;
 
     // String form of WidgetKind, suitable for emission in the spec response.
     const char* WidgetName() const;
