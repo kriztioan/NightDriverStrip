@@ -347,7 +347,7 @@ private:
             mySettingSpecs.push_back(SettingSpec::Validate(SettingSpec{
                 .Name         = NAME_OF(tickerSymbols),
                 .FriendlyName = "Ticker symbols",
-                .Description  = "Comma-separated list of ticker symbols to show stock data for.",
+                .Description  = "Comma-separated list of ticker symbols for which to retrieve and display stock data.",
                 .Type         = SettingSpec::SettingType::String
             }));
         }
