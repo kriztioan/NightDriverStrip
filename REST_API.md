@@ -18,6 +18,7 @@
   - [Get device setting specifications](#get-device-setting-specifications)
   - [Device settings](#device-settings)
   - [Set setting with validation](#set-setting-with-validation)
+  - [Unified device settings](#unified-device-settings)
   - [Get effect setting specifications](#get-effect-setting-specifications)
   - [Effect settings](#effect-settings)
   - [Reset configuration and/or device](#reset-configuration-andor-device)
@@ -245,9 +246,73 @@ Note that validation is not implemented for all settings; the validation step is
 |-|-|-|
 | URL | `/settings/validated` | |
 | Method | POST | |
-| Parameters | | Exactly one setting that has been returned by the [Get dvice setting specifications endpoint](#get-device-setting-specifications). |
+| Parameters | | Exactly one setting that has been returned by the [Get device setting specifications endpoint](#get-device-setting-specifications). |
 | Response | 200 (OK) | Validation succeeded and the provided value has been set. |
 | | 400 (Bad Request) | More than one known setting was provided, or validation failed. The applicable message is returned in a JSON blob. |
+
+### Unified device settings
+
+This set of endpoints provides a structured, grouped interface for retrieving and changing device configuration settings. Unlike the [Device settings](#device-settings) endpoint, which uses a flat key/value format, the unified settings endpoints organize values into logical groups (`device`, `topology`, `outputs`, `effects`). They also expose runtime applicability information alongside each group, indicating whether a change can be applied live or requires a reboot.
+
+#### Get unified device settings schema
+
+This endpoint returns compile-time constraints and metadata for the unified settings. It can be used to understand what values and options are valid for the current firmware build before constructing a change request.
+
+| Property| Value | Explanation |
+|-|-|-|
+| URL | `/api/v1/settings/schema` | |
+| Method | GET | |
+| Parameters | | |
+| Response | 200 (OK) | A JSON blob with compile-time constraints and schema information for the unified settings. Includes topology limits, allowed output drivers, WS281x options (allowed channel counts, color orders, and compiled pin assignments), audio configuration, remote control availability, and a section catalog that can be used by a UI to group settings into labeled categories. |
+
+#### Retrieve unified device settings
+
+| Property| Value | Explanation |
+|-|-|-|
+| URL | `/api/v1/settings` | |
+| Method | GET | |
+| Parameters | | |
+| Response | 200 (OK) | A JSON blob with the current unified device settings, organized into `device`, `topology`, `outputs`, and `effects` groups. Read-only informational fields (such as compiled defaults and live-apply flags) are included alongside the mutable values. |
+
+#### Change unified device settings
+
+All fields in the request body are optional. Only the values that are included are changed; everything else stays as-is.
+
+Changes to `topology` and `outputs` are applied as a transaction: the new configuration is validated, applied live if the device supports it, and only persisted once live application succeeds. If live application fails, the previous configuration is restored and an error is returned.
+
+For groups where the response (or schema) reports `liveApply: false`, changes to that group require a reboot before they take effect.
+
+| Property| Value | Explanation |
+|-|-|-|
+| URL | `/api/v1/settings` | |
+| Method | POST | |
+| Body | JSON object | |
+| Parameters | `topology.width` | Matrix width. |
+| | `topology.height` | Matrix height. |
+| | `topology.serpentine` | Whether the LED matrix is wired in serpentine order. |
+| | `outputs.driver` | Output driver name. Must be one of the values from `allowedDrivers` in the schema response. |
+| | `outputs.ws281x.channelCount` | Number of active WS281x channels. |
+| | `outputs.ws281x.colorOrder` | WS281x color component order. Must be one of the values from `allowedColorOrders` in the schema response. |
+| | `outputs.ws281x.pins` | Array of GPIO pin numbers, one per WS281x channel. |
+| | `device.hostname` | Device hostname. |
+| | `device.location` | Device location (city name or ZIP code). |
+| | `device.locationIsZip` | Whether `location` is a ZIP code (`true`/`false`). |
+| | `device.countryCode` | ISO country code for the device's location. |
+| | `device.timeZone` | IANA time zone name. |
+| | `device.use24HourClock` | Whether to display time using a 24-hour clock (`true`/`false`). |
+| | `device.useCelsius` | Whether to display temperatures in Celsius (`true`/`false`). |
+| | `device.ntpServer` | NTP server hostname. |
+| | `device.rememberCurrentEffect` | Whether to resume the last-active effect on reboot (`true`/`false`). |
+| | `device.powerLimit` | Power consumption limit in milliwatts. |
+| | `device.brightness` | LED brightness (0–255). |
+| | `device.audioInputPin` or `device.audio.inputPin` | GPIO pin number for the audio input. Both fields are accepted; providing conflicting values in the same request is an error. |
+| | `device.globalColor` | Global LED color override, as a 24-bit integer. |
+| | `device.secondColor` | Secondary LED color, as a 24-bit integer. |
+| | `device.applyGlobalColors` | Whether the global/secondary color override is active (`true`/`false`). |
+| | `device.clearGlobalColor` | Set to `true` to clear the current global color override. |
+| | `effects.effectInterval` | Duration in milliseconds that each effect runs before the next is activated. |
+| Response | 200 (OK) | A JSON blob with the current unified device settings after applying the changes in the request, in the same format as the GET response. |
+| | 400 (Bad Request) | Validation failed for one or more of the provided values. The applicable message is returned in a JSON blob. |
 
 ### Get effect setting specifications
 

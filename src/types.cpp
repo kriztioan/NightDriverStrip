@@ -102,15 +102,40 @@ double CAppTime::LastFrameTime() const
 // allows itself to be called from the outside as well.
 void SettingSpec::FinishAndValidateInitialization()
 {
-    // Default to front-end rejection of empty Strings
-    if (Type == SettingType::String)
+    // Default to front-end rejection of empty Strings, but only if the caller hasn't already
+    // set EmptyAllowed explicitly (so FinishGuard re-runs don't clobber an intentional override)
+    if (Type == SettingType::String && !EmptyAllowed.has_value())
         EmptyAllowed = false;
-    else
-        // Check that both min and max value are set for Slider
-        assert(Type != SettingType::Slider || (MinimumValue.has_value() && MaximumValue.has_value()));
 
     // If min and max value are both set, min must be less or equal than max
     assert(!(MinimumValue.has_value() && MaximumValue.has_value()) || MinimumValue.value() <= MaximumValue.value());
+
+    // For Slider widgets, display scale members must all be set or all be unset
+    assert(Widget != WidgetKind::Slider || (DisplayRawMin.has_value() == DisplayRawMax.has_value() &&
+           DisplayRawMin.has_value() == DisplayMin.has_value() &&
+           DisplayRawMin.has_value() == DisplayMax.has_value()));
+
+    // For Select widgets, validate options source-specific requirements
+    if (Widget == WidgetKind::Select)
+    {
+        // For Inline select options, labels must be empty or match the number of values
+        assert(Options != OptionsSource::Inline ||
+               OptionLabels.empty() || OptionLabels.size() == OptionValues.size());
+
+        // For SchemaPath select options, OptionsSchemaPath must be set, and
+        // any label overrides must be provided as matched pairs (both non-empty, same length)
+        assert(Options != OptionsSource::SchemaPath || OptionsSchemaPath != nullptr);
+        assert(Options != OptionsSource::SchemaPath ||
+               (OptionValues.empty() == OptionLabels.empty() &&
+                (OptionValues.empty() || OptionValues.size() == OptionLabels.size())));
+
+        // For ExternalTimeZones select options, OptionsExternalUrl must be set, and
+        // any label overrides must be provided as matched pairs (both non-empty, same length)
+        assert(Options != OptionsSource::ExternalTimeZones || OptionsExternalUrl != nullptr);
+        assert(Options != OptionsSource::ExternalTimeZones ||
+               (OptionValues.empty() == OptionLabels.empty() &&
+                (OptionValues.empty() || OptionValues.size() == OptionLabels.size())));
+    }
 }
 
 SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type)
@@ -142,6 +167,141 @@ SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType
     : SettingSpec(name, friendlyName, nullptr, type, min, max)
 {}
 
+// Constructor A: basic positioned spec (section + apiPath, optional priority)
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                         const char* section, const char* apiPath, std::optional<int> priority)
+    : Name(name),
+    FriendlyName(friendlyName),
+    Description(description),
+    Type(type),
+    Section(section),
+    Priority(priority),
+    ApiPath(apiPath)
+{
+    FinishAndValidateInitialization();
+}
+
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                         const char* section, const char* apiPath, std::optional<int> priority)
+    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, priority)
+{}
+
+// Constructor B: positioned spec with non-default access and optional hasValidation
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                         const char* section, const char* apiPath, SettingAccess access, bool hasValidation)
+    : Name(name),
+    FriendlyName(friendlyName),
+    Description(description),
+    Type(type),
+    HasValidation(hasValidation),
+    Access(access),
+    Section(section),
+    ApiPath(apiPath)
+{
+    FinishAndValidateInitialization();
+}
+
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                         const char* section, const char* apiPath, SettingAccess access, bool hasValidation)
+    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, access, hasValidation)
+{}
+
+// Constructor C: positioned spec with min/max range
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                         double min, double max, const char* section, const char* apiPath, std::optional<int> priority)
+    : Name(name),
+    FriendlyName(friendlyName),
+    Description(description),
+    Type(type),
+    MinimumValue(min),
+    MaximumValue(max),
+    Section(section),
+    Priority(priority),
+    ApiPath(apiPath)
+{
+    FinishAndValidateInitialization();
+}
+
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                         double min, double max, const char* section, const char* apiPath, std::optional<int> priority)
+    : SettingSpec(name, friendlyName, nullptr, type, min, max, section, apiPath, priority)
+{}
+
+// Constructor D: positioned SchemaPath Select widget
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                         const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority)
+    : Name(name),
+    FriendlyName(friendlyName),
+    Description(description),
+    Type(type),
+    Section(section),
+    Priority(priority),
+    ApiPath(apiPath),
+    Widget(WidgetKind::Select),
+    Options(OptionsSource::SchemaPath),
+    OptionsSchemaPath(optionsSchemaPath)
+{
+    FinishAndValidateInitialization();
+}
+
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                         const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority)
+    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, optionsSchemaPath, priority)
+{}
+
+// Constructor E: positioned Select widget with non-Inline source
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                         const char* section, const char* apiPath, OptionsSource optionsSource,
+                         const char* optionsExternalUrl)
+    : Name(name),
+    FriendlyName(friendlyName),
+    Description(description),
+    Type(type),
+    Section(section),
+    ApiPath(apiPath),
+    Widget(WidgetKind::Select),
+    Options(optionsSource),
+    OptionsExternalUrl(optionsExternalUrl)
+{
+    FinishAndValidateInitialization();
+}
+
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                         const char* section, const char* apiPath, OptionsSource optionsSource,
+                         const char* optionsExternalUrl)
+    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath, optionsSource, optionsExternalUrl)
+{}
+
+// Constructor F: positioned Slider widget with display scale
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                         const char* section, const char* apiPath,
+                         double displayRawMin, double displayRawMax, double displayMin, double displayMax,
+                         const char* displaySuffix, bool hasValidation)
+    : Name(name),
+    FriendlyName(friendlyName),
+    Description(description),
+    Type(type),
+    HasValidation(hasValidation),
+    Section(section),
+    ApiPath(apiPath),
+    Widget(WidgetKind::Slider),
+    DisplayRawMin(displayRawMin),
+    DisplayRawMax(displayRawMax),
+    DisplayMin(displayMin),
+    DisplayMax(displayMax),
+    DisplaySuffix(displaySuffix)
+{
+    FinishAndValidateInitialization();
+}
+
+SettingSpec::SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                         const char* section, const char* apiPath,
+                         double displayRawMin, double displayRawMax, double displayMin, double displayMax,
+                         const char* displaySuffix, bool hasValidation)
+    : SettingSpec(name, friendlyName, nullptr, type, section, apiPath,
+                  displayRawMin, displayRawMax, displayMin, displayMax, displaySuffix, hasValidation)
+{}
+
 String SettingSpec::TypeName() const
 {
     switch (Type)
@@ -153,7 +313,6 @@ String SettingSpec::TypeName() const
         case SettingType::String:               return "String";
         case SettingType::Palette:              return "Palette";
         case SettingType::Color:                return "Color";
-        case SettingType::Slider:               return "Slider";
         default:                                return "Unknown";
     }
 }
@@ -165,8 +324,6 @@ const char* SettingSpec::WidgetName() const
         case WidgetKind::Slider:           return "slider";
         case WidgetKind::Select:           return "select";
         case WidgetKind::IntervalToggle:   return "intervalToggle";
-        case WidgetKind::Color:            return "color";
-        case WidgetKind::Default:          return "default";
         default:                           return "default";
     }
 }

@@ -159,10 +159,18 @@ class PatternSubscribers : public EffectWithId<PatternSubscribers>
                                         SettingSpec::SettingType::Color);
             mySettingSpecs.emplace_back(NAME_OF(borderColor), "Border Color",
                                         "Color for the border around the edge", SettingSpec::SettingType::Color);
-            mySettingSpecs.emplace_back(NAME_OF(youtubeChannelName), "YouTube channel name",
-                                         "The name of the channel for which the effect should show subscriber information.",
-                                         SettingSpec::SettingType::String)
-                                         .EmptyAllowed = true;
+            {
+                SettingSpec::FinishGuard spec(mySettingSpecs.emplace_back(NAME_OF(youtubeChannelName), "YouTube channel name",
+                                             "The name of the channel for which the effect should show subscriber information.",
+                                             SettingSpec::SettingType::String));
+                spec->EmptyAllowed = true;
+            }
+            {
+                SettingSpec::FinishGuard spec(mySettingSpecs.emplace_back(NAME_OF(youtubeChannelName), "YouTube channel name",
+                                             "The name of the channel for which the effect should show subscriber information.",
+                                             SettingSpec::SettingType::String));
+                spec->EmptyAllowed = true;
+            }
         }
 
         return &mySettingSpecs;

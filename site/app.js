@@ -1045,17 +1045,27 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
   //   "schemaPath"         - resolve a path against state.unifiedSchema. If the
   //                          target is an array, use it directly. If it's a
   //                          number, generate 1..N (used for compiledMaxChannels).
+  //                          Optional widget.options.values/labels provide label
+  //                          overrides for specific raw values.
   //   "intlCountryCodes"   - the prebuilt COUNTRY_OPTIONS list
   //   "externalTimeZones"  - the lazily-fetched time zone list
-  // labelOverrides maps raw values to friendly labels (e.g. ws281x -> WS281x).
   function getWidgetSelectOptions(spec, widget) {
     const source = (widget.options && widget.options.source) || "inline";
     const options = widget.options || {};
-    const overrides = options.labelOverrides || {};
-    const decorate = (rawValue) => ({
-      value: String(rawValue),
-      label: Object.prototype.hasOwnProperty.call(overrides, String(rawValue)) ? overrides[String(rawValue)] : String(rawValue)
-    });
+    const values = Array.isArray(options.values) ? options.values : [];
+    const labels = Array.isArray(options.labels) ? options.labels : [];
+
+    // Build a value->label map from the parallel values/labels arrays.
+    const labelMap = {};
+    values.forEach((v, i) => { if (i < labels.length) labelMap[String(v)] = labels[i]; });
+
+    // Apply the label map to a raw array, falling back to the raw value as label.
+    function applyLabelMap(rawValues) {
+      return rawValues.map((value) => ({
+        value: String(value),
+        label: Object.prototype.hasOwnProperty.call(labelMap, String(value)) ? labelMap[String(value)] : String(value)
+      }));
+    }
 
     if (source === "intlCountryCodes") {
       return COUNTRY_OPTIONS.map((option) => ({ value: option.value, label: option.label }));
@@ -1063,22 +1073,17 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     if (source === "externalTimeZones") {
       // The URL is carried on the spec's widget metadata so the UI doesn't
       // bake the document path. ensureTimezonesLoaded() reads the same field.
-      return getTimeZoneOptions().map((value) => decorate(value));
+      return applyLabelMap(getTimeZoneOptions());
     }
     if (source === "schemaPath") {
       const target = readJsonPath(state.unifiedSchema, options.schemaPath);
       if (Array.isArray(target)) {
-        return target.map((value) => decorate(value));
+        return applyLabelMap(target);
       }
       return [];
     }
     // Inline (default)
-    const values = Array.isArray(options.values) ? options.values : [];
-    const labels = Array.isArray(options.labels) ? options.labels : [];
-    return values.map((value, index) => ({
-      value: String(value),
-      label: index < labels.length ? labels[index] : (Object.prototype.hasOwnProperty.call(overrides, String(value)) ? overrides[String(value)] : String(value))
-    }));
+    return applyLabelMap(values);
   }
 
   // Linearly remap a raw value into the displayed range, then clamp.
@@ -1204,7 +1209,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     }
   }
 
-  
+
   async function moveEffect(effectIndex, newIndex) {
     try {
       await postForm("/moveEffect", { effectIndex, newIndex });

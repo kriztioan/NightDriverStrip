@@ -76,14 +76,18 @@ void LEDStripEffect::FillBaseSettingSpecs()
         "hasMaximumEffectTime",
         "Has maximum effect time set",
         "Indicates if the effect has a maximum effect time set.",
-        SettingSpec::SettingType::Boolean
-    ).Access = SettingSpec::SettingAccess::ReadOnly;
+        SettingSpec::SettingType::Boolean,
+        /*section=*/nullptr, /*apiPath=*/nullptr,
+        SettingSpec::SettingAccess::ReadOnly
+    );
     _baseSettingSpecs.emplace_back(
         "clearMaximumEffectTime",
         "Clear maximum effect time",
         "Clear maximum effect time. Set to true to reset the maximum effect time to the default value.",
-        SettingSpec::SettingType::Boolean
-    ).Access = SettingSpec::SettingAccess::WriteOnly;
+        SettingSpec::SettingType::Boolean,
+        /*section=*/nullptr, /*apiPath=*/nullptr,
+        SettingSpec::SettingAccess::WriteOnly
+    );
 }
 
 // LEDStripEffect

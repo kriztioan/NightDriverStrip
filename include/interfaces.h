@@ -200,8 +200,7 @@ struct SettingSpec
         Boolean,
         String,
         Palette,
-        Color,
-        Slider
+        Color
     };
 
     enum class SettingAccess : char
@@ -220,8 +219,7 @@ struct SettingSpec
         Default,           // type-driven default (Integer -> number input, Boolean -> checkbox, etc.)
         Slider,            // numeric slider; honors DisplayScale and DisplaySuffix
         Select,            // dropdown sourced from inline Options or via OptionsSource
-        IntervalToggle,    // boolean-on + numeric value composite (effectInterval-style)
-        Color              // color picker; raw value is an integer 0xRRGGBB
+        IntervalToggle     // boolean-on + numeric value composite (effectInterval-style)
     };
 
     // Where the widget gets its option list from when WidgetKind::Select is used.
@@ -318,10 +316,16 @@ struct SettingSpec
     // For WidgetKind::Select: how to populate the options list.
     OptionsSource Options = OptionsSource::Inline;
 
-    // For Options == OptionsSource::Inline: parallel arrays of values and
-    // friendly labels. If OptionLabels is empty, values double as labels.
-    std::vector<const char*> InlineOptionValues = {};
-    std::vector<const char*> InlineOptionLabels = {};
+    // Parallel arrays of raw values and friendly labels for Select options.
+    // For OptionsSource::Inline: the full option list. OptionLabels may be
+    //   empty, in which case values double as labels.
+    // For OptionsSource::SchemaPath: optional label overrides for schema-
+    //   derived values (e.g. "ws281x" -> "WS281x"). Either both arrays are
+    //   empty (no overrides) or both are non-empty and the same length.
+    // For OptionsSource::ExternalTimeZones: optional label overrides for
+    //   specific time zone identifiers. Same empty-or-matched-length rule.
+    std::vector<const char*> OptionValues = {};
+    std::vector<const char*> OptionLabels = {};
 
     // For Options == OptionsSource::SchemaPath: the dotted path within
     // /api/v1/settings/schema where the option array lives.
@@ -332,27 +336,82 @@ struct SettingSpec
     // spec keeps the UI from having to bake a path like "/timezones.json".
     const char* OptionsExternalUrl = nullptr;
 
-    // Optional JSON-object (as a literal string) of value -> friendly-label
-    // overrides for Select options that come from a schema list. For example,
-    // mapping "ws281x" -> "WS281x" and "hub75" -> "HUB75" when the schema
-    // exposes raw driver identifiers. Parsed verbatim by the UI.
-    const char* OptionLabelMapJson = nullptr;
-
     // Finishes the initialization of the spec, and then validates the consistency of its overall contents.
     // Note that it does the latter quite rudely: it uses assert() on things it feels should be in order.
-    // This function is called by this struct's constructors that initialize values, but this being a struct
-    // allows itself to be called from the outside as well.
+    // All call sites must call this after all fields have been assigned. The FinishGuard RAII helper
+    // below is the preferred way to ensure that: construction happens inside the guard, all post-
+    // constructor field assignments are made in the enclosing block body, and the destructor fires
+    // FinishAndValidateInitialization() automatically when the block ends.
     void FinishAndValidateInitialization();
 
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type);
+    // RAII wrapper that calls FinishAndValidateInitialization() when the enclosing scope exits.
+    // Usage:
+    //   {
+    //       SettingSpec::FinishGuard spec(mySpecs.emplace_back(name, friendlyName, type));
+    //       spec->Widget = WidgetKind::Select;
+    //       spec->OptionsSchemaPath = "some.path";
+    //   } // ← FinishAndValidateInitialization() fires here, after all fields are set
+    struct FinishGuard
+    {
+        SettingSpec& ref;
+        explicit FinishGuard(SettingSpec& s) : ref(s) {}
+        ~FinishGuard() { ref.FinishAndValidateInitialization(); }
+        SettingSpec* operator->() const { return &ref; }
+        SettingSpec& operator*()  const { return ref; }
+        FinishGuard(const FinishGuard&)            = delete;
+        FinishGuard& operator=(const FinishGuard&) = delete;
+    };
 
+    // ---- Base constructors (type only) ----
+    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type);
     SettingSpec(const char* name, const char* friendlyName, SettingType type);
 
-    // Constructor that sets both minimum and maximum values
+    // Base constructors with min/max range
     SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type, double min, double max);
-
-    // Constructor that sets both minimum and maximum values
     SettingSpec(const char* name, const char* friendlyName, SettingType type, double min, double max);
+
+    // ---- Constructors for UI-positioned specs (type + section + apiPath) ----
+    // Constructor A: basic positioned spec (Boolean, Color, String, etc.)
+    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                const char* section, const char* apiPath, std::optional<int> priority = {});
+    SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                const char* section, const char* apiPath, std::optional<int> priority = {});
+
+    // Constructor B: positioned spec with non-default access (ReadOnly or WriteOnly)
+    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                const char* section, const char* apiPath, SettingAccess access, bool hasValidation = false);
+    SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                const char* section, const char* apiPath, SettingAccess access, bool hasValidation = false);
+
+    // Constructor C: positioned spec with range (min/max)
+    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                double min, double max, const char* section, const char* apiPath, std::optional<int> priority = {});
+    SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                double min, double max, const char* section, const char* apiPath, std::optional<int> priority = {});
+
+    // Constructor D: positioned SchemaPath Select widget
+    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority = {});
+    SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                const char* section, const char* apiPath, const char* optionsSchemaPath, std::optional<int> priority = {});
+
+    // Constructor E: positioned Select widget with non-Inline source (IntlCountryCodes or ExternalTimeZones)
+    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                const char* section, const char* apiPath, OptionsSource optionsSource,
+                const char* optionsExternalUrl = nullptr);
+    SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                const char* section, const char* apiPath, OptionsSource optionsSource,
+                const char* optionsExternalUrl = nullptr);
+
+    // Constructor F: positioned Slider widget with display scale
+    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type,
+                const char* section, const char* apiPath,
+                double displayRawMin, double displayRawMax, double displayMin, double displayMax,
+                const char* displaySuffix = nullptr, bool hasValidation = false);
+    SettingSpec(const char* name, const char* friendlyName, SettingType type,
+                const char* section, const char* apiPath,
+                double displayRawMin, double displayRawMax, double displayMin, double displayMax,
+                const char* displaySuffix = nullptr, bool hasValidation = false);
 
     SettingSpec() = default;
     virtual ~SettingSpec() = default;
