@@ -47,6 +47,13 @@
 static DRAM_ATTR CRGB l_SinglePixel = CRGB::Blue;
 static DRAM_ATTR uint64_t l_usLastWifiDraw = 0;
 
+// Counters backing g_Values.FPS. They live in the draw thread and are read
+// from the stats endpoint without locking — both are uint32_t writes/reads
+// which are atomic on ESP32, and a single torn read worst-case shows the
+// previous second's tally.
+static uint32_t g_FrameCountThisSecond = 0;
+static uint32_t g_LastSecondBoundaryMs = 0;
+
 // The g_buffer_mutex is a global mutex used to protect access while adding or removing frames
 // from the led buffer.
 
@@ -93,7 +100,6 @@ uint16_t WiFiDraw()
             if (pBuffer)
             {
                 l_usLastWifiDraw = micros();
-                g_Values.Fader = 255;
                 debugV("Calling LEDBuffer::Draw from wire with %d/%zu pixels.", pixelsDrawn, pBuffer->_pStrand->GetLEDCount());
                 pBuffer->DrawBuffer();
                 // In case we drew some pixels and then drew 0 due a failure, we want to return a positive
@@ -287,34 +293,51 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
         uint16_t wifiPixelsDrawn    = 0;
         double frameStartTime       = g_Values.AppTime.FrameStartTime();
 
-        auto& graphics = g_ptrSystem->GetEffectManager().g();
-
-        graphics.PrepareFrame();
-
-        if (nd_network::IsWiFiConnected())
-            wifiPixelsDrawn = WiFiDraw();
-
-        // If we didn't draw now, and it's been a while since we did, and we have at least one local effect, then draw the local effect instead
-
-        if (wifiPixelsDrawn == 0)
-            localPixelsDrawn = LocalDraw();
-
-        // If we drew any pixels by any method, we'll call that a frame and track it for FPS purposes.  We also notify the
-        // color data thread that a new frame is available and can be transmitted to clients
-
-        if (wifiPixelsDrawn + localPixelsDrawn > 0)
         {
-            // If the module has onboard LEDs, we support a couple of different types, and we set it to be the same as whatever
-            // is on LED #0 of Channel #0.
+            std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
+            auto& graphics = g_ptrSystem->GetEffectManager().g();
 
-            ShowOnboardPixel();
-            ShowOnboardRGBLED();
+            graphics.PrepareFrame();
 
-            g_Values.FPS = FastLED.getFPS();
-            g_ptrSystem->GetEffectManager().ReportNewFrameAvailable();
+            if (nd_network::IsWiFiConnected())
+                wifiPixelsDrawn = WiFiDraw();
+
+            // If we didn't draw now, and it's been a while since we did, and we have at least one local effect, then draw the local effect instead
+
+            if (wifiPixelsDrawn == 0)
+                localPixelsDrawn = LocalDraw();
+
+            // If we drew any pixels by any method, we'll call that a frame and track it for FPS purposes.  We also notify the
+            // color data thread that a new frame is available and can be transmitted to clients
+
+            if (wifiPixelsDrawn + localPixelsDrawn > 0)
+            {
+                // If the module has onboard LEDs, we support a couple of different types, and we set it to be the same as whatever
+                // is on LED #0 of Channel #0.
+
+                ShowOnboardPixel();
+                ShowOnboardRGBLED();
+
+                ++g_FrameCountThisSecond;
+                g_ptrSystem->GetEffectManager().ReportNewFrameAvailable();
+            }
+
+            // Frames-per-clock-second tally, independent of whether we drew a
+            // frame in this iteration so an idle chip reports 0 once a full
+            // second of inactivity has rolled past. g_Values.FPS holds the
+            // count from the most-recently-completed clock-second window.
+            const uint32_t nowMs = millis();
+            if (g_LastSecondBoundaryMs == 0)
+                g_LastSecondBoundaryMs = nowMs;
+            while (nowMs - g_LastSecondBoundaryMs >= 1000)
+            {
+                g_Values.FPS = g_FrameCountThisSecond;
+                g_FrameCountThisSecond = 0;
+                g_LastSecondBoundaryMs += 1000;
+            }
+
+            graphics.PostProcessFrame(localPixelsDrawn, wifiPixelsDrawn);
         }
-
-        graphics.PostProcessFrame(localPixelsDrawn, wifiPixelsDrawn);
 
         // Delay at least 2ms and not more than 1s until next frame is due
 

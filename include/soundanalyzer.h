@@ -40,6 +40,7 @@
 #include <arduinoFFT.h>
 #include <array>
 #include <memory>
+#include <mutex>
 
 #include <esp_idf_version.h>
 #define IS_IDF5 (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0))
@@ -234,8 +235,8 @@ class ISoundAnalyzer
     virtual float Peak1Decay(int band) const = 0;
     virtual float Peak2Decay(int band) const = 0;
     virtual unsigned long LastPeak1Time(int band) const = 0;
-    virtual const BeatInfo & LastBeat() const = 0;
-    virtual const BeatInfo & LastNearBeat() const = 0;
+    virtual BeatInfo LastBeat() const = 0;
+    virtual BeatInfo LastNearBeat() const = 0;
 
     // --- Simulation & Testing ---
     virtual void SetSimulateBeat(bool) = 0;
@@ -315,12 +316,12 @@ class SoundAnalyzer : public ISoundAnalyzer // Non-audio case stub
         return 0;
     }
 
-    const BeatInfo & LastBeat() const override
+    BeatInfo LastBeat() const override
     {
         return _beatInfo;
     }
 
-    const BeatInfo & LastNearBeat() const override
+    BeatInfo LastNearBeat() const override
     {
         return _beatInfo;
     }
@@ -450,13 +451,15 @@ class SoundAnalyzerBase : public ISoundAnalyzer
     // Returns the timestamp of the last time the primary peak for this band was updated.
     unsigned long LastPeak1Time(int band) const override;
 
-    const BeatInfo & LastBeat() const override
+    BeatInfo LastBeat() const override
     {
+        std::lock_guard<std::mutex> lock(_beatInfoMutex);
         return _lastBeatInfo;
     }
 
-    const BeatInfo & LastNearBeat() const override
+    BeatInfo LastNearBeat() const override
     {
+        std::lock_guard<std::mutex> lock(_beatInfoMutex);
         return _lastNearBeatInfo;
     }
 
@@ -549,6 +552,7 @@ class SoundAnalyzerBase : public ISoundAnalyzer
     // Keep beat state next to the analyzer so effects observe one shared pulse.
     BeatInfo _lastBeatInfo{};
     BeatInfo _lastNearBeatInfo{};
+    mutable std::mutex _beatInfoMutex;
     PeakData _previousBeatPeaks{};
     float _beatScoreBaseline = 0.0f;
     float _beatFluxBaseline = 0.0f;

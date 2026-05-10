@@ -252,8 +252,6 @@ public:
         config.rx_config.filter_ticks_thresh = 100; // Ignore pulses shorter than 100us
         config.rx_config.idle_threshold = 20000;    // 20ms idle = end of frame
 
-        attachInterruptArg(_pin, &RemoteControlImpl::EdgeISR, this, CHANGE);
-
         if (rmt_config(&config) != ESP_OK) return false;
         if (rmt_driver_install(_channel, 1024, 0) != ESP_OK) return false;
         if (rmt_get_ringbuf_handle(_channel, &_ringbuf) != ESP_OK) return false;
@@ -281,11 +279,6 @@ private:
     rmt_channel_t _channel;
     RingbufHandle_t _ringbuf = NULL;
     bool _begun = false;
-
-    static void EdgeISR(void* arg)
-    {
-        (void)arg;
-    }
 
     bool match(uint32_t measured, uint32_t target) {
         return (measured >= (target - NEC_DECODE_MARGIN)) &&

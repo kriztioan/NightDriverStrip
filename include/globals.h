@@ -92,6 +92,9 @@
 #include <mutex>
 extern std::mutex g_buffer_mutex;
 
+// Protects against drawing during config changes and vice versa
+extern std::recursive_mutex g_effect_manager_mutex;
+
 #include <FastLED.h>
 // If we're not using GNU C, (unlikely in embedded, especially in this
 // heavily ESP/Arduino-accented probject) elide __attribute__ - but even

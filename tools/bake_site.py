@@ -30,37 +30,35 @@
 #
 #---------------------------------------------------------------------------
 
+import gzip
 import os
-import sys
-import subprocess
-
-build="build"
-# Determine build command to run
-for i, arg in enumerate(sys.argv):
-    if arg == 'local':
-        print("Local build is not recommended. see site/readme.md for running a live server", file=sys.stderr)
-        build = "local"
-    if arg == 'offline':
-        build = build + "-offline"
+import shutil
 
 
-# Check if NPM is installed. If its not let the user know.
-try:
-    subprocess.check_call('cd site && npm --version', shell=True, stdout=subprocess.DEVNULL)
-except subprocess.CalledProcessError:
-    print('Error could not find NPM executable. Please install NPM to continue. see README.md/#build-tools', file=sys.stderr)
-    exit(1)
-
-# Install dependencies with NPM
-subprocess.check_call('cd site && npm install --save false', shell=True, stdout=subprocess.DEVNULL)
-
-# Build site with NPM
-subprocess.check_call(f'cd site && npm run {build}', shell=True)
-destFolder = os.path.join('site', 'dist')
+SITE_DIR = "site"
+DEST_DIR = os.path.join(SITE_DIR, "dist")
+ASSETS = (
+    ("index.html", "index.html.gz"),
+    ("styles.css", "styles.css.gz"),
+    ("app.js", "app.js.gz"),
+)
 
 
-htmlBytes = os.stat(os.path.join(destFolder, 'index.html.gz')).st_size
-jsxBytes = os.stat(os.path.join(destFolder, 'index.js.gz')).st_size
-icoBytes = os.stat(os.path.join(destFolder, 'favicon.ico.gz')).st_size
-totalBytes = htmlBytes + jsxBytes + icoBytes
-print('Build completed, html: %d B, jsx: %d B, ico: %d B, total: %d KB' % (htmlBytes, jsxBytes, icoBytes, totalBytes / 1024))
+def gzip_file(source_path, dest_path):
+    with open(source_path, "rb") as src, open(dest_path, "wb") as raw_dst:
+        with gzip.GzipFile(filename="", mode="wb", compresslevel=9, fileobj=raw_dst) as dst:
+            shutil.copyfileobj(src, dst)
+
+
+os.makedirs(DEST_DIR, exist_ok=True)
+
+total_bytes = 0
+for source_name, dest_name in ASSETS:
+    source_path = os.path.join(SITE_DIR, source_name)
+    dest_path = os.path.join(DEST_DIR, dest_name)
+    gzip_file(source_path, dest_path)
+    size = os.stat(dest_path).st_size
+    total_bytes += size
+    print(f"Baked {source_name} -> {dest_name}: {size} B")
+
+print(f"Build completed, total: {total_bytes / 1024:.1f} KB")

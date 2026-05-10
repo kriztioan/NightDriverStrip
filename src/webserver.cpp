@@ -114,6 +114,8 @@ namespace
         auto ws281x = outputs["ws281x"].to<JsonObject>();
         ws281x["channelCount"] = deviceConfig.GetChannelCount();
         ws281x["compiledMaxChannels"] = DeviceConfig::GetCompiledChannelCount();
+        ws281x["colorOrder"] = DeviceConfig::GetColorOrderName(deviceConfig.GetWS281xColorOrder());
+        ws281x["compiledColorOrder"] = DeviceConfig::GetColorOrderName(DeviceConfig::GetCompiledWS281xColorOrder());
         AppendPins(ws281x["pins"].to<JsonArray>(), deviceConfig.GetWS281xPins());
 
         auto effects = root["effects"].to<JsonObject>();
@@ -148,9 +150,24 @@ namespace
         drivers.add(deviceConfig.GetCompiledDriverName());
 
         auto ws281x = outputs["ws281x"].to<JsonObject>();
-        ws281x["compiledMaxChannels"] = DeviceConfig::GetCompiledChannelCount();
+        const auto compiledChannels = DeviceConfig::GetCompiledChannelCount();
+        ws281x["compiledMaxChannels"] = compiledChannels;
         ws281x["compiledMaxLEDs"] = DeviceConfig::GetCompiledLEDCount();
-        AppendPins(ws281x["compiledPins"].to<JsonArray>(), DeviceConfig::GetCompiledPins());
+        ws281x["compiledColorOrder"] = DeviceConfig::GetColorOrderName(DeviceConfig::GetCompiledWS281xColorOrder());
+        // Concrete list of valid channel counts. Specs that drive a select for
+        // channel count point here so the UI doesn't have to derive a range
+        // from a bare integer.
+        auto allowedChannelCounts = ws281x["allowedChannelCounts"].to<JsonArray>();
+        for (size_t channel = 1; channel <= compiledChannels; ++channel)
+            allowedChannelCounts.add(channel);
+        auto allowedColorOrders = ws281x["allowedColorOrders"].to<JsonArray>();
+        allowedColorOrders.add("RGB");
+        allowedColorOrders.add("RBG");
+        allowedColorOrders.add("GRB");
+        allowedColorOrders.add("GBR");
+        allowedColorOrders.add("BRG");
+        allowedColorOrders.add("BGR");
+        AppendPins(ws281x["compiledPins"].to<JsonArray>(), DeviceConfig::GetCompiledWS281xPins());
 
         auto device = root["device"].to<JsonObject>();
         auto remote = device["remote"].to<JsonObject>();
@@ -175,6 +192,95 @@ namespace
         audio["requiresReboot"] = !deviceConfig.SupportsLiveAudioInputReconfigure();
         audio["supportsPinOverride"] = deviceConfig.SupportsConfigurableAudioInputPin();
         audio["rejectMessage"] = "recompile needed";
+
+        // Section catalog. The UI groups settings by spec.section and uses
+        // these entries (matched on id) for the section heading and subtitle.
+        // Sections without any settings are still listed so the UI can decide
+        // whether to render an empty placeholder or skip them.
+        struct SectionInfo
+        {
+            const char* id;
+            const char* title;
+            const char* description;
+        };
+        static constexpr SectionInfo kSections[] =
+        {
+            { "topology",   "Topology",          "Active matrix dimensions and layout." },
+            { "output",     "Output",            "LED driver, channel count, color order, and per-channel pin assignments." },
+            { "appearance", "Appearance",        "Brightness, colors, effect rotation, and visual preferences." },
+            { "audio",      "Audio",             "Microphone input pin and audio capture configuration." },
+            { "location",   "Location",          "Where the device is for weather and timezone defaults." },
+            { "clock",      "Clock & Weather",   "Time display, NTP, and weather API options." },
+            { "system",     "System",            "Identification, power limits, and other system-wide options." },
+        };
+        auto sections = root["sections"].to<JsonArray>();
+        for (const auto& info : kSections)
+        {
+            auto entry = sections.add<JsonObject>();
+            entry["id"] = info.id;
+            entry["title"] = info.title;
+            entry["description"] = info.description;
+        }
+    }
+
+    // Normalizes the unified settings audio pin request into one optional value.
+    // The API currently accepts both the legacy flat device.audioInputPin field
+    // and the nested device.audio.inputPin field, so validation/apply can consume
+    // one resolved value instead of duplicating that lookup logic.
+
+    std::optional<int> GetRequestedUnifiedAudioInputPin(JsonObjectConst device)
+    {
+        std::optional<int> requestedAudioInputPin;
+
+        if (device[DeviceConfig::AudioInputPinTag].is<int>())
+            requestedAudioInputPin = device[DeviceConfig::AudioInputPinTag].as<int>();
+
+        if (device["audio"].is<JsonObjectConst>())
+        {
+            auto audio = device["audio"].as<JsonObjectConst>();
+            if (audio["inputPin"].is<int>())
+                requestedAudioInputPin = audio["inputPin"].as<int>();
+        }
+
+        return requestedAudioInputPin;
+    }
+
+    // Applies a validated runtime topology/output change as one staged transaction.
+    //
+    // The flow is:
+    // 1. Update DeviceConfig in-memory without persisting it.
+    // 2. Ask SystemContainer to reconfigure live devices/buffers/effects.
+    // 3. If live apply fails, restore the previous runtime config and best-effort
+    //    re-apply that old state so the device is not left half-switched.
+    // 4. Only persist the new runtime config after the live reconfigure succeeds.
+    //
+    // This keeps unified settings requests from partially committing topology/output
+    // changes when the runtime apply path fails after validation.
+
+    bool ApplyRuntimeConfigTransaction(const DeviceConfig::RuntimeConfig& requestedConfig, String* errorMessage)
+    {
+        auto& system = *g_ptrSystem;
+        auto& deviceConfig = system.GetDeviceConfig();
+        const auto previousConfig = deviceConfig.GetRuntimeConfig();
+
+        if (!deviceConfig.SetRuntimeConfig(requestedConfig, true, errorMessage))
+            return false;
+
+        if (!system.ApplyRuntimeConfiguration(errorMessage))
+        {
+            deviceConfig.SetRuntimeConfig(previousConfig, true, nullptr);
+
+            String rollbackError;
+            if (!system.ApplyRuntimeConfiguration(&rollbackError))
+                debugE("Failed to roll back runtime configuration after apply error: %s", rollbackError.c_str());
+
+            return false;
+        }
+
+        if (!deviceConfig.SetRuntimeConfig(requestedConfig, false, errorMessage))
+            return false;
+
+        return true;
     }
 }
 
@@ -249,21 +355,25 @@ void CWebServer::begin()
 {
     [[maybe_unused]] extern const uint8_t html_start[] asm("_binary_site_dist_index_html_gz_start");
     [[maybe_unused]] extern const uint8_t html_end[] asm("_binary_site_dist_index_html_gz_end");
-    [[maybe_unused]] extern const uint8_t js_start[] asm("_binary_site_dist_index_js_gz_start");
-    [[maybe_unused]] extern const uint8_t js_end[] asm("_binary_site_dist_index_js_gz_end");
-    [[maybe_unused]] extern const uint8_t ico_start[] asm("_binary_site_dist_favicon_ico_gz_start");
-    [[maybe_unused]] extern const uint8_t ico_end[] asm("_binary_site_dist_favicon_ico_gz_end");
+    [[maybe_unused]] extern const uint8_t css_start[] asm("_binary_site_dist_styles_css_gz_start");
+    [[maybe_unused]] extern const uint8_t css_end[] asm("_binary_site_dist_styles_css_gz_end");
+    [[maybe_unused]] extern const uint8_t js_start[] asm("_binary_site_dist_app_js_gz_start");
+    [[maybe_unused]] extern const uint8_t js_end[] asm("_binary_site_dist_app_js_gz_end");
     [[maybe_unused]] extern const uint8_t timezones_start[] asm("_binary_config_timezones_json_start");
     [[maybe_unused]] extern const uint8_t timezones_end[] asm("_binary_config_timezones_json_end");
 
+    auto trimmedTimezonesEnd = timezones_end;
+    while (trimmedTimezonesEnd > timezones_start && *(trimmedTimezonesEnd - 1) == 0)
+        --trimmedTimezonesEnd;
+
     EmbeddedWebFile html_file(html_start, html_end, "text/html", "gzip");
+    EmbeddedWebFile css_file(css_start, css_end, "text/css", "gzip");
     EmbeddedWebFile js_file(js_start, js_end, "application/javascript", "gzip");
-    EmbeddedWebFile ico_file(ico_start, ico_end, "image/vnd.microsoft.icon", "gzip");
-    EmbeddedWebFile timezones_file(timezones_start, timezones_end - 1, "text/json"); // end - 1 because of zero-termination
+    EmbeddedWebFile timezones_file(timezones_start, trimmedTimezonesEnd, "text/json");
 
     debugI("Embedded html file size: %zu", (size_t)html_file.length);
-    debugI("Embedded jsx file size: %zu", (size_t)js_file.length);
-    debugI("Embedded ico file size: %zu", (size_t)ico_file.length);
+    debugI("Embedded css file size: %zu", (size_t)css_file.length);
+    debugI("Embedded js file size: %zu", (size_t)js_file.length);
     debugI("Embedded timezones file size: %zu", (size_t)timezones_file.length);
 
     _staticStats.HeapSize = ESP.getHeapSize();
@@ -340,8 +450,8 @@ void CWebServer::begin()
 
         ServeEmbeddedFile("/", html_file);
         ServeEmbeddedFile("/index.html", html_file);
-        ServeEmbeddedFile("/index.js", js_file);
-        ServeEmbeddedFile("/favicon.ico", ico_file);
+        ServeEmbeddedFile("/styles.css", css_file);
+        ServeEmbeddedFile("/app.js", js_file);
     #endif
 
     // Not found handler
@@ -448,6 +558,8 @@ void CWebServer::GetStatistics(AsyncWebServerRequest * pRequest, StatisticsType 
         j["ACTIVE_NUM_CHANNELS"]        = deviceConfig.GetChannelCount();
         j["COMPILED_OUTPUT_DRIVER"]     = deviceConfig.GetCompiledDriverName();
         j["ACTIVE_OUTPUT_DRIVER"]       = deviceConfig.GetRuntimeDriverName();
+        j["COMPILED_WS281X_COLOR_ORDER"] = DeviceConfig::GetColorOrderName(DeviceConfig::GetCompiledWS281xColorOrder());
+        j["CONFIGURED_WS281X_COLOR_ORDER"] = DeviceConfig::GetColorOrderName(deviceConfig.GetWS281xColorOrder());
         j["COMPILED_AUDIO_INPUT_PIN"]   = DeviceConfig::GetCompiledAudioInputPin();
         j["CONFIGURED_AUDIO_INPUT_PIN"] = deviceConfig.GetAudioInputPin();
         j["AUDIO_INPUT_MODE"]           = deviceConfig.GetAudioInputModeName();
@@ -624,6 +736,75 @@ void CWebServer::SendSettingSpecsResponse(AsyncWebServerRequest * pRequest, cons
                 break;
         }
 
+        // ---- UI metadata: section, priority, requiresReboot, apiPath, widget ----
+
+        if (spec.Section)
+            jsonDoc["section"] = spec.Section;
+        if (spec.Priority.has_value())
+            jsonDoc["priority"] = spec.Priority.value();
+        if (spec.RequiresReboot)
+            jsonDoc["requiresReboot"] = true;
+        if (spec.ApiPath)
+            jsonDoc["apiPath"] = spec.ApiPath;
+
+        if (spec.Widget != SettingSpec::WidgetKind::Default)
+        {
+            auto widget = jsonDoc["widget"].to<JsonObject>();
+            widget["kind"] = spec.WidgetName();
+
+            if (spec.Widget == SettingSpec::WidgetKind::Slider
+                && spec.DisplayRawMin.has_value()) // Presence of other Display members is validated at SettingSpec construction
+            {
+                auto scale = widget["displayScale"].to<JsonObject>();
+                scale["rawMin"]     = spec.DisplayRawMin.value();
+                scale["rawMax"]     = spec.DisplayRawMax.value();
+                scale["displayMin"] = spec.DisplayMin.value();
+                scale["displayMax"] = spec.DisplayMax.value();
+                if (spec.DisplaySuffix)
+                    scale["suffix"] = spec.DisplaySuffix;
+            }
+            else if (spec.Widget == SettingSpec::WidgetKind::IntervalToggle)
+            {
+                auto interval = widget["interval"].to<JsonObject>();
+                interval["unitDivisor"] = spec.IntervalUnitDivisor;
+                if (spec.IntervalUnitLabel)
+                    interval["unitLabel"] = spec.IntervalUnitLabel;
+                if (spec.IntervalOnLabel)
+                    interval["onLabel"] = spec.IntervalOnLabel;
+                if (spec.IntervalOffLabel)
+                    interval["offLabel"] = spec.IntervalOffLabel;
+            }
+            else if (spec.Widget == SettingSpec::WidgetKind::Select)
+            {
+                auto options = widget["options"].to<JsonObject>();
+                options["source"] = spec.OptionsSourceName();
+
+                auto addOptionArrays = [&]()
+                {
+                    auto valuesArr = options["values"].to<JsonArray>();
+                    for (auto entry : spec.OptionValues)
+                        valuesArr.add(entry ? entry : "");
+                    auto labelsArr = options["labels"].to<JsonArray>();
+                    for (auto entry : spec.OptionLabels)
+                        labelsArr.add(entry ? entry : "");
+                };
+
+                if (spec.Options == SettingSpec::OptionsSource::Inline)
+                {
+                    addOptionArrays();
+                }
+                else if (spec.OptionsSchemaPath)
+                {
+                    options["schemaPath"] = spec.OptionsSchemaPath;
+                    if (!spec.OptionValues.empty())
+                        addOptionArrays();
+                }
+
+                if (spec.OptionsExternalUrl)
+                    options["url"] = spec.OptionsExternalUrl;
+            }
+        }
+
         if (jsonDoc.overflowed() || !specObject.set(jsonDoc.as<JsonObjectConst>()))
         {
             debugV("JSON response buffer overflow!");
@@ -639,12 +820,25 @@ const std::vector<std::reference_wrapper<SettingSpec>> & CWebServer::LoadDeviceS
 {
     if (deviceSettingSpecs.empty())
     {
-        mySettingSpecs.emplace_back(
-            "effectInterval",
-            "Effect interval",
-            "The duration in milliseconds that an individual effect runs, before the next effect is activated.",
-            SettingSpec::SettingType::PositiveBigInteger
-        );
+        // effectInterval lives on the EffectManager rather than DeviceConfig,
+        // so its spec is owned here. The Widget metadata mirrors the legacy
+        // composite "Rotate effects toggle + seconds input" UX in a way the
+        // front-end can render generically.
+        mySettingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name                = "effectInterval",
+            .FriendlyName        = "Effect interval",
+            .Description         = "The duration in milliseconds that an individual effect runs, before the next effect is activated. "
+                                   "Disable rotation to keep the current effect active indefinitely.",
+            .Type                = SettingSpec::SettingType::PositiveBigInteger,
+            .Section             = "appearance",
+            .ApiPath             = "effects.effectInterval",
+            .Widget              = SettingSpec::WidgetKind::IntervalToggle,
+            .IntervalUnitDivisor = 1000,
+            .IntervalOnLabel     = "Rotate effects",
+            .IntervalOffLabel    = "Off",
+            .IntervalUnitLabel   = "seconds"
+        }));
+
         deviceSettingSpecs.insert(deviceSettingSpecs.end(), mySettingSpecs.begin(), mySettingSpecs.end());
 
         auto deviceConfigSpecs = g_ptrSystem->GetDeviceConfig().GetSettingSpecs();
@@ -699,7 +893,7 @@ bool CWebServer::ValidateLegacyDeviceSettings(AsyncWebServerRequest * pRequest, 
     // Validate the constrained settings first so the legacy POST path behaves like the unified JSON API:
     // either the nontrivial request is coherent as a whole, or we reject it before any setters persist a
     // partially applied config.
-    
+
     if (pRequest->hasParam(DeviceConfig::OpenWeatherApiKeyTag, true, false))
     {
         auto [isValid, validationMessage] =
@@ -852,6 +1046,14 @@ bool CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* 
     runtimeConfigChanged = PushPostParamIfPresent<bool>(pRequest, DeviceConfig::MatrixSerpentineTag, SET_VALUE(runtimeConfig.topology.serpentine = value)) || runtimeConfigChanged;
     runtimeConfigChanged = PushPostParamIfPresent<size_t>(pRequest, DeviceConfig::WS281xChannelCountTag, SET_VALUE(runtimeConfig.outputs.channelCount = value)) || runtimeConfigChanged;
     runtimeConfigChanged = PushPostParamIfPresent<String>(pRequest, DeviceConfig::OutputDriverTag, SET_VALUE(runtimeConfig.outputs.driver = value == "hub75" ? DeviceConfig::OutputDriver::HUB75 : DeviceConfig::OutputDriver::WS281x)) || runtimeConfigChanged;
+    runtimeConfigChanged = PushPostParamIfPresent<String>(pRequest, DeviceConfig::WS281xColorOrderTag, SET_VALUE(
+        if (value == "RGB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RGB;
+        else if (value == "RBG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RBG;
+        else if (value == "GRB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GRB;
+        else if (value == "GBR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GBR;
+        else if (value == "BRG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BRG;
+        else if (value == "BGR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BGR;
+    )) || runtimeConfigChanged;
 
     if (runtimeConfigChanged)
     {
@@ -860,6 +1062,17 @@ bool CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* 
         {
             if (errorMessage)
                 *errorMessage = validationMessage;
+            return false;
+        }
+    }
+
+    if (runtimeConfigChanged)
+    {
+        String runtimeErrorMessage;
+        if (!ApplyRuntimeConfigTransaction(runtimeConfig, &runtimeErrorMessage))
+        {
+            if (errorMessage)
+                *errorMessage = runtimeErrorMessage;
             return false;
         }
     }
@@ -892,18 +1105,6 @@ bool CWebServer::SetSettingsIfPresent(AsyncWebServerRequest * pRequest, String* 
     deviceConfig.ApplyColorSettings(globalColor, secondColor,
                                     IsPostParamTrue(pRequest, DeviceConfig::ClearGlobalColorTag),
                                     IsPostParamTrue(pRequest, DeviceConfig::ApplyGlobalColorsTag));
-
-    if (runtimeConfigChanged)
-    {
-        String runtimeErrorMessage;
-        if (!deviceConfig.SetRuntimeConfig(runtimeConfig, false, &runtimeErrorMessage)
-            || !g_ptrSystem->ApplyRuntimeConfiguration(&runtimeErrorMessage))
-        {
-            if (errorMessage)
-                *errorMessage = runtimeErrorMessage;
-            return false;
-        }
-    }
 
     if (errorMessage)
         *errorMessage = "";
@@ -938,7 +1139,8 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
     auto root = json.as<JsonObjectConst>();
     auto& deviceConfig = g_ptrSystem->GetDeviceConfig();
     auto& effectManager = g_ptrSystem->GetEffectManager();
-    auto runtimeConfig = deviceConfig.GetRuntimeConfig();
+    const auto previousRuntimeConfig = deviceConfig.GetRuntimeConfig();
+    auto runtimeConfig = previousRuntimeConfig;
 
     if (root["topology"].is<JsonObjectConst>())
     {
@@ -961,6 +1163,16 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
         {
             auto ws281x = outputs["ws281x"].as<JsonObjectConst>();
             if (ws281x["channelCount"].is<size_t>()) runtimeConfig.outputs.channelCount = ws281x["channelCount"].as<size_t>();
+            if (ws281x["colorOrder"].is<String>())
+            {
+                const auto colorOrder = ws281x["colorOrder"].as<String>();
+                if (colorOrder == "RGB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RGB;
+                else if (colorOrder == "RBG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::RBG;
+                else if (colorOrder == "GRB") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GRB;
+                else if (colorOrder == "GBR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::GBR;
+                else if (colorOrder == "BRG") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BRG;
+                else if (colorOrder == "BGR") runtimeConfig.outputs.colorOrder = DeviceConfig::WS281xColorOrder::BGR;
+            }
             if (ws281x["pins"].is<JsonArrayConst>())
             {
                 auto pins = ws281x["pins"].as<JsonArrayConst>();
@@ -989,7 +1201,27 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
             AddCORSHeaderAndSendBadRequest(pRequest, validationMessage);
             return;
         }
+    }
 
+    const bool runtimeConfigChanged =
+        previousRuntimeConfig.topology.width != runtimeConfig.topology.width
+        || previousRuntimeConfig.topology.height != runtimeConfig.topology.height
+        || previousRuntimeConfig.topology.serpentine != runtimeConfig.topology.serpentine
+        || previousRuntimeConfig.outputs.driver != runtimeConfig.outputs.driver
+        || previousRuntimeConfig.outputs.channelCount != runtimeConfig.outputs.channelCount
+        || previousRuntimeConfig.outputs.outputPins != runtimeConfig.outputs.outputPins
+        || previousRuntimeConfig.outputs.colorOrder != runtimeConfig.outputs.colorOrder;
+
+    String errorMessage;
+    if (runtimeConfigChanged && !ApplyRuntimeConfigTransaction(runtimeConfig, &errorMessage))
+    {
+        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
+        return;
+    }
+
+    if (root["device"].is<JsonObjectConst>())
+    {
+        auto device = root["device"].as<JsonObjectConst>();
         if (device[DeviceConfig::HostnameTag].is<String>()) deviceConfig.SetHostname(device[DeviceConfig::HostnameTag].as<String>());
         if (device[DeviceConfig::LocationTag].is<String>()) deviceConfig.SetLocation(device[DeviceConfig::LocationTag].as<String>());
         if (device[DeviceConfig::LocationIsZipTag].is<bool>()) deviceConfig.SetLocationIsZip(device[DeviceConfig::LocationIsZipTag].as<bool>());
@@ -1002,12 +1234,8 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
         if (device[DeviceConfig::RememberCurrentEffectTag].is<bool>()) deviceConfig.SetRememberCurrentEffect(device[DeviceConfig::RememberCurrentEffectTag].as<bool>());
         if (device[DeviceConfig::PowerLimitTag].is<int>()) deviceConfig.SetPowerLimit(device[DeviceConfig::PowerLimitTag].as<int>());
         if (device[DeviceConfig::BrightnessTag].is<int>()) deviceConfig.SetBrightness(device[DeviceConfig::BrightnessTag].as<int>());
-        if (device[DeviceConfig::AudioInputPinTag].is<int>()) deviceConfig.SetAudioInputPin(device[DeviceConfig::AudioInputPinTag].as<int>());
-        if (device["audio"].is<JsonObjectConst>())
-        {
-            auto audio = device["audio"].as<JsonObjectConst>();
-            if (audio["inputPin"].is<int>()) deviceConfig.SetAudioInputPin(audio["inputPin"].as<int>());
-        }
+        if (const auto requestedAudioInputPin = GetRequestedUnifiedAudioInputPin(device); requestedAudioInputPin.has_value())
+            deviceConfig.SetAudioInputPin(requestedAudioInputPin.value());
 
         std::optional<CRGB> globalColor = {};
         std::optional<CRGB> secondColor = {};
@@ -1023,19 +1251,6 @@ void CWebServer::SetUnifiedSettings(AsyncWebServerRequest * pRequest, JsonVarian
         auto effects = root["effects"].as<JsonObjectConst>();
         if (effects["effectInterval"].is<size_t>())
             effectManager.SetInterval(effects["effectInterval"].as<size_t>());
-    }
-
-    String errorMessage;
-    if (!deviceConfig.SetRuntimeConfig(runtimeConfig, false, &errorMessage))
-    {
-        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
-        return;
-    }
-
-    if (!g_ptrSystem->ApplyRuntimeConfiguration(&errorMessage))
-    {
-        AddCORSHeaderAndSendBadRequest(pRequest, errorMessage);
-        return;
     }
 
     GetUnifiedSettings(pRequest);
@@ -1103,7 +1318,11 @@ bool CWebServer::ApplyEffectSettings(AsyncWebServerRequest * pRequest, std::shar
 
     for (auto& settingSpecWrapper : effect->GetSettingSpecs())
     {
-        const String& settingName = settingSpecWrapper.get().Name;
+        const auto& spec = settingSpecWrapper.get();
+        // Settings with an ApiPath are addressed via a structured path, not by name — skip them here.
+        if (spec.ApiPath)
+            continue;
+        const String& settingName = spec.Name;
         settingChanged = PushPostParamIfPresent<String>(pRequest, settingName, [&](auto value) { return effect->SetSetting(settingName, value); })
             || settingChanged;
     }
@@ -1135,6 +1354,10 @@ void CWebServer::ValidateAndSetSetting(AsyncWebServerRequest * pRequest)
     for (auto& settingSpecWrapper : LoadDeviceSettingSpecs())
     {
         auto& settingSpec = settingSpecWrapper.get();
+
+        // Settings with an ApiPath are addressed via a structured path, not by name — skip them here.
+        if (settingSpec.ApiPath)
+            continue;
 
         if (pRequest->hasParam(settingSpec.Name, true))
         {
@@ -1219,7 +1442,8 @@ void CWebServer::Reset(AsyncWebServerRequest * pRequest)
     if (boardResetRequested)
     {
         debugW("Resetting device at API request!");
-        throw std::runtime_error("Resetting device at API request");
+        delay(250);
+        ESP.restart();
     }
 }
 

@@ -93,8 +93,19 @@ void LEDBuffer::DrawBuffer()
 
 void LEDBuffer::Reconfigure(std::shared_ptr<GFXBase> pStrand)
 {
+    const auto nextLedCount = pStrand ? pStrand->GetLEDCount() : 0;
+    const auto currentLedCount = _pStrand ? _pStrand->GetLEDCount() : 0;
+
     _pStrand = std::move(pStrand);
-    _leds.reset(psram_allocator<CRGB>().allocate(_pStrand->GetLEDCount()));
+
+    // Pin/color-order changes should not churn every buffered frame. Only reallocate when the
+    // actual LED count changes; otherwise just retarget the buffer to the new strand config.
+    if (nextLedCount != currentLedCount)
+    {
+        _leds.reset();
+        _leds.reset(psram_allocator<CRGB>().allocate(nextLedCount));
+    }
+
     _pixelCount = 0;
     _timeStampMicroseconds = 0;
     _timeStampSeconds = 0;

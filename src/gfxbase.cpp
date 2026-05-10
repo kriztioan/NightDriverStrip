@@ -137,7 +137,7 @@ CRGB GFXBase::getPixel(int16_t x, int16_t y) const
     if (isValidPixel(x, y))
         return leds[XY(x, y)];
     else
-        throw std::runtime_error(str_sprintf("Invalid index in getPixel: x=%d, y=%d, NUM_LEDS=%d", x, y, NUM_LEDS).c_str());
+        throw std::runtime_error(str_sprintf("Invalid index in getPixel: x=%d, y=%d, LEDCount=%zu", x, y, GetLEDCount()).c_str());
 }
 
 // getPixel
@@ -149,7 +149,7 @@ CRGB GFXBase::getPixel(int16_t i) const
     if (isValidPixel(i))
         return leds[i];
     else
-        throw std::runtime_error(str_sprintf("Invalid index in getPixel: i=%d, NUM_LEDS=%d", i, NUM_LEDS).c_str());
+        throw std::runtime_error(str_sprintf("Invalid index in getPixel: i=%d, LEDCount=%zu", i, GetLEDCount()).c_str());
 }
 
 void GFXBase::drawPixel(int16_t x, int16_t y, uint16_t color)
@@ -245,7 +245,7 @@ void GFXBase::setPixel(int16_t x, int16_t y, uint16_t color)
     if (isValidPixel(x, y))
         leds[XY(x, y)] = from16Bit(color);
     else
-        debugE("Invalid setPixel request: x=%d, y=%d, NUM_LEDS=%d", x, y, NUM_LEDS);
+        debugE("Invalid setPixel request: x=%d, y=%d, LEDCount=%zu", x, y, GetLEDCount());
 }
 
 void GFXBase::setPixel(int16_t x, int16_t y, CRGB color)
@@ -253,7 +253,7 @@ void GFXBase::setPixel(int16_t x, int16_t y, CRGB color)
     if (isValidPixel(x, y))
         leds[XY(x, y)] = color;
     else
-        debugE("Invalid setPixel request: x=%d, y=%d, NUM_LEDS=%d", x, y, NUM_LEDS);
+        debugE("Invalid setPixel request: x=%d, y=%d, LEDCount=%zu", x, y, GetLEDCount());
 }
 
 void GFXBase::setPixel(int16_t x, int r, int g, int b)
@@ -261,7 +261,7 @@ void GFXBase::setPixel(int16_t x, int r, int g, int b)
     if (isValidPixel(x))
         setPixel(x, CRGB(r, g, b));
     else
-        debugE("Invalid setPixel request: x=%d, NUM_LEDS=%d", x, NUM_LEDS);
+        debugE("Invalid setPixel request: x=%d, LEDCount=%zu", x, GetLEDCount());
 }
 
 // fadePixelToBlackBy
@@ -1084,7 +1084,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
     // The following functions are specializations of noise-related member function
     // templates declared in gfxbase.h.
 
-    void GFXBase::NoiseVariablesSetup()
+    void GFXBase::NoiseVariablesSetup() const
     {
         _ptrNoise->noisesmoothing = 200;
 
@@ -1104,7 +1104,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
         _ptrNoise->noise_scale_y = sy;
     }
 
-    void GFXBase::FillGetNoise()
+    void GFXBase::FillGetNoise() const
     {
         // Subtracting the center offset before scaling ensures the noise pattern radiates
         // outwards from the center of the display (exactly as #803 intended).
@@ -1377,7 +1377,8 @@ GFXBase::GFXBase(int w, int h) : Adafruit_GFX(w, h),
     // Allocate boids for matrix effects (like PatternBounce) when we have matrix dimensions
     #if MATRIX_HEIGHT > 1
         debugV("Allocating boids for matrix effects");
-        _boids = std::make_unique<Boid[]>(_width);
+        // Boid state scales with width and can become large on matrix targets, so keep it in PSRAM.
+        _boids = make_unique_psram_constructed<Boid>(_width);
         assert(_boids);
     #endif
 
@@ -1390,7 +1391,16 @@ void GFXBase::ConfigureTopology(size_t width, size_t height, bool serpentine)
 {
     // The runtime topology work is intentionally routed through GFXBase so effects that already ask g()
     // for geometry start honoring live strip layouts without each effect learning about DeviceConfig.
-    
+    #if MATRIX_HEIGHT > 1
+    if (width != _width)
+    {
+        debugV("Resizing boid state to match runtime topology width");
+        // Topology changes invalidate width-sized boid caches. Rebuild them in PSRAM before effects restart.
+        _boids = make_unique_psram_constructed<Boid>(width);
+        assert(_boids);
+    }
+    #endif
+
     _width      = width;
     _height     = height;
     _ledcount   = width * height;
@@ -1404,17 +1414,17 @@ void GFXBase::ConfigureTopology(size_t width, size_t height, bool serpentine)
 }
 
 #if USE_NOISE
-void GFXBase::EnsureNoise()
+void GFXBase::EnsureNoise() const
 {
-    if (_ptrNoise)
-        return;
-
-    // Noise is large and only used by a subset of effects. Lazy allocation keeps the boot path leaner
-    // and still allows runtime topology to stay within the build-time maximum noise backing store.
-    _ptrNoise = std::make_unique<Noise>();
-    assert(_ptrNoise);
-    NoiseVariablesSetup();
-    FillGetNoise();
+    std::call_once(_noiseInitOnce, [this]()
+    {
+        // Noise is large and only used by a subset of effects. Lazy allocation keeps the boot path leaner
+        // and still allows runtime topology to stay within the build-time maximum noise backing store.
+        _ptrNoise = std::make_unique<Noise>();
+        assert(_ptrNoise);
+        NoiseVariablesSetup();
+        FillGetNoise();
+    });
 }
 #endif
 

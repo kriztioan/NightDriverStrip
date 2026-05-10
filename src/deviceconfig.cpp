@@ -49,6 +49,29 @@ namespace
 {
     constexpr const char* kRecompileNeededMessage = "recompile needed";
 
+    // It's annoying to have to map from the compile-time COLOR_ORDER macro to the
+    // runtime enum, but it is what it is.  It's better than tying to a FastLED type.
+
+    constexpr DeviceConfig::WS281xColorOrder ToRuntimeColorOrder(EOrder order)
+    {
+        switch (order)
+        {
+            case EOrder::RGB: return DeviceConfig::WS281xColorOrder::RGB;
+            case EOrder::RBG: return DeviceConfig::WS281xColorOrder::RBG;
+            case EOrder::GRB: return DeviceConfig::WS281xColorOrder::GRB;
+            case EOrder::GBR: return DeviceConfig::WS281xColorOrder::GBR;
+            case EOrder::BRG: return DeviceConfig::WS281xColorOrder::BRG;
+            case EOrder::BGR: return DeviceConfig::WS281xColorOrder::BGR;
+            default:          return DeviceConfig::WS281xColorOrder::GRB;
+        }
+    }
+
+    #if USE_WS281X
+    constexpr auto kCompiledWS281xColorOrder = ToRuntimeColorOrder(COLOR_ORDER);
+    #else
+    constexpr auto kCompiledWS281xColorOrder = DeviceConfig::WS281xColorOrder::GRB;
+    #endif
+
     constexpr std::array<int8_t, NUM_CHANNELS> kCompiledWS281xPins = {
         #if NUM_CHANNELS >= 1
         LED_PIN0,
@@ -119,6 +142,25 @@ const char* DeviceConfig::DriverName(OutputDriver driver)
     }
 }
 
+DeviceConfig::WS281xColorOrder DeviceConfig::GetCompiledWS281xColorOrder()
+{
+    return kCompiledWS281xColorOrder;
+}
+
+String DeviceConfig::GetColorOrderName(WS281xColorOrder colorOrder)
+{
+    switch (colorOrder)
+    {
+        case WS281xColorOrder::RGB: return "RGB";
+        case WS281xColorOrder::RBG: return "RBG";
+        case WS281xColorOrder::GRB: return "GRB";
+        case WS281xColorOrder::GBR: return "GBR";
+        case WS281xColorOrder::BRG: return "BRG";
+        case WS281xColorOrder::BGR: return "BGR";
+        default:                    return "GRB";
+    }
+}
+
 bool DeviceConfig::IsHub75Build()
 {
     return GetCompiledOutputDriver() == OutputDriver::HUB75;
@@ -134,14 +176,15 @@ void DeviceConfig::LogRuntimeConfig(const char* reason) const
         activePins += String(runtimeOutputs.outputPins[i]);
     }
 
-    debugI("Runtime config (%s): driver=%s matrix=%ux%u leds=%u serpentine=%d channels=%u audioPin=%d",
+    debugI("Runtime config (%s): driver=%s matrix=%ux%u leds=%u serpentine=%d channels=%u colorOrder=%s audioPin=%d",
            reason,
            DriverName(runtimeOutputs.driver),
            runtimeTopology.width,
            runtimeTopology.height,
            static_cast<unsigned>(GetActiveLEDCount()),
            runtimeTopology.serpentine,
-           static_cast<unsigned>(runtimeOutputs.channelCount),
+            static_cast<unsigned>(runtimeOutputs.channelCount),
+           GetColorOrderName(runtimeOutputs.colorOrder).c_str(),
            audioInputPin);
     debugI("Runtime config pins (%s): activeChannels=%s", reason, activePins.c_str());
 }
@@ -152,6 +195,7 @@ DeviceConfig::DeviceConfig()
     runtimeOutputs.driver = GetCompiledOutputDriver();
     runtimeOutputs.channelCount = NUM_CHANNELS;
     runtimeOutputs.outputPins = GetCompiledWS281xPins();
+    runtimeOutputs.colorOrder = GetCompiledWS281xColorOrder();
 
     writerIndex = g_ptrSystem->GetJSONWriter().RegisterWriter(
         [this] { assert(SaveToJSONFile(DEVICE_CONFIG_FILE, *this)); }
@@ -211,6 +255,7 @@ bool DeviceConfig::SerializeToJSON(JsonObject& jsonObject, bool includeSensitive
     jsonDoc[MatrixSerpentineTag] = runtimeTopology.serpentine;
     jsonDoc[OutputDriverTag] = DriverName(runtimeOutputs.driver);
     jsonDoc[WS281xChannelCountTag] = runtimeOutputs.channelCount;
+    jsonDoc[WS281xColorOrderTag] = GetColorOrderName(runtimeOutputs.colorOrder);
 
     auto ws281xPins = jsonDoc[WS281xPinsTag].to<JsonArray>();
     for (auto pin : runtimeOutputs.outputPins)
@@ -281,6 +326,17 @@ bool DeviceConfig::DeserializeFromJSON(const JsonObjectConst& jsonObject, bool s
     if (jsonObject[WS281xChannelCountTag].is<size_t>())
         updated.outputs.channelCount = jsonObject[WS281xChannelCountTag].as<size_t>();
 
+    if (jsonObject[WS281xColorOrderTag].is<String>())
+    {
+        const auto colorOrderName = jsonObject[WS281xColorOrderTag].as<String>();
+        if (colorOrderName == "RGB") updated.outputs.colorOrder = WS281xColorOrder::RGB;
+        else if (colorOrderName == "RBG") updated.outputs.colorOrder = WS281xColorOrder::RBG;
+        else if (colorOrderName == "GRB") updated.outputs.colorOrder = WS281xColorOrder::GRB;
+        else if (colorOrderName == "GBR") updated.outputs.colorOrder = WS281xColorOrder::GBR;
+        else if (colorOrderName == "BRG") updated.outputs.colorOrder = WS281xColorOrder::BRG;
+        else if (colorOrderName == "BGR") updated.outputs.colorOrder = WS281xColorOrder::BGR;
+    }
+
     if (jsonObject[WS281xPinsTag].is<JsonArrayConst>())
     {
         auto pinArray = jsonObject[WS281xPinsTag].as<JsonArrayConst>();
@@ -299,7 +355,7 @@ bool DeviceConfig::DeserializeFromJSON(const JsonObjectConst& jsonObject, bool s
         ntpServer = NTP_SERVER_DEFAULT;
 
     if (jsonObject[TimeZoneTag].is<String>())
-        return SetTimeZoneInternal(jsonObject[TimeZoneTag], true);
+        return SetTimeZone(jsonObject[TimeZoneTag], true);
 
     if (!skipWrite)
         SaveToJSON();
@@ -316,175 +372,315 @@ const std::vector<std::reference_wrapper<SettingSpec>>& DeviceConfig::GetSetting
 {
     if (settingSpecs.empty())
     {
-        // Add SettingSpec for additional settings to this list
-        settingSpecs.emplace_back(
-            HostnameTag,
-            "Hostname",
-            "The hostname of the device. A reboot is required after changing this.",
-            SettingSpec::SettingType::String
-        ).EmptyAllowed = true;
-        settingSpecs.emplace_back(
-            LocationTag,
-            "Location",
-            "The location (city or postal code) where the device is located.",
-            SettingSpec::SettingType::String
-        );
-        settingSpecs.emplace_back(
-            LocationIsZipTag,
-            "Location is postal code",
-            "Indicates if the value for the \"Location\" setting is a postal code (yes if checked) or not.",
-            SettingSpec::SettingType::Boolean
-        );
-        settingSpecs.emplace_back(
-            CountryCodeTag,
-            "Country code",
-            "The <a href=\"https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2\">ISO 3166-1 alpha-2</a> country "
-            "code for the country that the device is located in.",
-            SettingSpec::SettingType::String
-        );
+        // Section keys used below correspond to entries in the section catalog
+        // emitted by FillUnifiedSettingsSchemaJson(). Keep them in sync.
+        constexpr const char* kSectionSystem     = "system";
+        constexpr const char* kSectionLocation   = "location";
+        constexpr const char* kSectionClock      = "clock";
+        constexpr const char* kSectionAudio      = "audio";
+        constexpr const char* kSectionAppearance = "appearance";
+        constexpr const char* kSectionTopology   = "topology";
+        constexpr const char* kSectionOutput     = "output";
 
-        auto weatherKeySpec = settingSpecs.emplace_back(
-            OpenWeatherApiKeyTag,
-            "Open Weather API key",
-            "The API key for the <a href=\"https://openweathermap.org/api\">Weather API provided by Open Weather Map</a>.",
-            SettingSpec::SettingType::String
-        );
-        weatherKeySpec.HasValidation = true;
-        weatherKeySpec.Access = SettingSpec::SettingAccess::WriteOnly;
-        weatherKeySpec.EmptyAllowed.reset();        // Silently ignore empty value at the front-end
+        // ---- system section ------------------------------------------------
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name           = HostnameTag,
+            .FriendlyName   = "Hostname",
+            .Description    = "The hostname of the device. A reboot is required after changing this.",
+            .Type           = SettingSpec::SettingType::String,
+            .EmptyAllowed   = true,
+            .Section        = kSectionSystem,
+            .RequiresReboot = true,
+            .ApiPath        = "device.hostname"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name          = PowerLimitTag,
+            .FriendlyName  = "Power limit",
+            .Description   = "The maximum power in mW that the matrix attached to the board is allowed to use. As the previous sentence implies, this "
+                             "setting only applies if a matrix is used.",
+            .Type          = SettingSpec::SettingType::Integer,
+            .HasValidation = true,
+            .MinimumValue  = (double)POWER_LIMIT_MIN,
+            .Section       = kSectionSystem,
+            .ApiPath       = "device.powerLimit"
+        }));
 
-        settingSpecs.emplace_back(
-            TimeZoneTag,
-            "Time zone",
-            "The timezone the device resides in, in <a href=\"https://en.wikipedia.org/wiki/Tz_database\">tz database</a> format. "
-            "The list of available timezone identifiers can be found in the <a href=\"/timezones.json\">timezones.json</a> file.",
-            SettingSpec::SettingType::String
-        );
-        settingSpecs.emplace_back(
-            Use24HourClockTag,
-            "Use 24 hour clock",
-            "Indicates if time should be shown in 24-hour format (yes if checked) or 12-hour AM/PM format.",
-            SettingSpec::SettingType::Boolean
-        );
-        settingSpecs.emplace_back(
-            UseCelsiusTag,
-            "Use degrees Celsius",
-            "Indicates if temperatures should be shown in degrees Celsius (yes if checked) or degrees Fahrenheit.",
-            SettingSpec::SettingType::Boolean
-        );
-        settingSpecs.emplace_back(
-            NTPServerTag,
-            "NTP server address",
-            "The hostname or IP address of the NTP server to be used for time synchronization.",
-            SettingSpec::SettingType::String
-        );
-        settingSpecs.emplace_back(
-            RememberCurrentEffectTag,
-            "Remember current effect",
-            "Indicates if the current effect index should be saved after an effect transition, so the device resumes "
-            "from the same effect when restarted. Enabling this will lead to more wear on the flash chip of your device.",
-            SettingSpec::SettingType::Boolean
-        );
-        settingSpecs.emplace_back(
-            BrightnessTag,
-            "Brightness",
-            "Overall brightness the connected LEDs or matrix should be run at.",
-            SettingSpec::SettingType::Slider,
-            BRIGHTNESS_MIN,
-            BRIGHTNESS_MAX
-        ).HasValidation = true;
+        // ---- location section ----------------------------------------------
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = LocationTag,
+            .FriendlyName = "Location",
+            .Description  = "The location (city or postal code) where the device is located.",
+            .Type         = SettingSpec::SettingType::String,
+            .Section      = kSectionLocation,
+            .ApiPath      = "device.location"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = LocationIsZipTag,
+            .FriendlyName = "Location is postal code",
+            .Description  = "Indicates if the value for the \"Location\" setting is a postal code (yes if checked) or not.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Section      = kSectionLocation,
+            .ApiPath      = "device.locationIsZip"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = CountryCodeTag,
+            .FriendlyName = "Country code",
+            .Description  = "The <a href=\"https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2\">ISO 3166-1 alpha-2</a> country "
+                            "code for the country that the device is located in.",
+            .Type         = SettingSpec::SettingType::String,
+            .Section      = kSectionLocation,
+            .ApiPath      = "device.countryCode",
+            .Widget       = SettingSpec::WidgetKind::Select,
+            .Options      = SettingSpec::OptionsSource::IntlCountryCodes
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name               = TimeZoneTag,
+            .FriendlyName       = "Time zone",
+            .Description        = "The timezone the device resides in, in <a href=\"https://en.wikipedia.org/wiki/Tz_database\">tz database</a> format. "
+                                  "The list of available timezone identifiers can be found in the <a href=\"/timezones.json\">timezones.json</a> file.",
+            .Type               = SettingSpec::SettingType::String,
+            .Section            = kSectionLocation,
+            .ApiPath            = "device.timeZone",
+            .Widget             = SettingSpec::WidgetKind::Select,
+            .Options            = SettingSpec::OptionsSource::ExternalTimeZones,
+            .OptionsExternalUrl = "/timezones.json"
+        }));
 
-        // Only publish the VU meter setting if the VU meter is enabled in the build
+        // ---- clock section -------------------------------------------------
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = Use24HourClockTag,
+            .FriendlyName = "Use 24 hour clock",
+            .Description  = "Indicates if time should be shown in 24-hour format (yes if checked) or 12-hour AM/PM format.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Section      = kSectionClock,
+            .ApiPath      = "device.use24HourClock"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = UseCelsiusTag,
+            .FriendlyName = "Use degrees Celsius",
+            .Description  = "Indicates if temperatures should be shown in degrees Celsius (yes if checked) or degrees Fahrenheit.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Section      = kSectionClock,
+            .ApiPath      = "device.useCelsius"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = NTPServerTag,
+            .FriendlyName = "NTP server address",
+            .Description  = "The hostname or IP address of the NTP server to be used for time synchronization.",
+            .Type         = SettingSpec::SettingType::String,
+            .Section      = kSectionClock,
+            .ApiPath      = "device.ntpServer"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name          = OpenWeatherApiKeyTag,
+            .FriendlyName  = "Open Weather API key",
+            .Description   = "The API key for the <a href=\"https://openweathermap.org/api\">Weather API provided by Open Weather Map</a>.",
+            .Type          = SettingSpec::SettingType::String,
+            .HasValidation = true,
+            .Access        = SettingSpec::SettingAccess::WriteOnly,
+            .Section       = kSectionClock,
+            .ApiPath       = "device.openWeatherApiKey"
+        }));
+
+        // ---- audio section -------------------------------------------------
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name           = AudioInputPinTag,
+            .FriendlyName   = "Audio input pin",
+            .Description    = "External microphone input pin. This is boot-applied today because the audio task still owns the active DMA/I2S handles once sampling starts.",
+            .Type           = SettingSpec::SettingType::Integer,
+            .HasValidation  = true,
+            .MinimumValue   = -1.0,
+            .MaximumValue   = 48.0,
+            .Section        = kSectionAudio,
+            .RequiresReboot = !SupportsLiveAudioInputReconfigure(),
+            .ApiPath        = "device.audioInputPin"
+        }));
+
+        // ---- appearance section --------------------------------------------
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name          = BrightnessTag,
+            .FriendlyName  = "Brightness",
+            .Description   = "Overall brightness the connected LEDs or matrix should be run at.",
+            .Type          = SettingSpec::SettingType::Integer,
+            .HasValidation = true,
+            .Section       = kSectionAppearance,
+            .ApiPath       = "device.brightness",
+            .Widget        = SettingSpec::WidgetKind::Slider,
+            // Display as 5..100 percent over the raw 13..255 range. The endpoints
+            // mirror what the legacy UI did: clamp at 5% on the low side, 100% at
+            // raw max, with linear remapping in between. The UI does the math.
+            .DisplayRawMin = (double)BRIGHTNESS_MIN,
+            .DisplayRawMax = (double)BRIGHTNESS_MAX,
+            .DisplayMin    = 5.0,
+            .DisplayMax    = 100.0,
+            .DisplaySuffix = "%"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = GlobalColorTag,
+            .FriendlyName = "Global color",
+            .Description  = "Main color that is applied to all those effects that support using it.",
+            .Type         = SettingSpec::SettingType::Color,
+            .Section      = kSectionAppearance,
+            .ApiPath      = "device.globalColor"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = SecondColorTag,
+            .FriendlyName = "Second color",
+            .Description  = "Second color that is used to create a global palette in combination with the current global color. That palette is used "
+                            "by some effects. Defaults to the <em>previous</em> global color if not explicitly set.",
+            .Type         = SettingSpec::SettingType::Color,
+            .Section      = kSectionAppearance,
+            .ApiPath      = "device.secondColor"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = ApplyGlobalColorsTag,
+            .FriendlyName = "(Re)apply global color",
+            .Description  = "You can use this to \"reselect\" and apply the current global color, to force the composition of the derived "
+                            "global palette. This checkbox is ignored if the \"Clear global color\" checkbox is selected.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Access       = SettingSpec::SettingAccess::WriteOnly,
+            .Section      = kSectionAppearance,
+            .ApiPath      = "device.applyGlobalColors"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = ClearGlobalColorTag,
+            .FriendlyName = "Clear global color",
+            .Description  = "Stop applying the global color/derived palette. This takes precedence over the \"(Re)apply global color\" checkbox.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Access       = SettingSpec::SettingAccess::WriteOnly,
+            .Section      = kSectionAppearance,
+            .ApiPath      = "device.clearGlobalColor"
+        }));
+
         #if SHOW_VU_METER
-        settingSpecs.emplace_back(
-            ShowVUMeterTag,
-            "Show VU meter",
-            "Used to show (checked) or hide the VU meter at the top of the matrix.",
-            SettingSpec::SettingType::Boolean
-        );
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = ShowVUMeterTag,
+            .FriendlyName = "Show VU meter",
+            .Description  = "Used to show (checked) or hide the VU meter at the top of the matrix.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Section      = kSectionAppearance
+        }));
         #endif
 
-        auto& powerLimitSpec = settingSpecs.emplace_back(
-            PowerLimitTag,
-            "Power limit",
-            "The maximum power in mW that the matrix attached to the board is allowed to use. As the previous sentence implies, this "
-            "setting only applies if a matrix is used.",
-            SettingSpec::SettingType::Integer
-        );
-        powerLimitSpec.MinimumValue = POWER_LIMIT_MIN;
-        powerLimitSpec.HasValidation = true;
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = RememberCurrentEffectTag,
+            .FriendlyName = "Remember current effect",
+            .Description  = "Indicates if the current effect index should be saved after an effect transition, so the device resumes "
+                            "from the same effect when restarted. Enabling this will lead to more wear on the flash chip of your device.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Section      = kSectionAppearance,
+            .ApiPath      = "device.rememberCurrentEffect"
+        }));
 
-        settingSpecs.emplace_back(
-            ClearGlobalColorTag,
-            "Clear global color",
-            "Stop applying the global color/derived palette. This takes precedence over the \"(Re)apply global color\" checkbox.",
-            SettingSpec::SettingType::Boolean
-        ).Access = SettingSpec::SettingAccess::WriteOnly;
-        settingSpecs.emplace_back(
-            GlobalColorTag,
-            "Global color",
-            "Main color that is applied to all those effects that support using it.",
-            SettingSpec::SettingType::Color
-        );
-        settingSpecs.emplace_back(
-            ApplyGlobalColorsTag,
-            "(Re)apply global color",
-            "You can use this to \"reselect\" and apply the current global color, to force the composition of the derived "
-            "global palette. This checkbox is ignored if the \"Clear global color\" checkbox is selected.",
-            SettingSpec::SettingType::Boolean
-        ).Access = SettingSpec::SettingAccess::WriteOnly;
-        settingSpecs.emplace_back(
-            SecondColorTag,
-            "Second color",
-            "Second color that is used to create a global palette in combination with the current global color. That palette is used "
-            "by some effects. Defaults to the <em>previous</em> global color if not explicitly set.",
-            SettingSpec::SettingType::Color
-        );
-        settingSpecs.emplace_back(
-            MatrixWidthTag,
-            "Matrix width",
-            "Active matrix width. WS281x builds validate this by total LED capacity, so width * height must stay within the compiled LED budget.",
-            SettingSpec::SettingType::PositiveBigInteger,
-            1,
-            GetCompiledLEDCount()
-        );
-        settingSpecs.emplace_back(
-            MatrixHeightTag,
-            "Matrix height",
-            "Active matrix height. WS281x builds validate this by total LED capacity, so width * height must stay within the compiled LED budget.",
-            SettingSpec::SettingType::PositiveBigInteger,
-            1,
-            GetCompiledLEDCount()
-        );
-        settingSpecs.emplace_back(
-            MatrixSerpentineTag,
-            "Serpentine layout",
-            "Controls the logical XY mapping for strip-based matrices. HUB75 ignores this because its panel mapping is build-defined.",
-            SettingSpec::SettingType::Boolean
-        );
-        auto& audioInputPinSpec = settingSpecs.emplace_back(
-            AudioInputPinTag,
-            "Audio input pin",
-            "External microphone input pin. This is boot-applied today because the audio task still owns the active DMA/I2S handles once sampling starts.",
-            SettingSpec::SettingType::Integer,
-            -1,
-            48
-        );
-        audioInputPinSpec.HasValidation = true;
-        settingSpecs.emplace_back(
-            OutputDriverTag,
-            "Output driver",
-            "Runtime-selected driver. If this differs from the firmware's compiled driver, the API reports recompile required.",
-            SettingSpec::SettingType::String
-        );
-        settingSpecs.emplace_back(
-            WS281xChannelCountTag,
-            "WS281x channel count",
-            "Number of active strip channels within the compiled maximum. Live updates are limited to WS281x builds.",
-            SettingSpec::SettingType::PositiveBigInteger,
-            1,
-            GetCompiledChannelCount()
-        );
+        // ---- topology section ----------------------------------------------
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = MatrixWidthTag,
+            .FriendlyName = "Matrix width",
+            .Description  = "Active matrix width. WS281x builds validate this by total LED capacity, so width * height must stay within the compiled LED budget.",
+            .Type         = SettingSpec::SettingType::PositiveBigInteger,
+            .MinimumValue = 1.0,
+            .MaximumValue = (double)GetCompiledLEDCount(),
+            .Section      = kSectionTopology,
+            .Priority     = 0,
+            .ApiPath      = "topology.width"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = MatrixHeightTag,
+            .FriendlyName = "Matrix height",
+            .Description  = "Active matrix height. WS281x builds validate this by total LED capacity, so width * height must stay within the compiled LED budget.",
+            .Type         = SettingSpec::SettingType::PositiveBigInteger,
+            .MinimumValue = 1.0,
+            .MaximumValue = (double)GetCompiledLEDCount(),
+            .Section      = kSectionTopology,
+            .Priority     = 1,
+            .ApiPath      = "topology.height"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name         = MatrixSerpentineTag,
+            .FriendlyName = "Serpentine layout",
+            .Description  = "Controls the logical XY mapping for strip-based matrices. HUB75 ignores this because its panel mapping is build-defined.",
+            .Type         = SettingSpec::SettingType::Boolean,
+            .Section      = kSectionTopology,
+            .Priority     = 2,
+            .ApiPath      = "topology.serpentine"
+        }));
+
+        // ---- output section -------------------------------------------------
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name              = OutputDriverTag,
+            .FriendlyName      = "Output driver",
+            .Description       = "Runtime-selected driver. If this differs from the firmware's compiled driver, the API reports recompile required.",
+            .Type              = SettingSpec::SettingType::String,
+            .Section           = kSectionOutput,
+            .Priority          = 10,
+            .ApiPath           = "outputs.driver",
+            .Widget            = SettingSpec::WidgetKind::Select,
+            // Friendly labels for the raw driver identifiers the schema exposes.
+            .Options           = SettingSpec::OptionsSource::SchemaPath,
+            .OptionValues      = {"ws281x", "hub75"},
+            .OptionLabels      = {"WS281x", "HUB75"},
+            .OptionsSchemaPath = "outputs.allowedDrivers"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name              = WS281xChannelCountTag,
+            .FriendlyName      = "WS281x channel count",
+            .Description       = "Number of active strip channels within the compiled maximum. Live updates are limited to WS281x builds.",
+            .Type              = SettingSpec::SettingType::PositiveBigInteger,
+            .MinimumValue      = 1.0,
+            .MaximumValue      = (double)GetCompiledChannelCount(),
+            .Section           = kSectionOutput,
+            .Priority          = 11,
+            .ApiPath           = "outputs.ws281x.channelCount",
+            .Widget            = SettingSpec::WidgetKind::Select,
+            // Concrete list at outputs.ws281x.allowedChannelCounts in the
+            // schema, so the UI doesn't have to derive a range itself.
+            .Options           = SettingSpec::OptionsSource::SchemaPath,
+            .OptionsSchemaPath = "outputs.ws281x.allowedChannelCounts"
+        }));
+        settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name              = WS281xColorOrderTag,
+            .FriendlyName      = "WS281x color order",
+            .Description       = "Byte order used when streaming RGB values to WS281x LEDs. This applies live on strip builds and is ignored on HUB75 builds.",
+            .Type              = SettingSpec::SettingType::String,
+            .Section           = kSectionOutput,
+            .Priority          = 12,
+            .ApiPath           = "outputs.ws281x.colorOrder",
+            .Widget            = SettingSpec::WidgetKind::Select,
+            .Options           = SettingSpec::OptionsSource::SchemaPath,
+            .OptionsSchemaPath = "outputs.ws281x.allowedColorOrders"
+        }));
+
+        // ---- per-channel pin specs ------------------------------------------
+        // ws281xPin{N} specs are synthesized here because all the relevant
+        // details (channel count, naming convention, apiPath format, priority
+        // range) are DeviceConfig internals.
+        // pinSpecStrings holds the String backing; settingSpecs owns the specs.
+        // Both are sized up front so no reallocation can invalidate pointers.
+        constexpr size_t kPinStringsPerChannel = 4; // name, friendly, description, apiPath
+        const auto compiledChannelCount = GetCompiledChannelCount();
+        settingSpecs.reserve(settingSpecs.size() + compiledChannelCount);
+        pinSpecStrings.reserve(compiledChannelCount * kPinStringsPerChannel);
+        const auto stableCStr = [](const String& s) { return s.c_str(); };
+
+        for (size_t i = 0; i < compiledChannelCount; ++i)
+        {
+            const auto& nameStr        = pinSpecStrings.emplace_back(str_sprintf("ws281xPin%zu", i));
+            const auto& friendlyStr    = pinSpecStrings.emplace_back(str_sprintf("WS281x pin %zu", i + 1));
+            const auto& descriptionStr = pinSpecStrings.emplace_back(str_sprintf("GPIO assigned to WS281x channel %zu.", i + 1));
+            const auto& apiPathStr     = pinSpecStrings.emplace_back(str_sprintf("outputs.ws281x.pins[%zu]", i));
+
+            settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+                .Name         = stableCStr(nameStr),
+                .FriendlyName = stableCStr(friendlyStr),
+                .Description  = stableCStr(descriptionStr),
+                .Type         = SettingSpec::SettingType::Integer,
+                .MinimumValue = -1.0,
+                .MaximumValue = 48.0,
+                .Section      = kSectionOutput,
+                .Priority     = 3 + static_cast<int>(i),
+                .ApiPath      = stableCStr(apiPathStr)
+            }));
+        }
 
         settingSpecReferences.insert(settingSpecReferences.end(), settingSpecs.begin(), settingSpecs.end());
     }
@@ -647,11 +843,11 @@ void DeviceConfig::SetAudioInputPin(int newAudioInputPin)
     LogRuntimeConfig("audio input pin changed");
 }
 
-// This helper separates "apply the timezone to the running process" from "persist a user edit".
+// This setter separates "apply the timezone to the running process" from "persist a user edit".
 // Startup/config-load needs to set TZ immediately so localtime() is correct, but it must not
 // immediately rewrite device.cfg just because we re-applied the already-persisted value.
 // The timezone JSON file used by this logic is generated using tools/gen-tz-json.py
-bool DeviceConfig::SetTimeZoneInternal(const String& newTimeZone, bool skipWrite)
+bool DeviceConfig::SetTimeZone(const String& newTimeZone, bool skipWrite)
 {
     String quotedTZ = "\n\"" + newTimeZone + '"';
 
@@ -689,11 +885,6 @@ bool DeviceConfig::SetTimeZoneInternal(const String& newTimeZone, bool skipWrite
         SaveToJSON();
 
     return true;
-}
-
-bool DeviceConfig::SetTimeZone(const String& newTimeZone, bool skipWrite)
-{
-    return SetTimeZoneInternal(newTimeZone, skipWrite);
 }
 
 #if ENABLE_WIFI
@@ -809,7 +1000,7 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateTopology(uint16_t width, ui
         if (width != GetCompiledMatrixWidth() || height != GetCompiledMatrixHeight())
             return { false, kRecompileNeededMessage };
 
-        if (serpentine != runtimeTopology.serpentine)
+        if (serpentine != GetCompiledMatrixSerpentine())
             return { false, kRecompileNeededMessage };
     }
 
@@ -824,7 +1015,7 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateOutputDriver(OutputDriver d
     return { true, "" };
 }
 
-DeviceConfig::ValidateResponse DeviceConfig::ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins) const
+DeviceConfig::ValidateResponse DeviceConfig::ValidateWS281xSettings(size_t channelCount, const std::array<int8_t, NUM_CHANNELS>& pins, WS281xColorOrder colorOrder) const
 {
     if (channelCount == 0)
         return { false, "channel count must be greater than zero" };
@@ -839,12 +1030,18 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateWS281xSettings(size_t chann
 
         if (pins != GetCompiledWS281xPins())
             return { false, kRecompileNeededMessage };
+
+        if (colorOrder != GetCompiledWS281xColorOrder())
+            return { false, kRecompileNeededMessage };
     }
 
     for (size_t i = 0; i < channelCount; ++i)
     {
         if (pins[i] < 0)
             return { false, "active channels require valid GPIO pins" };
+
+        if (!GPIO_IS_VALID_OUTPUT_GPIO(static_cast<gpio_num_t>(pins[i])))
+            return { false, "WS281x channel pins must be valid output GPIOs" };
 
         for (size_t j = i + 1; j < channelCount; ++j)
         {
@@ -866,7 +1063,7 @@ DeviceConfig::ValidateResponse DeviceConfig::ValidateRuntimeConfig(const Runtime
     if (!topologyValid)
         return { false, topologyMessage };
 
-    auto [ws281xValid, ws281xMessage] = ValidateWS281xSettings(config.outputs.channelCount, config.outputs.outputPins);
+    auto [ws281xValid, ws281xMessage] = ValidateWS281xSettings(config.outputs.channelCount, config.outputs.outputPins, config.outputs.colorOrder);
     if (!ws281xValid)
         return { false, ws281xMessage };
 
@@ -889,7 +1086,8 @@ bool DeviceConfig::SetRuntimeConfig(const RuntimeConfig& config, bool skipWrite,
         || runtimeTopology.serpentine != config.topology.serpentine
         || runtimeOutputs.driver != config.outputs.driver
         || runtimeOutputs.channelCount != config.outputs.channelCount
-        || runtimeOutputs.outputPins != config.outputs.outputPins;
+        || runtimeOutputs.outputPins != config.outputs.outputPins
+        || runtimeOutputs.colorOrder != config.outputs.colorOrder;
 
     runtimeTopology = config.topology;
     runtimeOutputs = config.outputs;

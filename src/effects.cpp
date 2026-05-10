@@ -49,6 +49,7 @@
 #include "effects/strip/bouncingballeffect.h"   // bouncing ball effects
 #include "effects/strip/doublepaletteeffect.h"  // double palette effect
 #include "effects/strip/fireeffect.h"           // fire effects
+#include "effects/strip/fireworkseffect.h"
 #include "effects/strip/laserline.h"
 #include "effects/strip/meteoreffect.h"         // meteor blend effect
 #include "effects/strip/misceffects.h"
@@ -205,6 +206,15 @@ void LoadEffectFactories()
     #endif
 
     #if defined(EFFECTS_DEMO)
+
+        #if ENABLE_AUDIO
+        RegisterAll(*g_ptrEffectFactories,
+            Effect<FireworksEffect>("Beat Fireworks"),
+            Effect<StarEffect<MusicStar>>("RGB Music Blend Stars", RGBColors_p, 0.2, 1, NOBLEND, 5.0, 0.1, 2.0),
+            Effect<StarEffect<MusicStar>>("Rainbow Twinkle Stars", RainbowColors_p, kStarEffectProbability, 1, LINEARBLEND, 0.0, 0.0, kStarEffectMusicFactor)
+        );
+        #endif
+
         // Demo effect set for M5 demos and similar
         RegisterAll(*g_ptrEffectFactories,
             Effect<FireEffect>("Medium Fire", NUM_LEDS, 1, 3, 100, 3, 4, true, true),
@@ -221,12 +231,6 @@ void LoadEffectFactories()
             Effect<PaletteEffect>(RainbowColors_p)
         );
 
-        #if ENABLE_AUDIO
-        RegisterAll(*g_ptrEffectFactories,
-            Effect<StarEffect<MusicStar>>("RGB Music Blend Stars", RGBColors_p, 0.2, 1, NOBLEND, 5.0, 0.1, 2.0),
-            Effect<StarEffect<MusicStar>>("Rainbow Twinkle Stars", RainbowColors_p, kStarEffectProbability, 1, LINEARBLEND, 0.0, 0.0, kStarEffectMusicFactor)
-        );
-        #endif
     #endif
 
     #if defined(EFFECTS_FAN)

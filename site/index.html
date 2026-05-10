@@ -1,0 +1,261 @@
+<!--
+Abandon all hope, all ye who enter.  Here be AI code that even the author doesn't understand.  You've been warned.
+
+                          ud$$$**$$$$$$$bc.
+                       u@**"        4$$$$$$$Nu
+                     J                ""#$$$$$$r
+                    @                       $$$$b
+                  .F                        ^*3$$$
+                 :% 4                         J$$$N
+                 $  :F                       :$$$$$
+                4F  9                       J$$$$$$$
+                4$   k             4$$$$bed$$$$$$$$$
+                $$r  'F            $$$$$$$$$$$$$$$$$r
+                $$$   b.           $$$$$$$$$$$$$$$$$N
+                $$$$$k 3eeed$$b    $$$Euec."$$$$$$$$$
+ .@$**N.        $$$$$" $$$$$$F'L $$$$$$$$$$$  $$$$$$$
+ :$$L  'L       $$$$$ 4$$$$$$  * $$$$$$$$$$F  $$$$$$F         edNc
+@$$$$N  ^k      $$$$$  3$$$$*%   $F4$$$$$$$   $$$$$"        d"  z$N
+$$$$$$   ^k     '$$$"   #$$$F   .$  $$$$$c.u@$$$          J"  @$$$$r
+$$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
+ ^$$$$$$.    "NL   "N. z@*     $$$  $$$$$$$$$$$$$P      $P  d$$$$$$$
+    ^"*$$$$b   '*L   9$E      4$$$  d$$$$$$$$$$$"     d*   J$$$$$r
+         ^$$$$u  '$.  $$$L     "#" d$$$$$$".@$$    .@$"  z$$$$*"
+           ^$$$$. ^$N.3$$$       4u$$$$$$$ 4$$$  u$*" z$$$"
+             '*$$$$$$$$ *$b      J$$$$$$$b u$$P $"  d$$P
+                #$$$$$$ 4$ 3*$"$*$ $"$'c@@$$$$ .u@$$$P
+                  "$$$$  ""F~$ $uNr$$$^&J$$$$F $$$$#
+                    "$$    "$$$bd$.$W$$$$$$$$F $$"
+                      ?k         ?$$$$$$$$$$$F'*
+                       9$$bL     z$$$$$$$$$$$F
+                        $$$$    $$$$$$$$$$$$$
+                         '#$$c  '$$$$$$$$$"
+                          .@"#$$$$$$$$$$$$b
+                        z*      $$$$$$$$$$$$N.
+                      e"      z$$"  #$$$k  '*$$.
+                  .u*      u@$P"      '#$$c   "$$c
+           u@$*"""       d$$"            "$$$u  ^*$$b.
+         :$F           J$P"                ^$$$c   '"$$$$$$bL
+        d$$  ..      @$#                      #$$b         '#$
+        9$$$$$$b   4$$                          ^$$k         '$
+         "$$6""$b u$$                             '$    d$$$$$P
+           '$F $$$$$"                              ^b  ^$$$$b$
+            '$W$$$$"                                'b@$$$$"
+                                                     ^$$$*
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NightDriverStrip Control</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="backdrop"></div>
+  <div class="grid-overlay"></div>
+
+  <main class="shell">
+    <header class="topbar panel card-blue">
+      <div class="title-block">
+        <p class="eyebrow">ESP32 Control Surface</p>
+        <h1>NightDriverStrip</h1>
+      </div>
+      <div class="status-cluster">
+        <div class="status-pill" id="connectionStatus">
+          <span class="status-dot"></span>
+          <span id="connectionStatusText">Starting</span>
+        </div>
+        <div class="port-pill">
+          <span>Host</span>
+          <strong id="hostValue">--</strong>
+        </div>
+        <div class="port-pill">
+          <span>Web Port</span>
+          <strong id="webPortValue">--</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="toolbar panel card-orange">
+      <div class="toolbar-group">
+        <span class="toolbar-label">Effects</span>
+        <div class="button-group">
+          <button id="prevEffectButton" class="action-button" type="button">&#x23EE; Prev</button>
+          <button id="nextEffectButton" class="action-button" type="button">Next &#x23ED;</button>
+          <button id="refreshEffectsButton" class="action-button" type="button">&#x21BB; Sync</button>
+        </div>
+      </div>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Interval</span>
+        <div class="toolbar-row">
+          <label class="inline-field">
+            <input id="effectIntervalInput" type="number" min="0" step="1" inputmode="numeric">
+            <span>sec</span>
+          </label>
+          <button id="saveIntervalButton" class="action-button" type="button">Apply</button>
+        </div>
+      </div>
+      <div class="toolbar-group">
+        <span class="toolbar-label">Statistics</span>
+        <div class="toolbar-row">
+          <label class="inline-field">
+            <input id="statsRefreshInput" type="number" min="1" max="60" step="1" inputmode="numeric">
+            <span>sec</span>
+          </label>
+          <label class="toggle">
+            <input id="autoRefreshToggle" type="checkbox" checked>
+            <span>Auto</span>
+          </label>
+        </div>
+      </div>
+      <div class="toolbar-group push-right">
+        <span class="toolbar-label">Device</span>
+        <div class="button-group">
+          <button id="rebootButton" class="action-button warning" type="button">Reboot</button>
+          <button id="resetDeviceConfigButton" class="action-button" type="button">Reset Device Config</button>
+          <button id="resetEffectsConfigButton" class="action-button" type="button">Reset Effect Config</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-grid">
+      <article class="summary-card panel card-red">
+        <span class="summary-label">Current Effect</span>
+        <strong class="summary-value" id="summaryCurrentEffect">--</strong>
+        <span class="summary-note" id="summaryEffectStatus">Waiting for data</span>
+      </article>
+      <article class="summary-card panel card-yellow">
+        <span class="summary-label">Interval</span>
+        <strong class="summary-value" id="summaryInterval">--</strong>
+        <span class="summary-note" id="summaryIntervalRemaining">--</span>
+      </article>
+      <article class="summary-card panel card-green">
+        <span class="summary-label">Topology</span>
+        <strong class="summary-value" id="summaryTopology">--</strong>
+        <span class="summary-note" id="summaryDriver">--</span>
+      </article>
+      <article class="summary-card panel card-cyan">
+        <span class="summary-label">LED FPS</span>
+        <strong class="summary-value" id="summaryLedFps">--</strong>
+        <span class="summary-note" id="summaryAudioFps">Audio --</span>
+      </article>
+      <article class="summary-card panel card-purple">
+        <span class="summary-label">CPU Used</span>
+        <strong class="summary-value" id="summaryCpu">--</strong>
+        <span class="summary-note" id="summaryCpuCores">--</span>
+      </article>
+      <article class="summary-card panel card-pink">
+        <span class="summary-label">Heap Free</span>
+        <strong class="summary-value" id="summaryHeap">--</strong>
+        <span class="summary-note" id="summaryPsram">--</span>
+      </article>
+    </section>
+
+    <section class="main-grid tabs-grid">
+      <div class="tab-shell">
+        <div class="tab-strip" role="tablist" aria-label="Main sections">
+          <button id="tabEffectsButton" class="tab-button tab-effects active" type="button" role="tab" aria-selected="true" aria-controls="tabEffectsPane">Effects</button>
+          <button id="tabSettingsButton" class="tab-button tab-settings" type="button" role="tab" aria-selected="false" aria-controls="tabSettingsPane">Settings</button>
+          <button id="tabStatisticsButton" class="tab-button tab-statistics" type="button" role="tab" aria-selected="false" aria-controls="tabStatisticsPane">Statistics</button>
+        </div>
+
+        <article id="tabBodyPanel" class="panel tab-body-panel card-green">
+          <section id="tabEffectsPane" class="tab-pane active" role="tabpanel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Runtime Effects</p>
+              <h2>Effects</h2>
+            </div>
+            <div class="panel-meta" id="effectsMeta">0 effects</div>
+          </div>
+          <div class="table-wrap">
+            <table class="canvas-table">
+              <thead>
+                <tr>
+                  <th class="grip-cell"></th>
+                  <th>On</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Core</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="effectsTableBody">
+                <tr><td colspan="6" class="empty-cell">Loading effects...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          </section>
+
+          <section id="tabSettingsPane" class="tab-pane" role="tabpanel" hidden>
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Device</p>
+              <h2>Settings</h2>
+            </div>
+            <div class="button-group">
+              <button id="reloadSettingsButton" class="action-button" type="button">&#x21BB; Reload</button>
+              <button id="applySettingsButton" class="action-button accent" type="button">Apply</button>
+              <button id="applySettingsRebootButton" class="action-button warning" type="button">Apply + Reboot</button>
+            </div>
+          </div>
+          <form id="deviceSettingsForm" class="settings-grid">
+            <div class="empty-cell">Loading settings...</div>
+          </form>
+          </section>
+
+          <section id="tabStatisticsPane" class="tab-pane" role="tabpanel" hidden>
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Runtime</p>
+              <h2>Statistics</h2>
+            </div>
+            <div class="panel-meta" id="statsTimestamp">--</div>
+          </div>
+          <div class="stats-grid" id="statsGrid"></div>
+
+          <div class="panel-header preview-header">
+            <div>
+              <p class="eyebrow">Websocket</p>
+              <h2>Frame Preview</h2>
+            </div>
+            <div class="button-group">
+              <button id="previewConnectButton" class="action-button" type="button">Connect</button>
+              <button id="previewDisconnectButton" class="action-button" type="button">Disconnect</button>
+            </div>
+          </div>
+          <div class="preview-meta">
+            <span id="previewStatus">Preview offline</span>
+          </div>
+          <div id="previewWrap" class="preview-wrap is-empty">
+            <canvas id="previewCanvas" width="640" height="320"></canvas>
+          </div>
+          </section>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="effectSettingsDialog" class="editor-dialog">
+    <form method="dialog" class="dialog-shell panel card-red">
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">Effect</p>
+          <h2 id="effectDialogTitle">Effect Settings</h2>
+        </div>
+        <button class="icon-button" type="button" id="closeEffectDialogButton">Close</button>
+      </header>
+      <div id="effectSettingsForm" class="settings-grid"></div>
+      <footer class="dialog-actions">
+        <button class="action-button" type="button" id="cancelEffectDialogButton">Cancel</button>
+        <button class="action-button accent" type="button" id="applyEffectDialogButton">Apply</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
