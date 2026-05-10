@@ -872,48 +872,105 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     toggle.addEventListener("change", sync);
     valueInput.addEventListener("change", sync);
 
-      row.appendChild(switchLabel);
-      row.appendChild(rotateLabel);
-      row.appendChild(secondsField);
-      valueWrap.appendChild(row);
-      const help = document.createElement("div");
-      help.className = "field-help";
-      help.innerHTML = (spec.description || "") + " Disable rotation to keep the current effect active indefinitely.";
-      meta.appendChild(help);
-      applyStoredFieldError(wrapper, errorSet, key);
+    row.appendChild(switchLabel);
+    row.appendChild(verbLabel);
+    row.appendChild(valueField);
+    valueWrap.appendChild(row);
+  }
 
-      if (isEffectDialog) {
-        wrapper.dataset.dialogField = "1";
-      }
+  // Generic select widget. Options are resolved via getWidgetSelectOptions(),
+  // which handles all four sources (inline, schemaPath, intl country codes,
+  // external timezones). PositiveBigInteger and Integer specs coerce their
+  // selected value back to Number so the device receives correct types.
+  function renderSelectWidget(ctx) {
+    const { spec, widget, valueWrap, currentDraft, readOnly, setDraftValue, setFieldError } = ctx;
+    const control = document.createElement("select");
+    const options = getWidgetSelectOptions(spec, widget);
+    options.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option.value;
+      optionEl.textContent = option.label;
+      optionEl.selected = String(option.value) === String(currentDraft);
+      control.appendChild(optionEl);
+    });
+    control.disabled = readOnly;
+    const numeric = spec.type === settingType.Integer || spec.type === settingType.PositiveBigInteger || spec.type === settingType.Float;
+    control.addEventListener("change", () => {
+      setDraftValue(numeric ? Number(control.value) : control.value);
+      setFieldError(false, "");
+    });
+    valueWrap.appendChild(control);
+  }
 
-      return wrapper;
+  // Slider widget with optional displayScale (raw <-> display linear remap).
+  // Pure-numeric sliders without a displayScale operate on raw min/max.
+  function renderSliderWidget(ctx) {
+    const { spec, widget, valueWrap, currentDraft, currentValue, readOnly, setDraftValue, setFieldError } = ctx;
+    const scale = widget.displayScale || null;
+    const toDisplay = (raw) => scale ? clampDisplay(scale, mapRawToDisplay(scale, raw)) : raw;
+    const toRaw = (display) => scale ? Math.round(mapDisplayToRaw(scale, clampDisplay(scale, display))) : Math.round(Number(display));
+
+    const sliderMin = scale ? scale.displayMin : (spec.minimumValue ?? 0);
+    const sliderMax = scale ? scale.displayMax : (spec.maximumValue ?? 255);
+
+    const control = document.createElement("input");
+    control.type = "range";
+    control.min = sliderMin;
+    control.max = sliderMax;
+    control.value = String(toDisplay(currentDraft));
+    control.disabled = readOnly;
+
+    const output = document.createElement("input");
+    output.type = "number";
+    output.value = String(toDisplay(currentDraft));
+    output.disabled = readOnly;
+
+    const handleDisplay = (display) => {
+      const intValue = clampInt(display, Number(control.min), Number(control.max), toDisplay(currentValue));
+      output.value = String(intValue);
+      control.value = String(intValue);
+      setDraftValue(toRaw(intValue));
+      setFieldError(false, "");
+    };
+
+    output.addEventListener("change", () => handleDisplay(output.value));
+    control.addEventListener("input", () => handleDisplay(control.value));
+
+    const row = document.createElement("div");
+    row.className = "slider-row";
+    row.appendChild(control);
+    row.appendChild(output);
+    if (scale && scale.suffix) {
+      const suffix = document.createElement("span");
+      suffix.className = "slider-suffix";
+      suffix.textContent = scale.suffix;
+      row.appendChild(suffix);
     }
+    valueWrap.appendChild(row);
+  }
 
-    switch (spec.type) {
-      case settingType.Boolean: {
-        const switchLabel = document.createElement("label");
-        switchLabel.className = "mac-switch";
-        control = document.createElement("input");
-        control.type = "checkbox";
-        control.checked = !!currentDraft;
-        control.disabled = readOnly;
-        control.addEventListener("change", () => {
-          setDraftValue(!!control.checked);
-          setFieldError(false, "");
-        });
-        const track = document.createElement("span");
-        track.className = "mac-switch-track";
-        const thumb = document.createElement("span");
-        thumb.className = "mac-switch-thumb";
-        track.appendChild(thumb);
-        switchLabel.appendChild(control);
-        switchLabel.appendChild(track);
-        const toggle = document.createElement("div");
-        toggle.className = "toggle setting-toggle";
-        toggle.appendChild(switchLabel);
-        valueWrap.appendChild(toggle);
-        break;
-      }
+  function renderBooleanWidget(ctx) {
+    const { valueWrap, currentDraft, readOnly, setDraftValue, setFieldError } = ctx;
+    const switchLabel = document.createElement("label");
+    switchLabel.className = "mac-switch";
+    const control = document.createElement("input");
+    control.type = "checkbox";
+    control.checked = !!currentDraft;
+    control.disabled = readOnly;
+    control.addEventListener("change", () => {
+      setDraftValue(!!control.checked);
+      setFieldError(false, "");
+    });
+    const track = document.createElement("span");
+    track.className = "mac-switch-track";
+    track.appendChild(Object.assign(document.createElement("span"), { className: "mac-switch-thumb" }));
+    switchLabel.appendChild(control);
+    switchLabel.appendChild(track);
+    const toggle = document.createElement("div");
+    toggle.className = "toggle setting-toggle";
+    toggle.appendChild(switchLabel);
+    valueWrap.appendChild(toggle);
+  }
 
   function renderColorWidget(ctx) {
     const { valueWrap, currentDraft, currentValue, readOnly, setDraftValue, setFieldError } = ctx;
@@ -946,170 +1003,128 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     valueWrap.appendChild(row);
   }
 
-      case settingType.Palette: {
-        const row = document.createElement("div");
-        row.className = "palette-row";
-        const palette = Array.isArray(currentDraft) ? currentDraft : [];
-        palette.forEach((entry, index) => {
-          const box = document.createElement("div");
-          box.className = "palette-entry";
-          const color = document.createElement("input");
-          color.type = "color";
-          color.value = colorIntToHex(entry);
-          color.disabled = readOnly;
-          const value = document.createElement("input");
-          value.type = "number";
-          value.className = "color-value";
-          value.value = String(entry);
-          value.disabled = readOnly;
-          const updatePalette = (intValue) => {
-            const next = palette.slice();
-            next[index] = intValue;
-            setDraftValue(next);
-            setFieldError(false, "");
-          };
-          color.addEventListener("input", () => {
-            const intValue = hexToColorInt(color.value);
-            value.value = String(intValue);
-            updatePalette(intValue);
-          });
-          value.addEventListener("change", () => {
-            const intValue = clampInt(value.value, 0, 16777215, entry);
-            value.value = String(intValue);
-            color.value = colorIntToHex(intValue);
-            updatePalette(intValue);
-          });
-          box.appendChild(color);
-          box.appendChild(value);
-          row.appendChild(box);
-        });
-        valueWrap.appendChild(row);
-        break;
-      }
-
-      case settingType.Slider: {
-        control = document.createElement("input");
-        control.type = "range";
-        control.min = isBrightnessField ? 5 : (spec.minimumValue ?? 0);
-        control.max = isBrightnessField ? 100 : (spec.maximumValue ?? 255);
-        control.value = isBrightnessField ? String(rawBrightnessToDisplay(currentDraft)) : currentDraft;
-        control.disabled = readOnly;
-        const output = document.createElement("input");
-        output.type = "number";
-        output.value = isBrightnessField ? String(rawBrightnessToDisplay(currentDraft)) : String(currentDraft);
-        output.disabled = readOnly;
-        output.addEventListener("change", () => {
-          const intValue = clampInt(output.value, Number(control.min), Number(control.max), isBrightnessField ? rawBrightnessToDisplay(currentValue) : currentValue);
-          output.value = String(intValue);
-          control.value = String(intValue);
-          setDraftValue(isBrightnessField ? displayBrightnessToRaw(intValue) : intValue);
-          setFieldError(false, "");
-        });
-        control.addEventListener("input", () => {
-          output.value = control.value;
-          const sliderValue = clampInt(control.value, Number(control.min), Number(control.max), isBrightnessField ? rawBrightnessToDisplay(currentValue) : currentValue);
-          setDraftValue(isBrightnessField ? displayBrightnessToRaw(sliderValue) : sliderValue);
-          setFieldError(false, "");
-        });
-        const row = document.createElement("div");
-        row.className = "slider-row";
-        row.appendChild(control);
-        row.appendChild(output);
-        valueWrap.appendChild(row);
-        break;
-      }
-
-      default: {
-        if (isColorOrderField || isTimeZoneField || isCountryCodeField || isOutputDriverField || isChannelCountField) {
-          control = document.createElement("select");
-          const options =
-            isColorOrderField ? getColorOrderOptions()
-            : isTimeZoneField ? getTimeZoneOptions()
-            : isCountryCodeField ? COUNTRY_OPTIONS
-            : isOutputDriverField ? getOutputDriverOptions()
-            : getChannelCountOptions();
-          options.forEach((optionValue) => {
-            const option = document.createElement("option");
-            if (typeof optionValue === "string") {
-              option.value = optionValue;
-              option.textContent = optionValue;
-              option.selected = String(optionValue) === String(currentDraft);
-            } else {
-              option.value = optionValue.value;
-              option.textContent = optionValue.label;
-              option.selected = String(optionValue.value) === String(currentDraft);
-            }
-            control.appendChild(option);
-          });
-          control.disabled = readOnly;
-          control.addEventListener("change", () => {
-            setDraftValue(isChannelCountField ? Number(control.value) : control.value);
-            setFieldError(false, "");
-          });
-          valueWrap.appendChild(control);
-          break;
-        }
-
-        control = document.createElement("input");
-        if (control.tagName === "INPUT") {
-          control.type = spec.type === settingType.Float || spec.type === settingType.Integer || spec.type === settingType.PositiveBigInteger
-            ? "number"
-            : "text";
-          if (spec.minimumValue !== undefined) control.min = spec.minimumValue;
-          if (spec.maximumValue !== undefined) control.max = spec.maximumValue;
-          if (spec.type === settingType.Integer || spec.type === settingType.PositiveBigInteger) control.step = "1";
-        }
-        control.value = currentDraft ?? "";
-        control.readOnly = readOnly;
-        control.addEventListener("input", () => {
-          const validation = validateFieldValue(spec, control.value);
-          if (validation.valid) {
-            setDraftValue(coerceFieldValue(spec, control.value));
-          } else {
-            draftStore[key] = control.value;
-          }
-        });
-        control.addEventListener("change", () => {
-          const validation = validateFieldValue(spec, control.value);
-          if (!validation.valid) {
-            draftStore[key] = control.value;
-            setFieldError(true, validation.message);
-            return;
-          }
-          const coerced = coerceFieldValue(spec, control.value);
-          setDraftValue(coerced);
-          setFieldError(false, "");
-        });
-        valueWrap.appendChild(control);
-        break;
-      }
-    }
-
-    const help = document.createElement("div");
-    help.className = "field-help";
-    help.innerHTML = spec.description || "";
-    meta.appendChild(help);
-    applyStoredFieldError(wrapper, errorSet, key);
-
-    if (isEffectDialog) {
-      wrapper.dataset.dialogField = "1";
-    }
-
-    return wrapper;
+  function renderPaletteWidget(ctx) {
+    const { valueWrap, currentDraft, readOnly, setDraftValue, setFieldError } = ctx;
+    const row = document.createElement("div");
+    row.className = "palette-row";
+    const palette = Array.isArray(currentDraft) ? currentDraft : [];
+    palette.forEach((entry, index) => {
+      const box = document.createElement("div");
+      box.className = "palette-entry";
+      const color = document.createElement("input");
+      color.type = "color";
+      color.value = colorIntToHex(entry);
+      color.disabled = readOnly;
+      const value = document.createElement("input");
+      value.type = "number";
+      value.className = "color-value";
+      value.value = String(entry);
+      value.disabled = readOnly;
+      const updatePalette = (intValue) => {
+        const next = palette.slice();
+        next[index] = intValue;
+        setDraftValue(next);
+        setFieldError(false, "");
+      };
+      color.addEventListener("input", () => {
+        const intValue = hexToColorInt(color.value);
+        value.value = String(intValue);
+        updatePalette(intValue);
+      });
+      value.addEventListener("change", () => {
+        const intValue = clampInt(value.value, 0, 16777215, entry);
+        value.value = String(intValue);
+        color.value = colorIntToHex(intValue);
+        updatePalette(intValue);
+      });
+      box.appendChild(color);
+      box.appendChild(value);
+      row.appendChild(box);
+    });
+    valueWrap.appendChild(row);
   }
 
-  function applyStoredFieldError(wrapper, errorMap, key) {
-    if (!errorMap || !errorMap.has(key)) {
-      return;
+  function renderDefaultInputWidget(ctx) {
+    const { spec, valueWrap, currentDraft, readOnly, setDraftValue, setFieldError } = ctx;
+    const control = document.createElement("input");
+    control.type = spec.type === settingType.Float || spec.type === settingType.Integer || spec.type === settingType.PositiveBigInteger
+      ? "number"
+      : "text";
+    if (spec.minimumValue !== undefined) control.min = spec.minimumValue;
+    if (spec.maximumValue !== undefined) control.max = spec.maximumValue;
+    if (spec.type === settingType.Integer || spec.type === settingType.PositiveBigInteger) control.step = "1";
+    control.value = currentDraft ?? "";
+    control.readOnly = readOnly;
+    control.addEventListener("change", () => {
+      const validation = validateFieldValue(spec, control.value);
+      if (!validation.valid) {
+        setFieldError(true, validation.message);
+        return;
+      }
+      const coerced = coerceFieldValue(spec, control.value);
+      setDraftValue(coerced);
+      setFieldError(false, "");
+    });
+    valueWrap.appendChild(control);
+  }
+
+  // Resolve a select widget's option list. Sources:
+  //   "inline"             - widget.options.values (and optional .labels)
+  //   "schemaPath"         - resolve a path against state.unifiedSchema
+  //   "intlCountryCodes"   - the prebuilt COUNTRY_OPTIONS list
+  //   "externalTimeZones"  - the lazily-fetched time zone list
+  function getWidgetSelectOptions(spec, widget) {
+    const source = (widget.options && widget.options.source) || "inline";
+    const options = widget.options || {};
+    const values = Array.isArray(options.values) ? options.values : [];
+    const labels = Array.isArray(options.labels) ? options.labels : [];
+
+    const labelMap = {};
+    values.forEach((v, i) => { if (i < labels.length) labelMap[String(v)] = labels[i]; });
+
+    function applyLabelMap(rawValues) {
+      return rawValues.map((value) => ({
+        value: String(value),
+        label: Object.prototype.hasOwnProperty.call(labelMap, String(value)) ? labelMap[String(value)] : String(value)
+      }));
     }
 
-    const help = wrapper.querySelector(".field-help");
-    if (!help) {
-      return;
+    if (source === "intlCountryCodes") {
+      return COUNTRY_OPTIONS.map((option) => ({ value: option.value, label: option.label }));
     }
+    if (source === "externalTimeZones") {
+      return applyLabelMap(getTimeZoneOptions());
+    }
+    if (source === "schemaPath") {
+      const target = readJsonPath(state.unifiedSchema, options.schemaPath);
+      if (Array.isArray(target)) {
+        return applyLabelMap(target);
+      }
+      return [];
+    }
+    return applyLabelMap(values);
+  }
 
-    help.textContent = errorMap.get(key);
-    help.classList.add("field-error");
+  function mapRawToDisplay(scale, raw) {
+    const rawMin = Number(scale.rawMin);
+    const rawMax = Number(scale.rawMax);
+    const displayMin = Number(scale.displayMin);
+    const displayMax = Number(scale.displayMax);
+    if (rawMax === rawMin) return displayMin;
+    return ((Number(raw) - rawMin) / (rawMax - rawMin)) * (displayMax - displayMin) + displayMin;
+  }
+
+  function mapDisplayToRaw(scale, display) {
+    const rawMin = Number(scale.rawMin);
+    const rawMax = Number(scale.rawMax);
+    const displayMin = Number(scale.displayMin);
+    const displayMax = Number(scale.displayMax);
+    if (displayMax === displayMin) return rawMin;
+    return ((Number(display) - displayMin) / (displayMax - displayMin)) * (rawMax - rawMin) + rawMin;
+  }
+
+  function clampDisplay(scale, value) {
+    return Math.max(Number(scale.displayMin), Math.min(Number(scale.displayMax), Math.round(Number(value))));
   }
 
   function validateFieldValue(spec, rawValue) {
