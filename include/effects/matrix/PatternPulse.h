@@ -149,8 +149,6 @@ class PatternPulsar : public BeatEffectBase, public EffectWithId<PatternPulsar> 
     std::vector<PulsePop> _pops;
 
     static constexpr float kFadeRate = 0.9f;
-    static constexpr int kMaxNewStarsPerFrame = 8;
-    int diff;
 
     static constexpr size_t ComputeBurstCount(const BeatInfo& beat)
     {
