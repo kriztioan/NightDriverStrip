@@ -200,8 +200,7 @@ struct SettingSpec
         Boolean,
         String,
         Palette,
-        Color,
-        Slider
+        Color
     };
 
     enum class SettingAccess : char
@@ -220,8 +219,7 @@ struct SettingSpec
         Default,           // type-driven default (Integer -> number input, Boolean -> checkbox, etc.)
         Slider,            // numeric slider; honors DisplayScale and DisplaySuffix
         Select,            // dropdown sourced from inline Options or via OptionsSource
-        IntervalToggle,    // boolean-on + numeric value composite (effectInterval-style)
-        Color              // color picker; raw value is an integer 0xRRGGBB
+        IntervalToggle     // boolean-on + numeric value composite (effectInterval-style)
     };
 
     // Where the widget gets its option list from when WidgetKind::Select is used.
@@ -318,10 +316,16 @@ struct SettingSpec
     // For WidgetKind::Select: how to populate the options list.
     OptionsSource Options = OptionsSource::Inline;
 
-    // For Options == OptionsSource::Inline: parallel arrays of values and
-    // friendly labels. If OptionLabels is empty, values double as labels.
-    std::vector<const char*> InlineOptionValues = {};
-    std::vector<const char*> InlineOptionLabels = {};
+    // Parallel arrays of raw values and friendly labels for Select options.
+    // For OptionsSource::Inline: the full option list. OptionLabels may be
+    //   empty, in which case values double as labels.
+    // For OptionsSource::SchemaPath: optional label overrides for schema-
+    //   derived values (e.g. "ws281x" -> "WS281x"). Either both arrays are
+    //   empty (no overrides) or both are non-empty and the same length.
+    // For OptionsSource::ExternalTimeZones: optional label overrides for
+    //   specific time zone identifiers. Same empty-or-matched-length rule.
+    std::vector<const char*> OptionValues = {};
+    std::vector<const char*> OptionLabels = {};
 
     // For Options == OptionsSource::SchemaPath: the dotted path within
     // /api/v1/settings/schema where the option array lives.
@@ -332,32 +336,27 @@ struct SettingSpec
     // spec keeps the UI from having to bake a path like "/timezones.json".
     const char* OptionsExternalUrl = nullptr;
 
-    // Optional JSON-object (as a literal string) of value -> friendly-label
-    // overrides for Select options that come from a schema list. For example,
-    // mapping "ws281x" -> "WS281x" and "hub75" -> "HUB75" when the schema
-    // exposes raw driver identifiers. Parsed verbatim by the UI.
-    const char* OptionLabelMapJson = nullptr;
-
-    // Finishes the initialization of the spec, and then validates the consistency of its overall contents.
-    // Note that it does the latter quite rudely: it uses assert() on things it feels should be in order.
-    // This function is called by this struct's constructors that initialize values, but this being a struct
-    // allows itself to be called from the outside as well.
+    // Validates the consistency of the spec's contents. Called by Construct(); can also be
+    // called directly when constructing specs without using Construct().
     void FinishAndValidateInitialization();
 
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type);
+    // Factory method: construct a SettingSpec via C++20 designated initializers, then call
+    // FinishAndValidateInitialization() and return the validated spec. Use this for specs
+    // that need no post-construction field assignments:
+    //
+    //   settingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+    //       .Name         = "myName",
+    //       .FriendlyName = "My Name",
+    //       .Type         = SettingType::String,
+    //       .Section      = "section",
+    //       .ApiPath      = "path.to.setting"
+    //   }));
+    //
+    // Fields not listed receive their in-class defaults. Designated initializers must appear
+    // in the same order as the members are declared in this struct (C++20 requirement).
+    static SettingSpec Validate(SettingSpec spec);
 
-    SettingSpec(const char* name, const char* friendlyName, SettingType type);
-
-    // Constructor that sets both minimum and maximum values
-    SettingSpec(const char* name, const char* friendlyName, const char* description, SettingType type, double min, double max);
-
-    // Constructor that sets both minimum and maximum values
-    SettingSpec(const char* name, const char* friendlyName, SettingType type, double min, double max);
-
-    SettingSpec() = default;
-    virtual ~SettingSpec() = default;
-
-    virtual String TypeName() const;
+    String TypeName() const;
 
     // String form of WidgetKind, suitable for emission in the spec response.
     const char* WidgetName() const;

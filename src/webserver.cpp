@@ -227,7 +227,7 @@ namespace
     // The API currently accepts both the legacy flat device.audioInputPin field
     // and the nested device.audio.inputPin field, so validation/apply can consume
     // one resolved value instead of duplicating that lookup logic.
-    
+
     std::optional<int> GetRequestedUnifiedAudioInputPin(JsonObjectConst device)
     {
         std::optional<int> requestedAudioInputPin;
@@ -297,8 +297,6 @@ const std::map<String, CWebServer::ValueValidator> CWebServer::settingValidators
 
 std::vector<SettingSpec, psram_allocator<SettingSpec>> CWebServer::mySettingSpecs = {};
 std::vector<std::reference_wrapper<SettingSpec>> CWebServer::deviceSettingSpecs{};
-std::vector<SettingSpec, psram_allocator<SettingSpec>> CWebServer::synthesizedPinSpecs{};
-std::vector<String> CWebServer::synthesizedPinSpecStrings{};
 
 // Member function template specializations
 
@@ -755,8 +753,7 @@ void CWebServer::SendSettingSpecsResponse(AsyncWebServerRequest * pRequest, cons
             widget["kind"] = spec.WidgetName();
 
             if (spec.Widget == SettingSpec::WidgetKind::Slider
-                && spec.DisplayRawMin.has_value() && spec.DisplayRawMax.has_value()
-                && spec.DisplayMin.has_value()    && spec.DisplayMax.has_value())
+                && spec.DisplayRawMin.has_value()) // Presence of other Display members is validated at SettingSpec construction
             {
                 auto scale = widget["displayScale"].to<JsonObject>();
                 scale["rawMin"]     = spec.DisplayRawMin.value();
@@ -782,36 +779,29 @@ void CWebServer::SendSettingSpecsResponse(AsyncWebServerRequest * pRequest, cons
                 auto options = widget["options"].to<JsonObject>();
                 options["source"] = spec.OptionsSourceName();
 
+                auto addOptionArrays = [&]()
+                {
+                    auto valuesArr = options["values"].to<JsonArray>();
+                    for (auto entry : spec.OptionValues)
+                        valuesArr.add(entry ? entry : "");
+                    auto labelsArr = options["labels"].to<JsonArray>();
+                    for (auto entry : spec.OptionLabels)
+                        labelsArr.add(entry ? entry : "");
+                };
+
                 if (spec.Options == SettingSpec::OptionsSource::Inline)
                 {
-                    auto values = options["values"].to<JsonArray>();
-                    auto labels = options["labels"].to<JsonArray>();
-                    for (size_t i = 0; i < spec.InlineOptionValues.size(); ++i)
-                    {
-                        if (spec.InlineOptionValues[i])
-                            values.add(spec.InlineOptionValues[i]);
-                    }
-                    for (size_t i = 0; i < spec.InlineOptionLabels.size(); ++i)
-                    {
-                        if (spec.InlineOptionLabels[i])
-                            labels.add(spec.InlineOptionLabels[i]);
-                    }
+                    addOptionArrays();
                 }
                 else if (spec.OptionsSchemaPath)
                 {
                     options["schemaPath"] = spec.OptionsSchemaPath;
+                    if (!spec.OptionValues.empty())
+                        addOptionArrays();
                 }
 
                 if (spec.OptionsExternalUrl)
                     options["url"] = spec.OptionsExternalUrl;
-
-                if (spec.OptionLabelMapJson)
-                {
-                    JsonDocument labelMap;
-                    auto err = deserializeJson(labelMap, spec.OptionLabelMapJson);
-                    if (!err)
-                        options["labelOverrides"] = labelMap.as<JsonObjectConst>();
-                }
             }
         }
 
@@ -834,59 +824,25 @@ const std::vector<std::reference_wrapper<SettingSpec>> & CWebServer::LoadDeviceS
         // so its spec is owned here. The Widget metadata mirrors the legacy
         // composite "Rotate effects toggle + seconds input" UX in a way the
         // front-end can render generically.
-        {
-            auto& spec = mySettingSpecs.emplace_back(
-                "effectInterval",
-                "Effect interval",
-                "The duration in milliseconds that an individual effect runs, before the next effect is activated. "
-                "Disable rotation to keep the current effect active indefinitely.",
-                SettingSpec::SettingType::PositiveBigInteger
-            );
-            spec.Section = "appearance";
-            spec.ApiPath = "effects.effectInterval";
-            spec.Widget = SettingSpec::WidgetKind::IntervalToggle;
-            spec.IntervalUnitDivisor = 1000;
-            spec.IntervalUnitLabel = "seconds";
-            spec.IntervalOnLabel  = "Rotate effects";
-            spec.IntervalOffLabel = "Off";
-        }
+        mySettingSpecs.push_back(SettingSpec::Validate(SettingSpec{
+            .Name                = "effectInterval",
+            .FriendlyName        = "Effect interval",
+            .Description         = "The duration in milliseconds that an individual effect runs, before the next effect is activated. "
+                                   "Disable rotation to keep the current effect active indefinitely.",
+            .Type                = SettingSpec::SettingType::PositiveBigInteger,
+            .Section             = "appearance",
+            .ApiPath             = "effects.effectInterval",
+            .Widget              = SettingSpec::WidgetKind::IntervalToggle,
+            .IntervalUnitDivisor = 1000,
+            .IntervalOnLabel     = "Rotate effects",
+            .IntervalOffLabel    = "Off",
+            .IntervalUnitLabel   = "seconds"
+        }));
 
         deviceSettingSpecs.insert(deviceSettingSpecs.end(), mySettingSpecs.begin(), mySettingSpecs.end());
 
         auto deviceConfigSpecs = g_ptrSystem->GetDeviceConfig().GetSettingSpecs();
         deviceSettingSpecs.insert(deviceSettingSpecs.end(), deviceConfigSpecs.begin(), deviceConfigSpecs.end());
-
-        // Synthesize one ws281xPin{N} spec per compiled channel. These are not
-        // individually persisted in DeviceConfig (they are stored as an array
-        // inside RuntimeConfig.outputs.outputPins), but the UI needs per-channel
-        // editable entries with stable names and apiPaths. We reserve up front
-        // so vector growth never reallocates and invalidates the references
-        // that deviceSettingSpecs holds and the c_str() pointers the spec uses.
-        const auto compiledChannelCount = DeviceConfig::GetCompiledChannelCount();
-        constexpr size_t kStringsPerPin = 4;        // name, friendly, description, apiPath
-        synthesizedPinSpecs.reserve(compiledChannelCount);
-        synthesizedPinSpecStrings.reserve(compiledChannelCount * kStringsPerPin);
-        const auto stableCStr = [](const String& s) { return s.c_str(); };
-
-        for (size_t pinIndex = 0; pinIndex < compiledChannelCount; ++pinIndex)
-        {
-            const auto& nameStr        = synthesizedPinSpecStrings.emplace_back(str_sprintf("ws281xPin%zu", pinIndex));
-            const auto& friendlyStr    = synthesizedPinSpecStrings.emplace_back(str_sprintf("WS281x pin %zu", pinIndex + 1));
-            const auto& descriptionStr = synthesizedPinSpecStrings.emplace_back(str_sprintf("GPIO assigned to WS281x channel %zu.", pinIndex + 1));
-            const auto& apiPathStr     = synthesizedPinSpecStrings.emplace_back(str_sprintf("outputs.ws281x.pins[%zu]", pinIndex));
-
-            auto& spec = synthesizedPinSpecs.emplace_back();
-            spec.Name         = stableCStr(nameStr);
-            spec.FriendlyName = stableCStr(friendlyStr);
-            spec.Description  = stableCStr(descriptionStr);
-            spec.Type         = SettingSpec::SettingType::Integer;
-            spec.MinimumValue = -1;
-            spec.MaximumValue = 48;
-            spec.Section      = "output";
-            spec.Priority     = 3 + static_cast<int>(pinIndex);
-            spec.ApiPath      = stableCStr(apiPathStr);
-            deviceSettingSpecs.emplace_back(spec);
-        }
     }
 
     return deviceSettingSpecs;
@@ -937,7 +893,7 @@ bool CWebServer::ValidateLegacyDeviceSettings(AsyncWebServerRequest * pRequest, 
     // Validate the constrained settings first so the legacy POST path behaves like the unified JSON API:
     // either the nontrivial request is coherent as a whole, or we reject it before any setters persist a
     // partially applied config.
-    
+
     if (pRequest->hasParam(DeviceConfig::OpenWeatherApiKeyTag, true, false))
     {
         auto [isValid, validationMessage] =
@@ -1362,7 +1318,11 @@ bool CWebServer::ApplyEffectSettings(AsyncWebServerRequest * pRequest, std::shar
 
     for (auto& settingSpecWrapper : effect->GetSettingSpecs())
     {
-        const String& settingName = settingSpecWrapper.get().Name;
+        const auto& spec = settingSpecWrapper.get();
+        // Settings with an ApiPath are addressed via a structured path, not by name — skip them here.
+        if (spec.ApiPath)
+            continue;
+        const String& settingName = spec.Name;
         settingChanged = PushPostParamIfPresent<String>(pRequest, settingName, [&](auto value) { return effect->SetSetting(settingName, value); })
             || settingChanged;
     }
@@ -1394,6 +1354,10 @@ void CWebServer::ValidateAndSetSetting(AsyncWebServerRequest * pRequest)
     for (auto& settingSpecWrapper : LoadDeviceSettingSpecs())
     {
         auto& settingSpec = settingSpecWrapper.get();
+
+        // Settings with an ApiPath are addressed via a structured path, not by name — skip them here.
+        if (settingSpec.ApiPath)
+            continue;
 
         if (pRequest->hasParam(settingSpec.Name, true))
         {
