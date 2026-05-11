@@ -1091,7 +1091,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
         EnsureNoise();
         _ptrNoise->noise_x += nx;
         _ptrNoise->noise_y += ny;
-        _ptrNoise->noise_z += nx;
+        _ptrNoise->noise_z += nz;
         _ptrNoise->noise_scale_x = sx;
         _ptrNoise->noise_scale_y = sy;
     }
@@ -1405,7 +1405,7 @@ void GFXBase::ConfigureTopology(size_t width, size_t height, bool serpentine)
 
     WIDTH  = width;
     HEIGHT = height;
-    
+
     Adafruit_GFX::_width = width;
     Adafruit_GFX::_height = height;
 }
