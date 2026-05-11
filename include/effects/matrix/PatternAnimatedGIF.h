@@ -67,6 +67,8 @@ extern const uint8_t banana_start[]          asm("_binary_assets_gif_banana_gif_
 extern const uint8_t banana_end[]            asm("_binary_assets_gif_banana_gif_end");
 extern const uint8_t nyancat_start[]         asm("_binary_assets_gif_nyancat_gif_start");
 extern const uint8_t nyancat_end[]           asm("_binary_assets_gif_nyancat_gif_end");
+extern const uint8_t onair_start[]           asm("_binary_assets_gif_on_air_64x32_gif_start");
+extern const uint8_t onair_end[]             asm("_binary_assets_gif_on_air_64x32_gif_end");
 extern const uint8_t tesseract_start[]       asm("_binary_assets_gif_tesseract_gif_start");
 extern const uint8_t tesseract_end[]         asm("_binary_assets_gif_tesseract_gif_end");
 extern const uint8_t firelog_start[]         asm("_binary_assets_gif_firelog_gif_start");
@@ -86,7 +88,8 @@ enum class GIFIdentifier : int
     Banana      = 5,
     Tesseract   = 6,
     Nyancat     = 7,
-    Firelog     = 8
+    Firelog     = 8,
+    OnAir       = 9
 };
 
 // GIFInfo
@@ -103,9 +106,10 @@ struct GIFInfo : public EmbeddedFile
     {}
 };
 
-static const std::map<GIFIdentifier, const GIFInfo, std::less<GIFIdentifier>, psram_allocator<std::pair<const GIFIdentifier, const GIFInfo>>> AnimatedGIFs =
+static const std::map<GIFIdentifier, const GIFInfo> AnimatedGIFs =
 {
     // Banana has 8 frames.  Most music is around 120BPM, so we need to play each frame for 1/15th of a second to somewhat align with a typical beat
+    { GIFIdentifier::OnAir,        GIFInfo(onair_start,       onair_end,       64, 32, 14 ) },      //  8 KB
     { GIFIdentifier::Banana,       GIFInfo(banana_start,      banana_end,      32, 32, 10 ) },      //  4 KB
     { GIFIdentifier::Nyancat,      GIFInfo(nyancat_start,     nyancat_end,     64, 32, 18 ) },      // 20 KB
     { GIFIdentifier::Pacman,       GIFInfo(pacman_start,      pacman_end,      64, 12, 20 ) },      // 36 KB
@@ -140,7 +144,7 @@ g_gifDecoderState;
 // We dynamically allocate the GIF decoder because it's pretty big and we don't want to waste the base
 // ram on it.  This way it, and the GIFs it decodes, can live in PSRAM.
 
-const std::unique_ptr<GifDecoder<MATRIX_WIDTH, MATRIX_HEIGHT, 16, true>> g_ptrGIFDecoder = make_unique_psram<GifDecoder<MATRIX_WIDTH, MATRIX_HEIGHT, 16, true>>();
+const std::unique_ptr<GifDecoder<MATRIX_WIDTH, MATRIX_HEIGHT, 16, true>> g_ptrGIFDecoder = std::make_unique<GifDecoder<MATRIX_WIDTH, MATRIX_HEIGHT, 16, true>>();
 
 // PatternAnimatedGIF
 //

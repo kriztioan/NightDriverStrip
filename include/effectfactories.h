@@ -78,14 +78,14 @@ class EffectFactories
 
   private:
 
-    std::vector<NumberedFactory, psram_allocator<NumberedFactory>> defaultFactories;
-    std::map<EffectId, JSONEffectFactory, std::less<EffectId>, psram_allocator<std::pair<const EffectId, JSONEffectFactory>>> jsonFactories;
+    std::vector<NumberedFactory> defaultFactories;
+    std::map<EffectId, JSONEffectFactory> jsonFactories;
     String hashString;
 
   public:
 
-    const std::vector<NumberedFactory, psram_allocator<NumberedFactory>>& GetDefaultFactories() const { return defaultFactories; }
-    const std::map<EffectId, JSONEffectFactory, std::less<EffectId>, psram_allocator<std::pair<const EffectId, JSONEffectFactory>>>& GetJSONFactories() const { return jsonFactories; }
+    const std::vector<NumberedFactory>& GetDefaultFactories() const { return defaultFactories; }
+    const std::map<EffectId, JSONEffectFactory>& GetJSONFactories() const { return jsonFactories; }
 
     NumberedFactory& AddEffect(EffectId effectId, const DefaultEffectFactory& defaultFactory, const JSONEffectFactory& jsonFactory, FactoryId factoryId = 0);
 
@@ -128,8 +128,8 @@ inline EffectFactories::NumberedFactory& AddEffect(EffectFactories& factories, A
 {
     return factories.AddEffect(
         effect_id_of_type<TEffect>(),
-        [=]() -> std::shared_ptr<LEDStripEffect> { return make_shared_psram<TEffect>(args...); },
-        [](const JsonObjectConst& jsonObject) -> std::shared_ptr<LEDStripEffect> { return make_shared_psram<TEffect>(jsonObject); },
+        [=]() -> std::shared_ptr<LEDStripEffect> { return std::make_shared<TEffect>(args...); },
+        [](const JsonObjectConst& jsonObject) -> std::shared_ptr<LEDStripEffect> { return std::make_shared<TEffect>(jsonObject); },
         factory_id_of_instance<TEffect>(args...)
     );
 }

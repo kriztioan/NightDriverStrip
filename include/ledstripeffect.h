@@ -52,7 +52,7 @@ class HexagonGFX;
 // a SettingSpec container is easy to overlook.
 
 // The type for effect SettingSpec containers
-using EffectSettingSpecs = std::vector<SettingSpec, psram_allocator<SettingSpec>>;
+using EffectSettingSpecs = std::vector<SettingSpec>;
 
 // Declares a static class member variable that contains the SettingSpecs for an effect, if it has them.
 // If an effect uses this macro, it also needs a matching INIT_EFFECT_SETTING_SPECS invocation in
@@ -141,6 +141,7 @@ class LEDStripEffect : public IJSONSerializable
     virtual void Start() {}                                         // Optional method called when time to clean/init the effect
     virtual void Draw() = 0;                                        // Your effect must implement these
     virtual void OnBeat(const BeatInfo&) {}                         // Optional beat callback for audio-reactive effects
+    virtual void OnNearBeat(const BeatInfo&) {}                     // Optional callback for near-miss beat detections
 
     GFXBase& g(size_t channel = 0);
     const GFXBase& g(size_t channel = 0) const;

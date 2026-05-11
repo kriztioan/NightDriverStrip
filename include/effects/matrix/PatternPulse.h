@@ -148,8 +148,43 @@ class PatternPulsar : public BeatEffectBase, public EffectWithId<PatternPulsar> 
 
     std::vector<PulsePop> _pops;
 
-    float fadeRate = 0.9;
-    int diff;
+    static constexpr float kFadeRate = 0.9f;
+
+    static constexpr size_t ComputeBurstCount(const BeatInfo& beat)
+    {
+        const float normalizedConfidence = std::clamp(beat.confidence / 1.5f, 0.0f, 1.0f);
+        const float normalizedStrength = std::clamp(beat.strength / 2.5f, 0.0f, 1.0f);
+        const float normalizedBass = std::clamp(beat.bass, 0.0f, 1.0f);
+        const float majorBonus = beat.major ? 0.25f : 0.0f;
+        const float burstScore = std::clamp(
+            normalizedConfidence * 0.40f +
+            normalizedStrength * 0.35f +
+            normalizedBass * 0.15f +
+            majorBonus, 0.0f, 1.0f);
+
+        return 1U + static_cast<size_t>(burstScore >= 0.60f);
+    }
+
+    static constexpr int ComputeMaxSteps(const BeatInfo& beat)
+    {
+        const float normalizedStrength = std::clamp(beat.strength / 2.5f, 0.0f, 1.0f);
+        const int minSteps = beat.major ? 7 : 5;
+        const int maxSteps = beat.major ? 13 : 10;
+        return minSteps + static_cast<int>(normalizedStrength * static_cast<float>(maxSteps - minSteps));
+    }
+
+    void SpawnPulsars(const BeatInfo& beat)
+    {
+        const size_t burstCount = ComputeBurstCount(beat);
+        const int maxSteps = ComputeMaxSteps(beat);
+
+        for (size_t i = 0; i < burstCount; ++i)
+        {
+            PulsePop pop;
+            pop.maxSteps = maxSteps + random_range(0, 3);
+            _pops.push_back(pop);
+        }
+    }
 
   public:
     PatternPulsar() :
@@ -169,33 +204,30 @@ class PatternPulsar : public BeatEffectBase, public EffectWithId<PatternPulsar> 
         return 30;
     }
 
-    virtual void HandleBeat(bool bMajor, float elapsed, float span) override
+    virtual void HandleBeat(bool, float, float) override
     {
-        if (span > 1.5)
-        {
-            const size_t burstCount = random(kMajorBeatExtraBurstCount) + kMajorBeatBurstThreshold;
-            _pops.reserve(_pops.size() + burstCount);
-            for (size_t i = 0; i < burstCount; i++)
-                _pops.emplace_back();
-        }
-        else
-        {
-            _pops.emplace_back(random(kSmallPulseRandomSteps) + kSmallPulseMinSteps);
-        }
+        // PatternPulsar uses the richer BeatInfo path in OnBeat() rather than
+        // the older HandleBeat(bool, elapsed, span) compatibility adapter.
+    }
 
+    virtual void OnBeat(const BeatInfo& beat) override
+    {
+        if (!beat.major)
+            return;
+
+        SpawnPulsars(beat);
+        _lastBeat = g_Values.AppTime.CurrentTime();
     }
 
     void Draw() override
     {
-        ProcessAudio();
         fadeAllChannelsToBlackBy(kFadeAmount);
 
-        // Add some sparkle
-
+        // Keep the light audio-reactive sparkle layer that makes the effect feel alive
+        // between beats, while pulsar creation itself remains strictly beat-driven.
         for (int i = 0; i < kMaxNewStarsPerFrame; i++)
             if (random(kStarChanceRange) < g_Analyzer.VURatio())
                 g().drawPixel(random(MATRIX_WIDTH), random(MATRIX_HEIGHT), RandomSaturatedColor());
-
 
         for (auto pop = _pops.begin(); pop != _pops.end();)
         {
@@ -218,11 +250,11 @@ class PatternPulsar : public BeatEffectBase, public EffectWithId<PatternPulsar> 
                 if (pop->step < pop->maxSteps)
                 {
                     // initial pulse
-                    g().DrawSafeCircle(pop->centerX, pop->centerY, pop->step, g().to16bit(g().ColorFromCurrentPalette(pop->hue, pow(fadeRate, pop->step - 1) * 255)));
+                    g().DrawSafeCircle(pop->centerX, pop->centerY, pop->step, g().to16bit(g().ColorFromCurrentPalette(pop->hue, pow(kFadeRate, pop->step - 1) * 255)));
 
                     // secondary pulse
                     if (pop->step > kSecondaryPulseLag)
-                        g().DrawSafeCircle(pop->centerX, pop->centerY, pop->step - kSecondaryPulseLag, g().to16bit(g().ColorFromCurrentPalette(pop->hue, pow(fadeRate, pop->step - 2) * 255)));
+                        g().DrawSafeCircle(pop->centerX, pop->centerY, pop->step - kSecondaryPulseLag, g().to16bit(g().ColorFromCurrentPalette(pop->hue, pow(kFadeRate, pop->step - kSecondaryPulseLag - 1) * 255)));
 
                     // This looks like PDP-11 code to me.  double post-inc for the win!
                     pop++->step++;

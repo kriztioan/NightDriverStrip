@@ -120,6 +120,7 @@ class  EffectManager : public IJSONSerializable
     std::atomic_bool _newFrameAvailable = false;
     String _effectSetHashString = "";
     uint32_t _lastBeatSequence = 0;
+    uint32_t _lastNearBeatSequence = 0;
 
     std::vector<std::shared_ptr<GFXBase>> _gfx;
     std::shared_ptr<LEDStripEffect> _tempEffect;
@@ -160,6 +161,17 @@ public:
 
     void ReportNewFrameAvailable();
     void AddFrameEventListener(IFrameEventListener& listener);
+    
+    // RemoveFrameEventListener
+    //
+    // Removes a previously registered frame event listener by address.
+    // Safe to call even if the listener was never registered (no-op).
+    // Required for any listener whose lifetime is shorter than the
+    // EffectManager's (e.g. a listener owned by a service that can be
+    // Stop()-ed and have its task exit), since EffectManager stores
+    // listeners by reference.
+
+    void RemoveFrameEventListener(IFrameEventListener& listener);
     void AddEffectEventListener(IEffectEventListener& listener);
 
     void LoadDefaultEffects();

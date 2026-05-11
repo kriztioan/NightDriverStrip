@@ -185,18 +185,20 @@ private:
     };
 
     static const int snakeCount = 20;
-    Path *snakes;
+    std::unique_ptr<Path[]> snakes;
 
     void construct()
     {
-        snakes = (Path *) PreferPSRAMAlloc(snakeCount * sizeof(Path)); //
+        // The PSRAM-default policy in main.cpp routes large allocations
+        // through PSRAM automatically; std::make_unique is sufficient.
+        snakes = std::make_unique<Path[]>(snakeCount);
     }
 
 public:
 
     PatternCircuit() : EffectWithId<PatternCircuit>("Circuit") { construct(); }
     PatternCircuit(const JsonObjectConst& jsonObject) : EffectWithId<PatternCircuit>(jsonObject) { construct(); }
-    ~PatternCircuit() { free(snakes); }
+    ~PatternCircuit() = default;
 
     unsigned long msStart;
 

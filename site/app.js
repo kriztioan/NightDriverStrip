@@ -67,9 +67,11 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     unifiedSettings: null,
     unifiedSchema: null,
     effects: null,
+    effectIntervalInputDirty: false,
+    effectIntervalPendingMs: null,
     effectDraft: {},
     deviceDraft: {},
-    deviceErrors: new Set(),
+    deviceErrors: new Map(),
     effectDialog: {
       open: false,
       effectIndex: null,
@@ -77,7 +79,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
       specs: [],
       values: {},
       draft: {},
-      errors: new Set()
+      errors: new Map()
     },
     autoRefresh: true,
     statsRefreshSeconds: Number(localStorage.getItem("nd.statsRefreshSeconds") || 3),
@@ -93,7 +95,13 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     preview: {
       socket: null,
       connected: false,
-      frame: null
+      frame: null,
+      latestFrame: null,
+      dirty: false,
+      animationFrameId: 0,
+      lastRenderMs: 0,
+      shouldReconnect: false,
+      reconnectTimer: null
     },
     drag: {
       effectIndex: null,
@@ -144,7 +152,14 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     els.nextEffectButton.addEventListener("click", () => postForm("/nextEffect").then(loadEffectsOnly));
     els.refreshEffectsButton.addEventListener("click", () => loadEffectsOnly());
     els.saveIntervalButton.addEventListener("click", applyEffectInterval);
-    els.effectIntervalInput.addEventListener("input", () => { state.effectIntervalDirty = true; });
+    els.effectIntervalInput.addEventListener("input", () => {
+      state.effectIntervalInputDirty = true;
+      state.effectIntervalPendingMs = null;
+    });
+    els.effectIntervalInput.addEventListener("change", () => {
+      state.effectIntervalInputDirty = true;
+      state.effectIntervalPendingMs = null;
+    });
     els.reloadSettingsButton.addEventListener("click", () => loadSettingsOnly());
     els.applySettingsButton.addEventListener("click", () => applyDeviceSettings(false));
     els.applySettingsRebootButton.addEventListener("click", () => applyDeviceSettings(true));
@@ -416,14 +431,27 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     els.summaryHeap.textContent = formatBytes(dynamicStats.HEAP_FREE);
     els.summaryPsram.textContent = `PSRAM ${formatBytes(dynamicStats.PSRAM_FREE)}`;
 
-    // Don't clobber the user's in-progress edit. The dirty flag is set on
-    // every keystroke and cleared only by a successful save, so a refresh
-    // tick that fires while the user is typing — or after they've blurred
-    // but before they hit Save — leaves their value alone.
-    if (!state.effectIntervalDirty && document.activeElement !== els.effectIntervalInput) {
-      els.effectIntervalInput.value = String(Math.round(intervalMs / intervalScale.divisor));
-    }
+    syncEffectIntervalInput(intervalMs);
     els.effectsMeta.textContent = `${effectList.length} effects / active ${currentIndex}`;
+  }
+
+  function syncEffectIntervalInput(serverIntervalMs) {
+    const serverSeconds = Math.round(serverIntervalMs / 1000);
+
+    if (state.effectIntervalPendingMs !== null) {
+      const pendingSeconds = Math.round(state.effectIntervalPendingMs / 1000);
+      if (pendingSeconds === serverSeconds) {
+        state.effectIntervalPendingMs = null;
+        state.effectIntervalInputDirty = false;
+      } else if (!state.effectIntervalInputDirty && document.activeElement !== els.effectIntervalInput) {
+        els.effectIntervalInput.value = String(pendingSeconds);
+      }
+      return;
+    }
+
+    if (!state.effectIntervalInputDirty && document.activeElement !== els.effectIntervalInput) {
+      els.effectIntervalInput.value = String(serverSeconds);
+    }
   }
 
   function renderEffects() {
@@ -741,7 +769,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     const setFieldError = (hasError, message) => {
       const help = wrapper.querySelector(".field-help");
       if (hasError) {
-        errorSet.add(key);
+        errorSet.set(key, message);
         help.textContent = message;
         help.classList.add("field-error");
       } else {
@@ -1042,11 +1070,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
 
   // Resolve a select widget's option list. Sources:
   //   "inline"             - widget.options.values (and optional .labels)
-  //   "schemaPath"         - resolve a path against state.unifiedSchema. If the
-  //                          target is an array, use it directly. If it's a
-  //                          number, generate 1..N (used for compiledMaxChannels).
-  //                          Optional widget.options.values/labels provide label
-  //                          overrides for specific raw values.
+  //   "schemaPath"         - resolve a path against state.unifiedSchema
   //   "intlCountryCodes"   - the prebuilt COUNTRY_OPTIONS list
   //   "externalTimeZones"  - the lazily-fetched time zone list
   function getWidgetSelectOptions(spec, widget) {
@@ -1055,11 +1079,9 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     const values = Array.isArray(options.values) ? options.values : [];
     const labels = Array.isArray(options.labels) ? options.labels : [];
 
-    // Build a value->label map from the parallel values/labels arrays.
     const labelMap = {};
     values.forEach((v, i) => { if (i < labels.length) labelMap[String(v)] = labels[i]; });
 
-    // Apply the label map to a raw array, falling back to the raw value as label.
     function applyLabelMap(rawValues) {
       return rawValues.map((value) => ({
         value: String(value),
@@ -1071,8 +1093,6 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
       return COUNTRY_OPTIONS.map((option) => ({ value: option.value, label: option.label }));
     }
     if (source === "externalTimeZones") {
-      // The URL is carried on the spec's widget metadata so the UI doesn't
-      // bake the document path. ensureTimezonesLoaded() reads the same field.
       return applyLabelMap(getTimeZoneOptions());
     }
     if (source === "schemaPath") {
@@ -1082,11 +1102,9 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
       }
       return [];
     }
-    // Inline (default)
     return applyLabelMap(values);
   }
 
-  // Linearly remap a raw value into the displayed range, then clamp.
   function mapRawToDisplay(scale, raw) {
     const rawMin = Number(scale.rawMin);
     const rawMax = Number(scale.rawMax);
@@ -1168,34 +1186,18 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
   }
 
   async function applyEffectInterval() {
-    // The standalone "rotate every N seconds" control on the effects tab posts
-    // through the same path the full settings form does: it looks up the
-    // effectInterval spec, uses its widget metadata to convert displayed
-    // units to the raw stored value, and writes via the spec's apiPath.
-    const spec = (state.settingsSpecs || []).find((entry) => entry && entry.name === "effectInterval");
-    if (!spec) {
-      toast("Effect interval spec is not available yet.", "error");
-      return;
-    }
-    const interval = (spec.widget && spec.widget.interval) || {};
-    const divisor = Number(interval.unitDivisor) || 1;
-    const displayedValue = clampInt(els.effectIntervalInput.value, 0, 2147483, 0);
-    const rawValue = displayedValue * divisor;
-
+    const seconds = clampInt(els.effectIntervalInput.value, 0, 2147483, 0);
+    const intervalMs = seconds * 1000;
+    els.effectIntervalInput.value = String(seconds);
+    state.effectIntervalPendingMs = intervalMs;
+    state.effectIntervalInputDirty = false;
     try {
-      if (spec.apiPath) {
-        const body = {};
-        writeJsonPath(body, spec.apiPath, rawValue);
-        await postJson("/api/v1/settings", body);
-      } else {
-        await postForm("/settings", { [spec.name]: rawValue });
-      }
-      // Edit successfully landed; release the input back to auto-refresh.
-      state.effectIntervalDirty = false;
-      const unit = interval.unitLabel || "";
-      toast(`Effect interval set to ${displayedValue} ${unit}.`.trim(), "success");
+      await postForm("/settings", { effectInterval: intervalMs });
+      toast(`Effect interval set to ${seconds} sec.`, "success");
       await Promise.all([loadEffectsOnly(), loadSettingsOnly()]);
     } catch (error) {
+      state.effectIntervalPendingMs = null;
+      state.effectIntervalInputDirty = true;
       handleError("Failed to set effect interval", error);
     }
   }
@@ -1231,10 +1233,92 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     }
   }
 
-  async function applyDeviceSettings(rebootAfter) {
-    if (state.deviceErrors.size > 0) {
-      toast("Fix invalid settings before applying.", "error");
+  function collectDeviceValidationErrors() {
+    const errors = new Map();
+    const specs = getOrderedDeviceSettingSpecs();
+
+    specs.forEach((spec) => {
+      if (!Object.prototype.hasOwnProperty.call(state.deviceDraft, spec.name)) {
+        return;
+      }
+
+      const validation = validateFieldValue(spec, state.deviceDraft[spec.name]);
+      if (!validation.valid) {
+        errors.set(spec.name, validation.message);
+      }
+    });
+
+    addTopologyValidationErrors(errors);
+    return errors;
+  }
+
+  function addTopologyValidationErrors(errors) {
+    const maxLeds = getCompiledMaxLEDs();
+    if (!maxLeds) {
       return;
+    }
+
+    const width = Number(getDraftOrCurrentDeviceSetting("matrixWidth"));
+    const height = Number(getDraftOrCurrentDeviceSetting("matrixHeight"));
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return;
+    }
+
+    const requestedLeds = width * height;
+    if (requestedLeds <= maxLeds) {
+      return;
+    }
+
+    const message = `Matrix dimensions ${width} x ${height} require ${requestedLeds} LEDs, but this firmware supports ${maxLeds}. Lower width/height or flash a build compiled for more LEDs.`;
+    if (!errors.has("matrixWidth")) {
+      errors.set("matrixWidth", message);
+    }
+    if (!errors.has("matrixHeight")) {
+      errors.set("matrixHeight", message);
+    }
+  }
+
+  function getCompiledMaxLEDs() {
+    const topologyMax = Number((((state.unifiedSchema || {}).topology || {}).compiledMaxLEDs) || 0);
+    if (topologyMax > 0) {
+      return topologyMax;
+    }
+
+    const staticMax = Number((state.staticStats || {}).COMPILED_NUM_LEDS || 0);
+    return staticMax > 0 ? staticMax : 0;
+  }
+
+  function getDraftOrCurrentDeviceSetting(name) {
+    if (Object.prototype.hasOwnProperty.call(state.deviceDraft, name)) {
+      return state.deviceDraft[name];
+    }
+
+    const spec = getOrderedDeviceSettingSpecs().find((candidate) => candidate.name === name) || { name };
+    return getCurrentDeviceSettingValue(spec);
+  }
+
+  function summarizeValidationErrors(errorMap, specs) {
+    const specsByName = new Map((specs || []).map((spec) => [spec.name, spec]));
+    const entries = Array.from(errorMap.entries());
+    const visibleEntries = entries.slice(0, 4).map(([name, message]) => {
+      const spec = specsByName.get(name);
+      const label = spec ? (spec.friendlyName || spec.name) : name;
+      return `${label}: ${message}`;
+    });
+    const remaining = entries.length - visibleEntries.length;
+    return visibleEntries.join(" ") + (remaining > 0 ? ` ${remaining} more invalid setting${remaining === 1 ? "" : "s"}.` : "");
+  }
+
+  async function applyDeviceSettings(rebootAfter) {
+    const hadDeviceErrors = state.deviceErrors.size > 0;
+    state.deviceErrors = collectDeviceValidationErrors();
+    if (state.deviceErrors.size > 0) {
+      renderSettingsForm();
+      toast(`Fix invalid settings before applying. ${summarizeValidationErrors(state.deviceErrors, getOrderedDeviceSettingSpecs())}`, "error");
+      return;
+    }
+    if (hadDeviceErrors) {
+      renderSettingsForm();
     }
 
     const { legacyPayload, unifiedPayload } = splitDeviceDraftPayloads(state.deviceDraft);
@@ -1289,7 +1373,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
         specs,
         values,
         draft: {},
-        errors: new Set()
+        errors: new Map()
       };
       renderEffectDialogForm();
       if (!els.effectSettingsDialog.open) {
@@ -1303,7 +1387,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
   function closeEffectDialog() {
     state.effectDialog.open = false;
     state.effectDialog.draft = {};
-    state.effectDialog.errors = new Set();
+    state.effectDialog.errors = new Map();
     if (els.effectSettingsDialog.open) {
       els.effectSettingsDialog.close();
     }
@@ -1315,7 +1399,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
       return;
     }
     if (dialog.errors.size > 0) {
-      toast("Fix invalid effect settings before applying.", "error");
+      toast(`Fix invalid effect settings before applying. ${summarizeValidationErrors(dialog.errors, dialog.specs)}`, "error");
       return;
     }
     const payload = { effectIndex: dialog.effectIndex, ...dialog.draft };
@@ -1431,6 +1515,12 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
   }
 
   function connectPreviewSocket() {
+    state.preview.shouldReconnect = true;
+    if (state.preview.reconnectTimer) {
+      window.clearTimeout(state.preview.reconnectTimer);
+      state.preview.reconnectTimer = null;
+    }
+
     if (state.preview.socket) {
       return;
     }
@@ -1445,6 +1535,11 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     socket.binaryType = "arraybuffer";
     socket.onopen = function () {
       state.preview.connected = true;
+      state.preview.lastRenderMs = 0;
+      if (state.preview.reconnectTimer) {
+        window.clearTimeout(state.preview.reconnectTimer);
+        state.preview.reconnectTimer = null;
+      }
       els.previewStatus.textContent = "Preview connected";
       toast("Frame preview connected.", "success");
       refreshPreviewVisibility();
@@ -1453,18 +1548,23 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
       state.preview.connected = false;
       state.preview.socket = null;
       state.preview.frame = null;
-      els.previewStatus.textContent = "Preview offline";
+      state.preview.latestFrame = null;
+      state.preview.dirty = false;
+      state.preview.lastRenderMs = 0;
+      stopPreviewRenderLoop();
+      els.previewStatus.textContent = state.preview.shouldReconnect ? "Preview reconnecting..." : "Preview offline";
       refreshPreviewVisibility();
+      schedulePreviewReconnect();
     };
     socket.onerror = function () {
-      handleError("Preview socket error");
-      els.previewStatus.textContent = "Preview unavailable";
-      refreshPreviewVisibility();
+      console.warn("Preview socket error");
     };
     socket.onmessage = function (event) {
       try {
-        state.preview.frame = new Uint8Array(event.data);
-        drawPreviewFrame();
+        state.preview.latestFrame = new Uint8Array(event.data);
+        state.preview.dirty = true;
+        refreshPreviewVisibility();
+        ensurePreviewRenderLoop();
       } catch (error) {
         handleError("Failed to render preview frame", error);
       }
@@ -1473,31 +1573,89 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
   }
 
   function disconnectPreviewSocket() {
+    state.preview.shouldReconnect = false;
+    if (state.preview.reconnectTimer) {
+      window.clearTimeout(state.preview.reconnectTimer);
+      state.preview.reconnectTimer = null;
+    }
     if (state.preview.socket) {
       state.preview.socket.close();
       state.preview.socket = null;
     }
     state.preview.connected = false;
     state.preview.frame = null;
+    state.preview.latestFrame = null;
+    state.preview.dirty = false;
+    state.preview.lastRenderMs = 0;
+    stopPreviewRenderLoop();
     els.previewStatus.textContent = "Preview offline";
     refreshPreviewVisibility();
   }
 
+  function schedulePreviewReconnect() {
+    if (!state.preview.shouldReconnect || state.preview.socket || state.preview.reconnectTimer) {
+      return;
+    }
+
+    state.preview.reconnectTimer = window.setTimeout(function () {
+      state.preview.reconnectTimer = null;
+      if (state.preview.shouldReconnect && !state.preview.socket) {
+        connectPreviewSocket();
+      }
+    }, 1000);
+  }
+
+  function ensurePreviewRenderLoop() {
+    if (state.preview.animationFrameId) {
+      return;
+    }
+
+    state.preview.animationFrameId = window.requestAnimationFrame(runPreviewRenderLoop);
+  }
+
+  function stopPreviewRenderLoop() {
+    if (!state.preview.animationFrameId) {
+      return;
+    }
+
+    window.cancelAnimationFrame(state.preview.animationFrameId);
+    state.preview.animationFrameId = 0;
+  }
+
+  function runPreviewRenderLoop(timestamp) {
+    const frameIntervalMs = 1000 / 30;
+    state.preview.animationFrameId = 0;
+
+    if (!state.preview.connected) {
+      return;
+    }
+
+    if (state.preview.dirty && timestamp - state.preview.lastRenderMs >= frameIntervalMs) {
+      state.preview.frame = state.preview.latestFrame;
+      state.preview.dirty = false;
+      state.preview.lastRenderMs = timestamp;
+      drawPreviewFrame();
+    }
+
+    if (state.preview.dirty) {
+      ensurePreviewRenderLoop();
+    }
+  }
+
   function drawPreviewFrame() {
-    const frame = state.preview.frame;
+    const frame = state.preview.latestFrame || state.preview.frame;
     const staticStats = state.staticStats;
     const canvas = els.previewCanvas;
     if (!canvas || !frame || !staticStats) {
       return;
     }
 
+    refreshPreviewVisibility();
     const metrics = getPreviewDisplayMetrics();
     const width = metrics.width;
     const height = metrics.height;
-    refreshPreviewVisibility();
     const dpr = window.devicePixelRatio || 1;
     canvas.classList.toggle("preview-canvas-thin", metrics.displayHeight <= 12);
-    canvas.style.maxWidth = "none";
     canvas.style.width = `${metrics.displayWidth}px`;
     canvas.style.height = `${metrics.displayHeight}px`;
     canvas.width = Math.max(1, Math.round(metrics.displayWidth * dpr));
@@ -1530,17 +1688,23 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
         width: 1,
         height: 1,
         displayWidth: 1,
-        displayHeight: 4,
+        displayHeight: 10,
         pixelWidth: 1,
-        pixelHeight: 4
+        pixelHeight: 10
       };
     }
 
     const width = Number(staticStats.ACTIVE_MATRIX_WIDTH || staticStats.CONFIGURED_MATRIX_WIDTH || 1);
     const height = Number(staticStats.ACTIVE_MATRIX_HEIGHT || staticStats.CONFIGURED_MATRIX_HEIGHT || 1);
-    const availableWidth = Math.max(1, (canvas.parentElement ? canvas.parentElement.clientWidth : 0) || width);
+    const parent = canvas.parentElement;
+    let parentContentWidth = 0;
+    if (parent) {
+      const ps = getComputedStyle(parent);
+      parentContentWidth = parent.clientWidth - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+    }
+    const availableWidth = Math.max(1, parentContentWidth || width);
     const pixelWidth = availableWidth / Math.max(1, width);
-    const pixelHeight = Math.max(pixelWidth, 4);
+    const pixelHeight = Math.max(pixelWidth, 10);
     return {
       width,
       height,
@@ -1552,7 +1716,8 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
   }
 
   function refreshPreviewVisibility() {
-    const hasFrame = !!(state.preview.connected && state.preview.frame && state.preview.frame.length > 0);
+    const currentFrame = state.preview.latestFrame || state.preview.frame;
+    const hasFrame = !!(state.preview.connected && currentFrame && currentFrame.length > 0);
     if (els.previewWrap) {
       els.previewWrap.classList.toggle("is-empty", !hasFrame);
     }

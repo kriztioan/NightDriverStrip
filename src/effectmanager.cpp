@@ -68,7 +68,7 @@ static DRAM_ATTR size_t l_CurrentEffectWriterIndex = SIZE_MAX;
     {
         debugW("InitSplashEffectManager");
 
-        g_ptrSystem->SetupEffectManager(make_shared_psram<SplashLogoEffect>(), g_ptrSystem->GetDevices());
+        g_ptrSystem->SetupEffectManager(std::make_shared<SplashLogoEffect>(), g_ptrSystem->GetDevices());
     }
 
 #endif
@@ -130,6 +130,7 @@ void InitEffectsManager()
 
 void EffectManager::StartEffect()
 {
+    std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
     std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
 
     // If there's a temporary effect override from the remote control active, we start that, else
@@ -144,6 +145,7 @@ void EffectManager::StartEffect()
 
     effect->Start();
     _lastBeatSequence = g_Analyzer.LastBeat().sequence;
+    _lastNearBeatSequence = g_Analyzer.LastNearBeat().sequence;
     _effectStartTime = millis();
 }
 
@@ -152,16 +154,23 @@ void EffectManager::DispatchBeatIfNeeded()
 #if ENABLE_AUDIO
     std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
 
-    const auto beat = g_Analyzer.LastBeat();
-    if (beat.sequence == 0 || beat.sequence == _lastBeatSequence)
-        return;
-
     // Beat callbacks are sequenced here so every active effect sees the same
     // detector output, including BeatEffectBase-derived effects via OnBeat().
     auto& currentEffect = GetCurrentEffect();
-    currentEffect.OnBeat(beat);
 
-    _lastBeatSequence = beat.sequence;
+    const auto nearBeat = g_Analyzer.LastNearBeat();
+    if (nearBeat.sequence != 0 && nearBeat.sequence != _lastNearBeatSequence)
+    {
+        currentEffect.OnNearBeat(nearBeat);
+        _lastNearBeatSequence = nearBeat.sequence;
+    }
+
+    const auto beat = g_Analyzer.LastBeat();
+    if (beat.sequence != 0 && beat.sequence != _lastBeatSequence)
+    {
+        currentEffect.OnBeat(beat);
+        _lastBeatSequence = beat.sequence;
+    }
 #endif
 }
 
@@ -236,6 +245,8 @@ EffectManager::~EffectManager()
 
 void EffectManager::SetTempEffect(std::shared_ptr<LEDStripEffect> effect)
 {
+    std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
+    std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
     _tempEffect = effect;
 }
 
@@ -252,6 +263,21 @@ void EffectManager::ReportNewFrameAvailable()
 void EffectManager::AddFrameEventListener(IFrameEventListener& listener)
 {
     _frameEventListeners.emplace_back(listener);
+}
+
+void EffectManager::RemoveFrameEventListener(IFrameEventListener& listener)
+{
+    // Match by address — reference_wrapper has no operator== so we compare
+    // the underlying object pointers. erase/remove_if so we drop every entry
+    // even if the same listener was registered more than once.
+    // Robert may have a better or less obtuse way to do this, but it works 
+    // and it's not like we have thousands of listeners.  Change at will!
+    
+    _frameEventListeners.erase(
+        std::remove_if(_frameEventListeners.begin(), _frameEventListeners.end(),
+                       [&](const std::reference_wrapper<IFrameEventListener>& w)
+                       { return &w.get() == &listener; }),
+        _frameEventListeners.end());
 }
 
 void EffectManager::AddEffectEventListener(IEffectEventListener& listener)
@@ -334,6 +360,7 @@ const String & EffectManager::GetCurrentEffectName() const
 
 void EffectManager::SetCurrentEffectIndex(size_t i)
 {
+    std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
     std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
 
     if (i >= _vEffects.size())
@@ -574,7 +601,7 @@ std::shared_ptr<LEDStripEffect> GetSpectrumAnalyzer(CRGB color)
 {
     CHSV hueColor = rgb2hsv_approximate(color);
     CRGB color2 = CRGB(CHSV(hueColor.hue + 64, 255, 255));
-    auto object = make_shared_psram<SpectrumAnalyzerEffect>("Spectrum Clr", 24, CRGBPalette16(color, color2), true);
+    auto object = std::make_shared<SpectrumAnalyzerEffect>("Spectrum Clr", 24, CRGBPalette16(color, color2), true);
     if (object->Init(g_ptrSystem->GetDevices()))
         return object;
     throw std::runtime_error("Could not initialize new spectrum analyzer, one color version!");
@@ -972,6 +999,7 @@ bool EffectManager::DeleteEffect(size_t index)
 
 void EffectManager::CheckEffectTimerExpired()
 {
+    std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
     std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
 
     if (IsIntervalEternal() && !GetCurrentEffect().HasMaximumEffectTime())
@@ -995,6 +1023,7 @@ void EffectManager::CheckEffectTimerExpired()
 
 void EffectManager::NextEffect(bool skipSave)
 {
+    std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
     std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
 
     auto enabled = AreEffectsEnabled();
@@ -1016,6 +1045,7 @@ void EffectManager::NextEffect(bool skipSave)
 
 void EffectManager::PreviousEffect()
 {
+    std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
     std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
 
     auto enabled = AreEffectsEnabled();
@@ -1041,6 +1071,7 @@ void EffectManager::PreviousEffect()
 
 void EffectManager::Update()
 {
+    std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
     std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
 
     if ((_gfx[0])->GetLEDCount() == 0)

@@ -15,7 +15,7 @@ LEDBuffer::LEDBuffer(std::shared_ptr<GFXBase> pStrand) :
              _timeStampMicroseconds(0),
              _timeStampSeconds(0)
 {
-    _leds.reset(psram_allocator<CRGB>().allocate(_pStrand->GetLEDCount()));
+    _leds = std::make_unique<CRGB[]>(_pStrand->GetLEDCount());
 }
 
 uint64_t LEDBuffer::Seconds()      const  { return _timeStampSeconds;      }
@@ -101,10 +101,7 @@ void LEDBuffer::Reconfigure(std::shared_ptr<GFXBase> pStrand)
     // Pin/color-order changes should not churn every buffered frame. Only reallocate when the
     // actual LED count changes; otherwise just retarget the buffer to the new strand config.
     if (nextLedCount != currentLedCount)
-    {
-        _leds.reset();
-        _leds.reset(psram_allocator<CRGB>().allocate(nextLedCount));
-    }
+        _leds = std::make_unique<CRGB[]>(nextLedCount);
 
     _pixelCount = 0;
     _timeStampMicroseconds = 0;
@@ -128,7 +125,7 @@ LEDBufferManager::LEDBufferManager(uint32_t cBuffers, const std::shared_ptr<GFXB
     // are returned back out to callers so they must be shared pointers.
 
     for (uint32_t i = 0; i < _cBuffers; i++)
-        _ppBuffers->push_back(make_shared_psram<LEDBuffer>(pGFX));
+        _ppBuffers->push_back(std::make_shared<LEDBuffer>(pGFX));
 }
 
 double LEDBufferManager::AgeOfOldestBuffer() const

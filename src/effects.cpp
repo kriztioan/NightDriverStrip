@@ -164,7 +164,7 @@ void LoadEffectFactories()
     if (g_ptrEffectFactories)
         return;
 
-    g_ptrEffectFactories = make_unique_psram<EffectFactories>();
+    g_ptrEffectFactories = std::make_unique<EffectFactories>();
 
     // Include custom effects header if available - it overrides whatever the effect set flags
     // would otherwise include.
@@ -318,6 +318,7 @@ void LoadEffectFactories()
             Effect<PatternCube>(),
             Effect<PatternAnimatedGIF>("Tesseract", GIFIdentifier::Tesseract),
             Effect<PatternAnimatedGIF>("Nyancat", GIFIdentifier::Nyancat),
+            Effect<PatternAnimatedGIF>("On Air", GIFIdentifier::OnAir),
             Effect<PatternLife>(),
             Effect<PatternCircuit>(),
             Effect<SpectrumAnalyzerEffect>("USA", NUM_BANDS, USAColors_p, true, 0, 0, 0.75, 0.75),

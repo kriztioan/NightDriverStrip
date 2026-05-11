@@ -34,25 +34,23 @@
 #include <algorithm>
 #include <ArduinoOTA.h>
 #include <cmath>
+#include <limits>
 #include <mutex>
 
 #include "colordata.h"
 #include "ledbuffer.h"
 #include "nd_network.h"
 #include "ntptimeclient.h"
+#include "renderservice.h"
 #include "systemcontainer.h"
+#include "taskmgr.h"   // DRAWING_STACK_SIZE / DRAWING_PRIORITY / DRAWING_CORE
 
 #include "effects/matrix/spectrumeffects.h"
 
 static DRAM_ATTR CRGB l_SinglePixel = CRGB::Blue;
 static DRAM_ATTR uint64_t l_usLastWifiDraw = 0;
-
-// Counters backing g_Values.FPS. They live in the draw thread and are read
-// from the stats endpoint without locking — both are uint32_t writes/reads
-// which are atomic on ESP32, and a single torn read worst-case shows the
-// previous second's tally.
-static uint32_t g_FrameCountThisSecond = 0;
-static uint32_t g_LastSecondBoundaryMs = 0;
+static uint32_t l_FrameCountThisSecond = 0;
+static uint32_t l_LastSecondBoundaryMs = 0;
 
 // The g_buffer_mutex is a global mutex used to protect access while adding or removing frames
 // from the led buffer.
@@ -233,8 +231,8 @@ void ShowOnboardRGBLED()
             ledcWrite(2, 255 - c.g);
             ledcWrite(3, 255 - c.b);
         #else
-            int iLed = g_ptrSystem->GetEffectManager().g().GetLEDCount() / 2;
-            const auto& graphics = g_ptrSystem->GetEffectManager().g();
+            const auto& graphics = *g_ptrSystem->GetDevices()[0];
+            int iLed = graphics.GetLEDCount() / 2;
             ledcWrite(1, 255 - graphics.leds[iLed].r); // write red component to channel 1, etc.
             ledcWrite(2, 255 - graphics.leds[iLed].g);
             ledcWrite(3, 255 - graphics.leds[iLed].b);
@@ -265,13 +263,35 @@ void ShowOnboardPixel()
     #endif
 }
 
-// DrawLoopTaskEntry
+// RenderService ITaskService hooks
 //
-// Main draw loop entry point
+// Start/Stop/IsRunning are inherited final from ITaskService; this class
+// only supplies the task config and the per-frame render loop body. The
+// render task is pinned to DRAWING_CORE because SmartMatrix and FastLED
+// both impose core affinity expectations on whatever drives them.
 
-void IRAM_ATTR DrawLoopTaskEntry(void *)
+ITaskService::TaskConfig RenderService::GetTaskConfig() const
 {
-    debugW(">> DrawLoopTaskEntry\n");
+    return TaskConfig {
+        "Draw Loop",
+        DRAWING_STACK_SIZE,
+        DRAWING_PRIORITY,
+        DRAWING_CORE,
+        2000   // Stop timeout: loop yields up to 1s in CalcDelayUntilNextFrame.
+    };
+}
+
+// RenderService::Run
+//
+// Main draw loop. Calls WiFiDraw / LocalDraw, runs PostProcessFrame, and
+// updates the FPS window. Holds the global render mutex for the duration
+// of each frame so runtime topology/output changes can't reconfigure the
+// active buffers mid-frame. Polls ShouldShutdown() between frames so a
+// Stop() in OTA / shutdown can break the loop cleanly.
+
+void IRAM_ATTR RenderService::Run()
+{
+    debugW(">> RenderService::Run\n");
 
     // If this board has an onboard RGB pixel, set it up now
 
@@ -285,7 +305,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
 
     debugW("Entering main draw loop!");
 
-    for (;;)
+    while (!ShouldShutdown())
     {
         g_Values.AppTime.NewFrame();
 
@@ -294,8 +314,10 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
         double frameStartTime       = g_Values.AppTime.FrameStartTime();
 
         {
-            std::lock_guard<std::recursive_mutex> effectGuard(g_effect_manager_mutex);
-            auto& graphics = g_ptrSystem->GetEffectManager().g();
+            // Hold the render mutex for the frame pipeline so runtime topology/output
+            // changes cannot reconfigure the active buffers mid-frame.
+            std::lock_guard<std::recursive_mutex> renderGuard(g_render_mutex);
+            auto& graphics = *g_ptrSystem->GetDevices()[0];
 
             graphics.PrepareFrame();
 
@@ -304,7 +326,7 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
 
             // If we didn't draw now, and it's been a while since we did, and we have at least one local effect, then draw the local effect instead
 
-            if (wifiPixelsDrawn == 0)
+            if (wifiPixelsDrawn == 0 && localPixelsDrawn == 0)
                 localPixelsDrawn = LocalDraw();
 
             // If we drew any pixels by any method, we'll call that a frame and track it for FPS purposes.  We also notify the
@@ -318,22 +340,21 @@ void IRAM_ATTR DrawLoopTaskEntry(void *)
                 ShowOnboardPixel();
                 ShowOnboardRGBLED();
 
-                ++g_FrameCountThisSecond;
+                ++l_FrameCountThisSecond;
                 g_ptrSystem->GetEffectManager().ReportNewFrameAvailable();
             }
 
-            // Frames-per-clock-second tally, independent of whether we drew a
-            // frame in this iteration so an idle chip reports 0 once a full
-            // second of inactivity has rolled past. g_Values.FPS holds the
-            // count from the most-recently-completed clock-second window.
+            // Count actual frames emitted by the draw loop over completed
+            // clock-second windows. This avoids FastLED's internal estimate
+            // and lets an idle device report 0 after a full second passes.
             const uint32_t nowMs = millis();
-            if (g_LastSecondBoundaryMs == 0)
-                g_LastSecondBoundaryMs = nowMs;
-            while (nowMs - g_LastSecondBoundaryMs >= 1000)
+            if (l_LastSecondBoundaryMs == 0)
+                l_LastSecondBoundaryMs = nowMs;
+            while (nowMs - l_LastSecondBoundaryMs >= MILLIS_PER_SECOND)
             {
-                g_Values.FPS = g_FrameCountThisSecond;
-                g_FrameCountThisSecond = 0;
-                g_LastSecondBoundaryMs += 1000;
+                g_Values.FPS = l_FrameCountThisSecond;
+                l_FrameCountThisSecond = 0;
+                l_LastSecondBoundaryMs += MILLIS_PER_SECOND;
             }
 
             graphics.PostProcessFrame(localPixelsDrawn, wifiPixelsDrawn);

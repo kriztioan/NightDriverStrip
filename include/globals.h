@@ -89,10 +89,19 @@
 //  See https://github.com/PlummersSoftwareLLC/NightDriverStrip/issues/515
 #define FASTLED_ESP32_FLASH_LOCK 1
 #define FASTLED_INTERNAL 1               // Suppresses build banners
+#include <atomic>
 #include <mutex>
 extern std::mutex g_buffer_mutex;
 
-// Protects against drawing during config changes and vice versa
+// Protects the active render/configuration pipeline so runtime topology/output changes
+// cannot reconfigure device buffers while a frame is being prepared, drawn, or emitted.
+// Splitting this into two mutexes (render and effect manager) allows effects to change without 
+// blocking the entire render pipeline, which is important for effects that need to update every 
+// frame like the spectrum analyzer, but it looks redundant in many cases when acquired!
+
+extern std::recursive_mutex g_render_mutex;
+
+// Protects effect state transitions and effect-manager mutations.
 extern std::recursive_mutex g_effect_manager_mutex;
 
 #include <FastLED.h>
@@ -148,7 +157,7 @@ extern std::recursive_mutex g_effect_manager_mutex;
 // of the OLED/LCD is now controlled separately, but M5 is always equipped
 // with one (but it doesn't have to be used!).
 
-#if M5STICKC || M5STICKCPLUS || M5STICKCPLUS2 || M5STACKCORE2 || M5TAB
+#if M5STICKC || M5STICKCPLUS || M5STICKCPLUS2 || M5STICKS3 || M5STACKCORE2 || M5TAB
     #define USE_M5 1
 #endif
 
@@ -203,7 +212,7 @@ extern std::recursive_mutex g_effect_manager_mutex;
 #define SOCKET_CORE             1
 #define REMOTE_CORE             1
 #define JSONWRITER_CORE         0
-#define COLORDATA_CORE          1
+#define COLORDATA_CORE          0
 
 #define FASTLED_INTERNAL            1   // Suppresses the compilation banner from FastLED
 #define __STDC_FORMAT_MACROS
@@ -659,6 +668,10 @@ extern const int g_aRingSizeTable[];
 
 #ifndef M5STICKCPLUS2
 #define M5STICKCPLUS2 0
+#endif
+
+#ifndef M5STICKS3
+#define M5STICKS3 0
 #endif
 
 #ifndef M5STACKCORE2

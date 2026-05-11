@@ -44,6 +44,7 @@
 #endif
 
 #include "colordata.h"
+#include "colorstreamerservice.h"
 #include "deviceconfig.h"
 #include "effectmanager.h"
 #include "ledbuffer.h"
@@ -77,6 +78,12 @@ namespace nd_network
 {
     // Private State
     static std::atomic<bool> l_bWifiDriverReady{false};
+
+    // True while Improv owns WiFi during a provisioning attempt. Gates the
+    // background reconnect loop so it doesn't race Improv on WiFi.begin /
+    // WiFi.disconnect.
+    static std::atomic<bool> l_ProvisioningActive{false};
+    static std::atomic<int> l_LastWiFiDisconnectReason{0};
 
 #if ENABLE_WIFI
     static DRAM_ATTR WiFiUDP l_Udp;
@@ -187,7 +194,10 @@ namespace nd_network
                 if (event == ARDUINO_EVENT_WIFI_READY)
                     l_bWifiDriverReady = true;
                 else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED)
+                {
+                    l_LastWiFiDisconnectReason.store(info.wifi_sta_disconnected.reason);
                     debugW("WiFi Disconnected. Reason: %d", info.wifi_sta_disconnected.reason);
+                }
             });
             WiFi.mode(WIFI_STA);
             WiFi.setSleep(false);
@@ -201,10 +211,12 @@ namespace nd_network
         static String WiFi_ssid;
         static String WiFi_password;
 
-        bool haveNewCredentials = (ssid != nullptr && password != nullptr && (WiFi_ssid != *ssid || WiFi_password != *password));
+        bool explicitCredentials = (ssid != nullptr && password != nullptr);
 
-        // If we have new credentials then always reconnect using them
-        if (haveNewCredentials)
+        // If credentials are explicitly supplied, always start a fresh connection attempt.
+        // This matters for USB provisioning, where the same SSID may be submitted with a
+        // corrected or intentionally repeated password.
+        if (explicitCredentials)
         {
             WiFi_ssid = *ssid;
             WiFi_password = *password;
@@ -216,8 +228,8 @@ namespace nd_network
             return WiFiConnectResult::Connected;
         }
 
-        // (Re)connect if credentials have changed, or our last attempt was long enough ago
-        if (haveNewCredentials || millisAtLastAttempt == 0 || millis() - millisAtLastAttempt >= retryDelay)
+        // (Re)connect if credentials were explicitly provided, or our last attempt was long enough ago
+        if (explicitCredentials || millisAtLastAttempt == 0 || millis() - millisAtLastAttempt >= retryDelay)
         {
             millisAtLastAttempt = millis();
             retryDelay = std::min<unsigned long>(retryDelay + WIFI_WAIT_INCREASE, WIFI_WAIT_MAX);
@@ -232,8 +244,23 @@ namespace nd_network
             if (hostname.length() > 0)
                 WiFi.setHostname(hostname.c_str());
 
-            if (haveNewCredentials || WiFi.status() == WL_CONNECT_FAILED)
-                WiFi.disconnect();
+            if (explicitCredentials || WiFi.status() == WL_CONNECT_FAILED)
+            {
+                // Explicit credentials mean Improv or startup asked for a new
+                // connection attempt. Clear the driver's STA AP config so
+                // WiFi.begin cannot short-circuit as "already connected" when
+                // the SSID is unchanged.
+                WiFi.disconnect(false, explicitCredentials);
+                bPreviousConnection = false;
+                bReportedDisconnected = false;
+
+                const unsigned long disconnectStarted = millis();
+                while (WiFi.isConnected() && millis() - disconnectStarted < 2000)
+                    delay(20);
+
+                if (WiFi.isConnected())
+                    debugW("WiFi remained connected after disconnect request; starting the new attempt anyway.");
+            }
 
             debugW("Connecting to Wifi SSID: \"%s\" - ESP32 Free Memory: %zu, PSRAM:%zu, PSRAM Free: %zu\n",
                    WiFi_ssid.c_str(), (size_t)ESP.getFreeHeap(), (size_t)ESP.getPsramSize(), (size_t)ESP.getFreePsram());
@@ -278,7 +305,12 @@ namespace nd_network
             NTPTimeClient::UpdateClockFromWeb(&l_Udp);
         #endif
         #if ENABLE_WEBSERVER
-            g_ptrSystem->GetWebServer().begin();
+            g_ptrSystem->GetWebServer().Start();
+        #endif
+
+        #if WEB_SOCKETS_ANY_ENABLED
+            if (g_ptrSystem->HasWebSocketServer())
+                g_ptrSystem->GetWebSocketServer().Start();
         #endif
 
         return WiFiConnectResult::Connected;
@@ -364,6 +396,11 @@ namespace nd_network
         return success;
     }
 
+    bool IsProvisioningActive() { return l_ProvisioningActive.load(); }
+    void SetProvisioningActive(bool active) { l_ProvisioningActive.store(active); }
+    int  GetLastWiFiDisconnectReason() { return l_LastWiFiDisconnectReason.load(); }
+    void ClearLastWiFiDisconnectReason() { l_LastWiFiDisconnectReason.store(0); }
+
     // ClearWiFiConfig
     //
     // Attempts to erase the WiFi ssid and password for a given source from NVS
@@ -409,7 +446,7 @@ namespace nd_network
         if (index < readers.size())
         {
             readers[index]->flag.store(true);
-            g_ptrSystem->GetTaskManager().NotifyNetworkThread();
+            WakeTask();
         }
     }
 
@@ -420,58 +457,98 @@ namespace nd_network
             auto &entry = *readers[index];
             entry.canceled.store(true);
             entry.readInterval.store(0);
-            entry.reader = nullptr;
+            entry.flag.store(false);
         }
     }
 
-    // NetworkHandlingLoopEntry
+    // NetworkReader ITaskService hooks
     //
-    // Thead entry point for the Networking task
-    // Pumps the various network loops and sets the time periodically, as well as reconnecting
-    // to WiFi if the connection drops.  Also pumps the OTA (Over the air updates) loop.
-    void NetworkHandlingLoopEntry(void *)
+    // Start/Stop/IsRunning are inherited final from ITaskService; this class
+    // only supplies the task config and the network handling loop body. The
+    // task drives WiFi reconnect, OTA pumping, mDNS, and the registered-reader
+    // dispatch (effects pulling data from RESTful APIs etc.).
+
+    ITaskService::TaskConfig NetworkReader::GetTaskConfig() const
     {
-        static unsigned long lastConnected = millis();
+        return TaskConfig {
+            "NetworkHandlingLoop",
+            NET_STACK_SIZE,
+            NET_PRIORITY,
+            NET_CORE,
+            2000   // Stop timeout: notifyWait can be up to ~1s.
+        };
+    }
+
+    // NetworkReader::Run
+    //
+    // Pumps the various network loops and sets the time periodically, as well
+    // as reconnecting to WiFi if the connection drops. Also pumps the OTA
+    // (Over the air updates) loop. Used to be the free function
+    // NetworkHandlingLoopEntry; absorbed here so the friend pattern goes away
+    // and the lifecycle is consistent with the other services.
+
+    void NetworkReader::Run()
+    {
+        unsigned long lastConnected = millis();
+        unsigned long lastWebSocketCleanup = 0;
         if (!MDNS.begin("esp32")) Serial.println("Error starting mDNS");
 
         TickType_t notifyWait = 0;
-        for (;;)
+        while (!ShouldShutdown())
         {
             ulTaskNotifyTake(pdTRUE, notifyWait);
+
+            if (ShouldShutdown())
+                break;
+
             EVERY_N_SECONDS(1)
             {
-                auto res = ConnectToWiFi();
-                if (res == WiFiConnectResult::Connected)
+                // While Improv is actively provisioning, it owns the WiFi
+                // state machine. Skipping our reconnect retry here prevents
+                // both code paths from concurrently calling WiFi.disconnect /
+                // WiFi.begin and confusing the ESP-IDF driver.
+                if (!l_ProvisioningActive.load())
                 {
-                    lastConnected = millis();
-                    #if WEB_SOCKETS_ANY_ENABLED
-                        g_ptrSystem->GetWebSocketServer().CleanupClients();
-                    #endif
-                }
-                else
-                {
-                    #if WAIT_FOR_WIFI
-                        if (res != WiFiConnectResult::NoCredentials && (millis() - lastConnected) > WIFI_WAIT_MAX)
-                        {
-                            debugE("Rebooting due to no Wifi.");
-                            delay(5000);
-                            ESP.restart();
-                        }
-                    #endif
+                    auto res = ConnectToWiFi();
+                    if (res == WiFiConnectResult::Connected)
+                    {
+                        lastConnected = millis();
+                        #if WEB_SOCKETS_ANY_ENABLED
+                            // AsyncWebSocket client cleanup is useful, but doing it every second while
+                            // frame preview traffic is active can churn otherwise healthy clients. Keep
+                            // it periodic and infrequent so it only reaps genuinely stale connections.
+                            if (millis() - lastWebSocketCleanup >= 15000)
+                            {
+                                lastWebSocketCleanup = millis();
+                                if (g_ptrSystem && g_ptrSystem->HasWebSocketServer())
+                                    g_ptrSystem->GetWebSocketServer().CleanupClients();
+                            }
+                        #endif
+                    }
+                    else
+                    {
+                        #if WAIT_FOR_WIFI
+                            if (res != WiFiConnectResult::NoCredentials && (millis() - lastConnected) > WIFI_WAIT_MAX)
+                            {
+                                debugE("Rebooting due to no Wifi.");
+                                delay(5000);
+                                ESP.restart();
+                            }
+                        #endif
+                    }
                 }
             }
 
-            if (!g_ptrSystem->HasNetworkReader() || !WiFi.isConnected())
+            if (!WiFi.isConnected())
             {
                 notifyWait = pdMS_TO_TICKS(1000);
                 continue;
             }
 
-            auto &networkReader = g_ptrSystem->GetNetworkReader();
             unsigned long now = millis();
             unsigned long nextEventMs = 1000;
 
-            for (auto &entryPtr : networkReader.readers)
+            for (auto &entryPtr : readers)
             {
                 auto &entry = *entryPtr;
                 if (entry.canceled.load()) continue;
@@ -489,12 +566,20 @@ namespace nd_network
 
                 if (entry.flag.exchange(false))
                 {
-                    entry.reader();
+                    if (entry.reader)
+                        entry.reader();
                     entry.lastReadMs.store(millis());
                 }
             }
             notifyWait = pdMS_TO_TICKS(nextEventMs);
         }
+
+        // Tear down mDNS so a subsequent Stop()/Start() cycle doesn't double-
+        // register the "esp32" hostname (the underlying mdns component will
+        // refuse to re-init while it still holds an active responder).
+        // I'm not convinced MDNS even works, but this is the polite thing to do if it does.
+
+        MDNS.end();
     }
 
     void DoStatsCommand(const DebugCLI::cli_argv &)
@@ -558,7 +643,14 @@ namespace nd_network
     bool WriteWiFiConfig(WifiCredSource, const String &, const String &) { return false; }
     bool ClearWiFiConfig(WifiCredSource) { return false; }
 
-    void NetworkHandlingLoopEntry(void *) { for (;;) delay(1000); }
+    bool IsProvisioningActive()            { return false; }
+    void SetProvisioningActive(bool)       {}
+    int  GetLastWiFiDisconnectReason()     { return 0; }
+    void ClearLastWiFiDisconnectReason()   {}
+
+    // The network handling loop is gone in non-WiFi builds; NetworkReader
+    // is only declared when ENABLE_WIFI=1 (see nd_network.h).
+
     void InitNetworkCLI() {}
 
 #endif // ENABLE_WIFI
@@ -583,19 +675,7 @@ void onReceiveESPNOW(const uint8_t *macAddr, const uint8_t *data, int dataLen)
 }
 #endif
 
-#if ENABLE_REMOTE
-// RemoteLoopEntry
-//
-// If enabled, this is the main thread loop for the remote control.  It is initialized and then
-// called once every 20ms to pump its work queue and scan for new remote codes, etc.  If no
-// remote is being used, this code and thread doesn't exist in the build.
-void IRAM_ATTR RemoteLoopEntry(void *)
-{
-    auto &rc = g_ptrSystem->GetRemoteControl();
-    rc.begin();
-    while (true) { rc.handle(); delay(20); }
-}
-#endif
+// RemoteLoopEntry was migrated into RemoteControl::Run() (ITaskService).
 
 String urlEncode(const String &str)
 {
@@ -785,42 +865,28 @@ bool ProcessIncomingData(std::unique_ptr<uint8_t[]> &payloadData, size_t payload
     #endif
 }
 
-#if INCOMING_WIFI_ENABLED
-// SocketServerTaskEntry
-//
-// Repeatedly calls the code to open up a socket and receive new connections
-void IRAM_ATTR SocketServerTaskEntry(void *)
-{
-    for (;;)
-    {
-        if (WiFi.isConnected())
-        {
-            auto &socketServer = g_ptrSystem->GetSocketServer();
-
-            socketServer.release();
-            if (socketServer.begin())
-            {
-                socketServer.ProcessIncomingConnectionsLoop();
-                debugV("Socket connection closed.  Retrying...");
-            }
-            else
-            {
-                debugE("Failed to start socket server, retrying in 5 seconds...");
-                delay(5000);
-            }
-        }
-        delay(500);
-    }
-}
-#endif
+// SocketServerTaskEntry was migrated into SocketServer::Run() (ITaskService).
 
 #if COLORDATA_SERVER_ENABLED
-// ColorDataTaskEntry
+// ColorStreamerService ITaskService hooks
 //
-// The thread which serves requests for color data.
-void IRAM_ATTR ColorDataTaskEntry(void *)
+// Start/Stop/IsRunning are inherited final from ITaskService; this class
+// only supplies the task config and the per-frame color-streaming loop body.
+
+ITaskService::TaskConfig ColorStreamerService::GetTaskConfig() const
 {
-    constexpr uint32_t kPreviewMaxFps = 30;
+    return TaskConfig {
+        "ColorData Loop",
+        DEFAULT_STACK_SIZE,
+        COLORDATA_PRIORITY,
+        COLORDATA_CORE,
+        1500
+    };
+}
+
+void IRAM_ATTR ColorStreamerService::Run()
+{
+    constexpr uint32_t kPreviewMaxFps          = 30;
     constexpr uint32_t kPreviewFrameIntervalMs = 1000 / kPreviewMaxFps;
 
     LEDViewer _viewer(NetworkPort::ColorServer);
@@ -832,15 +898,30 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
 
     auto &effectManager = g_ptrSystem->GetEffectManager();
 #if COLORDATA_WEB_SOCKET_ENABLED
-    auto &webSocketServer = g_ptrSystem->GetWebSocketServer();
+    auto *webSocketServer =
+        (g_ptrSystem && g_ptrSystem->HasWebSocketServer()) ? &g_ptrSystem->GetWebSocketServer() : nullptr;
 #endif
 
     effectManager.AddFrameEventListener(frameEventListener);
 
-    for (;;)
+    // RAII guard: ensure we deregister the stack-local listener before Run()
+    // returns, so EffectManager doesn't keep a dangling reference_wrapper if
+    // this service is Stop()-ed and later restarted.  Claude found this!
+
+    struct ListenerGuard
     {
-        while (!WiFi.isConnected())
+        EffectManager&        mgr;
+        IFrameEventListener&  listener;
+        ~ListenerGuard() { mgr.RemoveFrameEventListener(listener); }
+    } listenerGuard{ effectManager, frameEventListener };
+
+    while (!ShouldShutdown())
+    {
+        while (!WiFi.isConnected() && !ShouldShutdown())
             delay(250);
+
+        if (ShouldShutdown())
+            return;
 
         if (!_viewer.begin())
         {
@@ -855,7 +936,7 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
         }
     }
 
-    for (;;)
+    while (!ShouldShutdown())
     {
         if (socket < 0)
             socket = _viewer.CheckForConnection();
@@ -864,14 +945,14 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
         auto leds = graphics.leds;
         const auto activeLEDCount = graphics.GetLEDCount();
 
-        if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
-        {
 #if COLORDATA_WEB_SOCKET_ENABLED
-            wsListenersPresent = webSocketServer.HaveColorDataClients();
+        wsListenersPresent = webSocketServer && webSocketServer->HaveColorDataClients();
 #else
-            wsListenersPresent = false;
+        wsListenersPresent = false;
 #endif
 
+        if (frameEventListener.CheckAndClearNewFrameAvailable() && leds != nullptr)
+        {
             const auto previewActive = (socket >= 0) || wsListenersPresent;
             const auto now = millis();
             if (previewActive && now - lastPreviewSendMs >= kPreviewFrameIntervalMs)
@@ -889,18 +970,18 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
 #if COLORDATA_WEB_SOCKET_ENABLED
                 if (wsListenersPresent)
                 {
-                    webSocketServer.SendColorData(leds, activeLEDCount);
+                    webSocketServer->SendColorData(leds, activeLEDCount);
                 }
                 else
 #endif
                 if (socket >= 0)
                 {
+                    debugV("Sending color data packet");
                     const auto packetSize =
                         sizeof(previewPacket->header) +
                         sizeof(previewPacket->width) +
                         sizeof(previewPacket->height) +
                         sizeof(CRGB) * activeLEDCount;
-
                     const auto sendResult = _viewer.SendPacket(socket, previewPacket.get(), packetSize);
                     if (sendResult == LEDViewer::SendResult::Failed)
                     {
@@ -912,16 +993,14 @@ void IRAM_ATTR ColorDataTaskEntry(void *)
             }
         }
 
-#if COLORDATA_WEB_SOCKET_ENABLED
-        if (!wsListenersPresent)
-            wsListenersPresent = webSocketServer.HaveColorDataClients();
-#endif
-
         if (socket >= 0 || wsListenersPresent)
             delay(10);
         else
             delay(1000);
     }
+
+    if (socket >= 0)
+        close(socket);
 }
 #endif // COLORDATA_SERVER_ENABLED
 #endif // ENABLE_WIFI

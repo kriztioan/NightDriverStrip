@@ -109,7 +109,7 @@ public:
         }();
 
         const uint32_t now = millis();
-        if (now - this->last_read_byte_ > 50)
+        if (now - this->last_read_byte_ > this->serial_packet_idle_timeout_ms_)
         {
             this->rx_buffer_.clear();
             this->last_read_byte_ = now;
@@ -118,19 +118,43 @@ public:
         while (this->available_())
         {
             uint8_t byte = this->read_byte_();
+            const uint32_t byteNow = millis();
             if (this->parse_improv_serial_byte_(byte))
-                this->last_read_byte_ = now;
+                this->last_read_byte_ = byteNow;
             else
+            {
                 this->rx_buffer_.clear();
+                this->last_read_byte_ = byteNow;
+            }
+        }
+
+        const uint32_t postReadNow = millis();
+
+        if (this->state_ == improv::STATE_PROVISIONING &&
+            this->provisioning_started_at_ != 0 &&
+            postReadNow - this->provisioning_started_at_ > this->provisioning_timeout_ms_)
+        {
+            this->on_wifi_connect_timeout_();
+        }
+
+        if (this->state_ == improv::STATE_PROVISIONING &&
+            (WiFi.getMode() != WIFI_STA || !WiFi.isConnected()))
+        {
+            this->provisioning_seen_disconnected_ = true;
         }
 
         if (this->state_ != improv::STATE_PROVISIONED)
         {
-            if (WiFi.getMode() == WIFI_AP || (WiFi.getMode() == WIFI_STA && WiFi.isConnected()))
+            if (this->is_connected_to_requested_wifi_())
             {
                 log_write("Responding that wiFi is connected.");
                 debugI("Sending Improv packets to indicate WiFi is connected. Ignore any IMPROV lines that follow this one.");
                 this->set_state_(improv::STATE_PROVISIONED);
+                this->provisioning_started_at_ = 0;
+                this->provisioning_seen_disconnected_ = false;
+                #if ENABLE_WIFI
+                    nd_network::SetProvisioningActive(false);
+                #endif
 
                 // Only send the URL to connect to if there's a webserver listening to the resulting requests
                 if constexpr (ENABLE_WEBSERVER)
@@ -286,6 +310,22 @@ protected:
                 String WiFi_ssid = command.ssid.c_str();
                 String WiFi_password = command.password.c_str();
 
+                #if ENABLE_WIFI
+                    // Take ownership of the WiFi state machine for the duration
+                    // of this provisioning attempt so the background reconnect
+                    // loop doesn't race us on WiFi.begin / WiFi.disconnect.
+                    nd_network::SetProvisioningActive(true);
+                    nd_network::ClearLastWiFiDisconnectReason();
+                #endif
+
+                this->set_state_(improv::STATE_PROVISIONING);
+
+                this->command_.command  = command.command;
+                this->command_.ssid     = command.ssid;
+                this->command_.password = command.password;
+                this->provisioning_started_at_ = millis();
+                this->provisioning_seen_disconnected_ = false;
+
                 // These lines actually require WiFi to be enabled in the project
                 #if ENABLE_WIFI
                     if (!WriteWiFiConfig(WifiCredSource::ImprovCreds, WiFi_ssid, WiFi_password))
@@ -294,13 +334,9 @@ protected:
                     log_write(".Received wifi settings ssid=\"%s\", password=******", command.ssid.c_str());
 
                     ConnectToWiFi(WiFi_ssid, WiFi_password);
+                    if (!WiFi.isConnected())
+                        this->provisioning_seen_disconnected_ = true;
                 #endif
-
-                this->set_state_(improv::STATE_PROVISIONING);
-
-                this->command_.command  = command.command;
-                this->command_.ssid     = command.ssid;
-                this->command_.password = command.password;
 
                 return true;
             }
@@ -392,19 +428,22 @@ protected:
 
     // Allows the caller to inform us that an error has occured
 
-    void set_error_(improv::Error error)
+    void set_error_(improv::Error error, uint8_t detail = 0)
     {
         std::vector<uint8_t> data = {'I', 'M', 'P', 'R', 'O', 'V'};
-        data.resize(11);
+        const bool hasDetail = detail != 0;
+        data.resize(hasDetail ? 12 : 11);
         data[6] = IMPROV_SERIAL_VERSION;
         data[7] = TYPE_ERROR_STATE;
-        data[8] = 1;
+        data[8] = hasDetail ? 2 : 1;
         data[9] = error;
+        if (hasDetail)
+            data[10] = detail;
 
-        log_write("..Sending error response for error: 0x%02hhX", error);
+        log_write("..Sending error response for error: 0x%02hhX detail: 0x%02hhX", error, detail);
 
         uint8_t checksum = std::accumulate(data.begin(), data.end(), static_cast<uint8_t>(0));
-        data[10] = checksum;
+        data[hasDetail ? 11 : 10] = checksum;
         this->write_data_(data);
     }
 
@@ -427,10 +466,53 @@ protected:
 
     void on_wifi_connect_timeout_()
     {
-        this->set_error_(improv::ERROR_UNABLE_TO_CONNECT);
+        this->set_error_(improv::ERROR_UNABLE_TO_CONNECT, this->get_last_wifi_disconnect_reason_());
         this->set_state_(improv::STATE_AUTHORIZED);
+        this->provisioning_started_at_ = 0;
+        this->provisioning_seen_disconnected_ = false;
+        #if ENABLE_WIFI
+            nd_network::SetProvisioningActive(false);
+        #endif
         log_write("Timed out trying to connect to given WiFi network.");
         WiFi.disconnect();
+    }
+
+    uint8_t get_last_wifi_disconnect_reason_()
+    {
+        #if ENABLE_WIFI
+            const int reason = nd_network::GetLastWiFiDisconnectReason();
+            if (reason < 0)
+                return 0;
+            if (reason > 255)
+                return 255;
+            return static_cast<uint8_t>(reason);
+        #else
+            return 0;
+        #endif
+    }
+
+    bool is_connected_to_requested_wifi_()
+    {
+        if (WiFi.getMode() == WIFI_AP)
+            return true;
+
+        if (WiFi.getMode() != WIFI_STA || !WiFi.isConnected())
+            return false;
+
+        if (this->state_ != improv::STATE_PROVISIONING || this->command_.ssid.empty())
+            return true;
+
+        // A matching SSID only counts as success after we've observed the
+        // previous link drop. Otherwise a still-active old connection can look
+        // like the newly submitted credentials worked.
+        const uint32_t elapsed = millis() - this->provisioning_started_at_;
+        if (elapsed < this->provisioning_minimum_settle_ms_)
+            return false;
+
+        if (!this->provisioning_seen_disconnected_)
+            return false;
+
+        return WiFi.SSID() == String(this->command_.ssid.c_str());
     }
 
     std::vector<uint8_t> build_rpc_settings_response_(improv::Command command)
@@ -479,6 +561,11 @@ protected:
 
     std::vector<uint8_t> rx_buffer_;
     uint32_t last_read_byte_{0};
+    uint32_t provisioning_started_at_{0};
+    bool provisioning_seen_disconnected_{false};
+    static constexpr uint32_t provisioning_minimum_settle_ms_ = 1500;
+    static constexpr uint32_t provisioning_timeout_ms_ = 12000;
+    static constexpr uint32_t serial_packet_idle_timeout_ms_ = 250;
     improv::State state_{improv::STATE_AUTHORIZED};
     improv::ImprovCommand command_{improv::Command::UNKNOWN, "", ""};
 

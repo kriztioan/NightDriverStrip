@@ -103,28 +103,71 @@ SoundAnalyzerBase::SoundAnalyzerBase()
 
 SoundAnalyzerBase::~SoundAnalyzerBase()
 {
+    TeardownAudioInput();
+}
+
+// TeardownAudioInput
+//
+// Idempotent counterpart to InitAudioInput. Called by AudioService::Stop()
+// during a runtime audio reconfigure, and also by ~SoundAnalyzerBase at
+// program end. The _hardwareInstalled guard makes double-uninstall safe.
+void SoundAnalyzerBase::TeardownAudioInput()
+{
+    if (!_hardwareInstalled)
+        return;
+
+    debugI("Audio: tearing down audio input driver");
+
 #if IS_IDF5
     // Stop the hardware first to kill any active DMA transfers
     if (_rx_handle)
     {
-        i2s_channel_disable(_rx_handle);
-        i2s_del_channel(_rx_handle);
+        const esp_err_t disableErr = i2s_channel_disable(_rx_handle);
+        if (disableErr != ESP_OK)
+            debugW("Audio: i2s_channel_disable returned %d", (int)disableErr);
+        const esp_err_t delErr = i2s_del_channel(_rx_handle);
+        if (delErr != ESP_OK)
+            debugW("Audio: i2s_del_channel returned %d", (int)delErr);
+        _rx_handle = nullptr;
     }
     if (_adc_handle)
     {
-        adc_continuous_stop(_adc_handle);
-        adc_continuous_deinit(_adc_handle);
+        const esp_err_t stopErr = adc_continuous_stop(_adc_handle);
+        if (stopErr != ESP_OK)
+            debugW("Audio: adc_continuous_stop returned %d", (int)stopErr);
+        const esp_err_t deinitErr = adc_continuous_deinit(_adc_handle);
+        if (deinitErr != ESP_OK)
+            debugW("Audio: adc_continuous_deinit returned %d", (int)deinitErr);
+        _adc_handle = nullptr;
     }
 #else
-    // Legacy cleanup - i2s_stop terminates DMA
-    i2s_stop(I2S_NUM_0);
-    i2s_driver_uninstall(I2S_NUM_0);
+    #if !USE_M5
+        // Legacy cleanup - i2s_stop terminates DMA. M5Unified manages its own
+        // mic teardown in M5.Mic.end() so we don't double-stop the I2S peripheral.
+        i2s_stop(I2S_NUM_0);
+        i2s_driver_uninstall(I2S_NUM_0);
+    #endif
 #endif
+
+#if USE_M5
+    M5.Mic.end();
+#endif
+
+    _hardwareInstalled = false;
 }
 
 // Reset
 //
-// Reset and clear the FFT buffers
+// Reset and clear the FFT buffers. Leaves the analyzer in a benign default
+// state: VU/ratio metrics restored to their startup values (1.0f) so any
+// effect that scales by VURatio() before the sampler has produced its first
+// frame still renders something visible rather than going dark or dividing
+// by zero. Beat detection is cleared. The audio sampler task overwrites
+// these on its first iteration so the values here only matter when audio
+// is stopped, has never been started, or is mid-reconfigure.
+// AudioService::Stop() relies on this to give direct g_Analyzer readers
+// safe-default values during a reconfigure.
+
 void SoundAnalyzerBase::Reset()
 {
     debugI("Audio analyzer full reset");
@@ -197,9 +240,9 @@ void SoundAnalyzerBase::FFT()
 void SoundAnalyzerBase::SampleAudio()
 {
     size_t bytesRead = 0;
-    const auto inputPin = GetConfiguredAudioInputPin();
+    const auto audioInputPin = GetConfiguredAudioInputPin();
 
-    if (inputPin < 0)
+    if (audioInputPin < 0)
         return;
 
 #if USE_M5
@@ -293,11 +336,20 @@ float SoundAnalyzerBase::BeatEnhance(float amt)
 // InitAudioInput
 //
 // Entry point for configuring board-specific audio input (M5, I2S Digital, or I2S ADC Analog).
+// Idempotent: if the hardware is already installed, this is a no-op so a stale Start()
+// after an aborted Stop() can't double-install the I2S/ADC driver.
+
 void SoundAnalyzerBase::InitAudioInput()
 {
-    const auto inputPin = GetConfiguredAudioInputPin();
+    if (_hardwareInstalled)
+    {
+        debugI("Audio: InitAudioInput skipped, hardware already installed");
+        return;
+    }
 
-    if (inputPin < 0)
+    const auto audioInputPin = GetConfiguredAudioInputPin();
+
+    if (audioInputPin < 0)
     {
         debugI("Audio: input pin < 0, skipping hardware initialization. SimBeat only.");
         return;
@@ -316,6 +368,7 @@ void SoundAnalyzerBase::InitAudioInput()
     InitADC_Modern();
     InitADC_Legacy();
 #endif
+    _hardwareInstalled = true;
     debugV("InitAudioInput Complete\n");
 }
 
@@ -704,8 +757,8 @@ void SoundAnalyzerBase::InitM5()
 void SoundAnalyzerBase::InitI2S_Modern()
 {
 #if (USE_I2S_AUDIO || ELECROW) && IS_IDF5
-    const auto inputPin = GetConfiguredAudioInputPin();
-    debugI("Audio: Initializing I2S Digital Mic (Modern) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, inputPin);
+    const auto audioInputPin = GetConfiguredAudioInputPin();
+    debugI("Audio: Initializing I2S Digital Mic (Modern) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, audioInputPin);
     // Digital Microphones (INMP441, etc.) - Standard I2S Mode
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &_rx_handle));
@@ -718,7 +771,7 @@ void SoundAnalyzerBase::InitI2S_Modern()
             .bclk = I2S_BCLK_PIN,
             .ws = I2S_WS_PIN,
             .dout = I2S_GPIO_UNUSED,
-            .din = static_cast<gpio_num_t>(inputPin),
+            .din = static_cast<gpio_num_t>(audioInputPin),
         },
     };
 
@@ -730,8 +783,8 @@ void SoundAnalyzerBase::InitI2S_Modern()
 void SoundAnalyzerBase::InitI2S_Legacy()
 {
 #if (USE_I2S_AUDIO || ELECROW) && !IS_IDF5
-    const auto inputPin = GetConfiguredAudioInputPin();
-    debugI("Audio: Initializing I2S Digital Mic (Legacy) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, inputPin);
+    const auto audioInputPin = GetConfiguredAudioInputPin();
+    debugI("Audio: Initializing I2S Digital Mic (Legacy) on BCLK:%d WS:%d DIN:%d", I2S_BCLK_PIN, I2S_WS_PIN, audioInputPin);
     const i2s_config_t i2s_config = {.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
                                      .sample_rate = SAMPLING_FREQUENCY,
                                      .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
@@ -746,12 +799,12 @@ void SoundAnalyzerBase::InitI2S_Legacy()
 
     pinMode(I2S_BCLK_PIN, OUTPUT);
     pinMode(I2S_WS_PIN, OUTPUT);
-    pinMode(inputPin, INPUT);
+    pinMode(audioInputPin, INPUT);
 
     const i2s_pin_config_t pin_config = {.bck_io_num = I2S_BCLK_PIN,
                                          .ws_io_num = I2S_WS_PIN,
                                          .data_out_num = I2S_PIN_NO_CHANGE,
-                                         .data_in_num = inputPin};
+                                         .data_in_num = audioInputPin};
 
     ESP_ERROR_CHECK(i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL));
     ESP_ERROR_CHECK(i2s_set_pin(I2S_NUM_0, &pin_config));

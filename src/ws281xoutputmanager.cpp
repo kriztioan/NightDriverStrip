@@ -18,60 +18,99 @@
 
 #if USE_WS281X
 
-#if defined(CONFIG_RMT_SUPPRESS_DEPRECATE_WARN)
-#undef CONFIG_RMT_SUPPRESS_DEPRECATE_WARN
-#endif
-#define CONFIG_RMT_SUPPRESS_DEPRECATE_WARN 1
-
 #include "ws281xoutputmanager.h"
 
 #include <algorithm>
 #include <cstdint>
 
+#include <esp_heap_caps.h>
 #include <esp_idf_version.h>
-#include <driver/rmt.h>
 #include <esp_err.h>
 #include <esp_task_wdt.h>
 
-// This runtime transport intentionally targets the ESP-IDF legacy RMT API.
-// We depend on the Arduino/IDF compatibility layer because the sender uses
-// the legacy translator-based TX path (`rmt_translator_init`,
-// `rmt_write_sample`, `rmt_wait_tx_done`) rather than the newer IDF5 encoder
-// API. If that shim is unavailable, this transport cannot be built.
-
+// Two RMT backends, picked at compile time. On IDF 4.x (Arduino-ESP32 2.x)
+// only the legacy driver/rmt.h API exists; on IDF 5.x driver_ng is the
+// supported path. The legacy and driver_ng headers cannot be included in
+// the same translation unit on IDF 5 because they use the name
+// rmt_channel_t for two different types - the legacy as an enum, the new
+// as `struct rmt_channel_t *` - so we include only the one we'll use.
+#if ESP_IDF_VERSION_MAJOR >= 5
+#include <driver/rmt_tx.h>
+#else
+#if defined(CONFIG_RMT_SUPPRESS_DEPRECATE_WARN)
+#undef CONFIG_RMT_SUPPRESS_DEPRECATE_WARN
+#endif
+#define CONFIG_RMT_SUPPRESS_DEPRECATE_WARN 1
+#include <driver/rmt.h>
 #ifndef RMT_DEFAULT_CONFIG_TX
-    #error "NightDriverStrip WS281x runtime transport requires the ESP-IDF legacy RMT API compatibility layer."
+    #error "NightDriverStrip WS281x runtime transport requires the ESP-IDF legacy RMT API on IDF 4.x."
+#endif
 #endif
 
 #include "gfxbase.h"
 #include "ws281xgfx.h"
 
+// Transport base class. Concrete subclasses (in the anonymous namespace below)
+// wrap a single ESP-IDF RMT driver generation so the manager itself stays
+// driver-agnostic. The base class lives at file scope so that the matching
+// `class Transport;` forward declaration in the header (used by the
+// `std::unique_ptr<Transport>` member) refers to the same type.
+class Transport
+{
+public:
+    virtual ~Transport() = default;
+    // Configure (or reconfigure) a single TX channel for the given GPIO. Caller
+    // guarantees the channel is not currently installed when this is invoked.
+    // `byteCount` is the size of the outputBytes buffer for that channel
+    // (always 3 * ledCount). Returns false on failure with errorMessage set.
+    virtual bool ConfigureChannel(size_t channelIndex, gpio_num_t pin, size_t byteCount, String* errorMessage) = 0;
+
+    // Tear down a previously installed channel. Idempotent: safe to call on
+    // an already-released channel.
+    virtual void ReleaseChannel(size_t channelIndex) = 0;
+
+    // Queue a frame for transmission on this channel. Implementation is
+    // responsible for any driver-specific error logging.
+    virtual void TransmitChannel(size_t channelIndex, const uint8_t* bytes, size_t byteCount, int8_t pin, size_t activeLEDCount) = 0;
+
+    // Block until the most recent frame on this channel has finished
+    // transmitting (or the timeout elapses). Implementation does its own
+    // error logging.
+    virtual void WaitForChannel(size_t channelIndex, int8_t pin, size_t activeLEDCount) = 0;
+};
+
 namespace
 {
     static_assert(NUM_CHANNELS <= 8, "ESP32 RMT path supports up to 8 WS281x channels");
 
-    // Legacy RMT uses a simple APB-clock divider model. With 80MHz / 2 we get
-    // 25ns ticks, which is fine-grained enough to represent WS2812 timings with
-    // integer durations.
-
-    constexpr uint8_t kRmtClockDivider = 2; // 80MHz APB / 2 = 40MHz => 25ns ticks
-    constexpr uint8_t kRmtMemoryBlocksPerChannel = 1;
-    constexpr TickType_t kRmtWaitTimeout = pdMS_TO_TICKS(100);
-
-    // FastLED already carries the WS2812 timing constants we want.  We reuse
+    // Common timing
+    //
+    // FastLED already carries the WS2812 timing constants we want. We reuse
     // those values here, but the actual transport and GPIO ownership remain in
     // NightDriver's runtime manager rather than in FastLED's controller layer.
 
     constexpr uint32_t kWs2812T0HighNs = FASTLED_WS2812_T1;
-    constexpr uint32_t kWs2812T0LowNs = FASTLED_WS2812_T2 + FASTLED_WS2812_T3;
+    constexpr uint32_t kWs2812T0LowNs  = FASTLED_WS2812_T2 + FASTLED_WS2812_T3;
     constexpr uint32_t kWs2812T1HighNs = FASTLED_WS2812_T1 + FASTLED_WS2812_T2;
-    constexpr uint32_t kWs2812T1LowNs = FASTLED_WS2812_T3;
+    constexpr uint32_t kWs2812T1LowNs  = FASTLED_WS2812_T3;
+
+    // 25 ns ticks (40 MHz APB / 2 on legacy via kRmtClockDivider, or
+    // resolution_hz=40MHz on driver_ng). The wait timeout is shared.
+    constexpr TickType_t kRmtWaitTimeout = pdMS_TO_TICKS(100);
 
     constexpr uint16_t NsToRmtTicks(uint32_t nanoseconds)
     {
         constexpr uint32_t kTickNs = 25;
         return static_cast<uint16_t>((nanoseconds + (kTickNs - 1)) / kTickNs);
     }
+
+#if ESP_IDF_VERSION_MAJOR < 5
+    // Legacy-only: clock divider model and per-bit rmt_item32_t entries
+    // populated from ISR by the translator. driver_ng's bytes-encoder
+    // has its own bit-symbol descriptors built inside DriverNgTransport
+    // and doesn't need any of these.
+    constexpr uint8_t kRmtClockDivider = 2;
+    constexpr uint8_t kRmtMemoryBlocksPerChannel = 1;
 
     constexpr rmt_item32_t MakeRmtItem(uint16_t highTicks, uint16_t lowTicks)
     {
@@ -89,7 +128,6 @@ namespace
     // The translator is called by the legacy RMT driver as it needs more items.
     // It consumes raw GRB/RGB/etc. bytes and expands each bit into one timing
     // item, so the higher layers only need to provide packed color bytes.
-
     void IRAM_ATTR WS2812ByteTranslator(const void* src, rmt_item32_t* dest, size_t srcSize, size_t wantedNum, size_t* translatedSize, size_t* itemNum)
     {
         const auto* bytes = static_cast<const uint8_t*>(src);
@@ -109,35 +147,62 @@ namespace
         *translatedSize = consumedBytes;
         *itemNum = outputItems;
     }
+#endif // ESP_IDF_VERSION_MAJOR < 5
 
-    // Runtime color order is a settings concern rather than a template concern,
-    // so we materialize the final byte order explicitly into the per-channel
-    // output buffer before handing bytes to the RMT driver.
+    template <uint8_t RIndex, uint8_t GIndex, uint8_t BIndex>
+    void PackChannelPixels(uint8_t* output,
+                           const CRGB* source,
+                           size_t activeLedCount,
+                           size_t pixelsToShow,
+                           uint8_t brightness,
+                           uint8_t fader)
+    {
+        for (size_t pixelIndex = 0; pixelIndex < activeLedCount; ++pixelIndex)
+        {
+            CRGB color = pixelIndex < pixelsToShow ? source[pixelIndex] : CRGB::Black;
 
-    void WriteColorOrderedBytes(uint8_t* dest, const CRGB& color, DeviceConfig::WS281xColorOrder colorOrder)
+            // Preserve the compiled-path semantics without first mutating the effect buffer:
+            // scale by configured brightness, then apply the global master fader.
+            nscale8x3_video(color.r, color.g, color.b, brightness);
+            nscale8x3_video(color.r, color.g, color.b, fader);
+
+            const size_t offset = pixelIndex * 3;
+            output[offset + RIndex] = color.r;
+            output[offset + GIndex] = color.g;
+            output[offset + BIndex] = color.b;
+        }
+    }
+
+    void PackChannelPixelsForColorOrder(uint8_t* output,
+                                        const CRGB* source,
+                                        size_t activeLedCount,
+                                        size_t pixelsToShow,
+                                        uint8_t brightness,
+                                        uint8_t fader,
+                                        DeviceConfig::WS281xColorOrder colorOrder)
     {
         switch (colorOrder)
         {
             case DeviceConfig::WS281xColorOrder::RGB:
-                dest[0] = color.r; dest[1] = color.g; dest[2] = color.b;
+                PackChannelPixels<0, 1, 2>(output, source, activeLedCount, pixelsToShow, brightness, fader);
                 return;
             case DeviceConfig::WS281xColorOrder::RBG:
-                dest[0] = color.r; dest[1] = color.b; dest[2] = color.g;
+                PackChannelPixels<0, 2, 1>(output, source, activeLedCount, pixelsToShow, brightness, fader);
                 return;
             case DeviceConfig::WS281xColorOrder::GRB:
-                dest[0] = color.g; dest[1] = color.r; dest[2] = color.b;
+                PackChannelPixels<1, 0, 2>(output, source, activeLedCount, pixelsToShow, brightness, fader);
                 return;
             case DeviceConfig::WS281xColorOrder::GBR:
-                dest[0] = color.g; dest[1] = color.b; dest[2] = color.r;
+                PackChannelPixels<2, 0, 1>(output, source, activeLedCount, pixelsToShow, brightness, fader);
                 return;
             case DeviceConfig::WS281xColorOrder::BRG:
-                dest[0] = color.b; dest[1] = color.r; dest[2] = color.g;
+                PackChannelPixels<1, 2, 0>(output, source, activeLedCount, pixelsToShow, brightness, fader);
                 return;
             case DeviceConfig::WS281xColorOrder::BGR:
-                dest[0] = color.b; dest[1] = color.g; dest[2] = color.r;
+                PackChannelPixels<2, 1, 0>(output, source, activeLedCount, pixelsToShow, brightness, fader);
                 return;
             default:
-                dest[0] = color.g; dest[1] = color.r; dest[2] = color.b;
+                PackChannelPixels<1, 0, 2>(output, source, activeLedCount, pixelsToShow, brightness, fader);
                 return;
         }
     }
@@ -173,7 +238,273 @@ namespace
     {
         return str_sprintf("%s failed (%s)", action, esp_err_to_name(error));
     }
+
+#if ESP_IDF_VERSION_MAJOR < 5
+    // Legacy IDF RMT API (driver/rmt.h). State-free: the channel index *is*
+    // the rmt_channel_t value passed to every API call. Only present on
+    // IDF 4 because legacy and driver_ng headers can't coexist in the same
+    // translation unit on IDF 5 (rmt_channel_t name collision).
+    class LegacyTransport : public ::Transport
+    {
+    public:
+        bool ConfigureChannel(size_t channelIndex, gpio_num_t pin, size_t /*byteCount*/, String* errorMessage) override
+        {
+            // The IDF4-compatible helper seeds a TX config for the requested
+            // channel/GPIO. We then override the pieces that matter for WS2812
+            // timing and idle behavior.
+            rmt_config_t config = RMT_DEFAULT_CONFIG_TX(pin, static_cast<rmt_channel_t>(channelIndex));
+            config.clk_div = kRmtClockDivider;
+            config.mem_block_num = kRmtMemoryBlocksPerChannel;
+            config.tx_config.idle_output_en = true;
+            config.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
+
+            if (const auto error = rmt_config(&config); error != ESP_OK)
+            {
+                if (errorMessage)
+                    *errorMessage = FormatRmtError("rmt_config", error);
+                return false;
+            }
+
+            if (const auto error = rmt_driver_install(static_cast<rmt_channel_t>(channelIndex), 0, ESP_INTR_FLAG_IRAM); error != ESP_OK)
+            {
+                if (errorMessage)
+                    *errorMessage = FormatRmtError("rmt_driver_install", error);
+                return false;
+            }
+
+            if (const auto error = rmt_translator_init(static_cast<rmt_channel_t>(channelIndex), WS2812ByteTranslator); error != ESP_OK)
+            {
+                rmt_driver_uninstall(static_cast<rmt_channel_t>(channelIndex));
+                if (errorMessage)
+                    *errorMessage = FormatRmtError("rmt_translator_init", error);
+                return false;
+            }
+
+            return true;
+        }
+
+        void ReleaseChannel(size_t channelIndex) override
+        {
+            // Wait for any in-flight frame to finish before tearing down the
+            // transport so a live pin/channel change does not pull the driver out
+            // from under Show().
+            const auto channel = static_cast<rmt_channel_t>(channelIndex);
+            const auto waitError = rmt_wait_tx_done(channel, kRmtWaitTimeout);
+            if (waitError == ESP_ERR_TIMEOUT)
+            {
+                debugW("rmt_wait_tx_done timed out during ReleaseChannel for channel=%zu; forcing TX stop",
+                       channelIndex);
+
+                const auto stopError = rmt_tx_stop(channel);
+                if (stopError != ESP_OK)
+                {
+                    debugE("rmt_tx_stop failed during ReleaseChannel for channel=%zu error=%s",
+                           channelIndex,
+                           esp_err_to_name(stopError));
+                }
+            }
+            else if (waitError != ESP_OK)
+            {
+                debugE("rmt_wait_tx_done failed during ReleaseChannel for channel=%zu error=%s",
+                       channelIndex,
+                       esp_err_to_name(waitError));
+            }
+
+            const auto uninstallError = rmt_driver_uninstall(channel);
+            if (uninstallError != ESP_OK)
+            {
+                debugE("rmt_driver_uninstall failed during ReleaseChannel for channel=%zu error=%s",
+                       channelIndex,
+                       esp_err_to_name(uninstallError));
+            }
+        }
+
+        void TransmitChannel(size_t channelIndex, const uint8_t* bytes, size_t byteCount, int8_t pin, size_t activeLEDCount) override
+        {
+            const auto error = rmt_write_sample(static_cast<rmt_channel_t>(channelIndex), bytes, byteCount, false);
+            if (error != ESP_OK)
+            {
+                debugE("rmt_write_sample failed for channel=%zu pin=%d leds=%zu error=%s",
+                       channelIndex,
+                       pin,
+                       activeLEDCount,
+                       esp_err_to_name(error));
+            }
+        }
+
+        void WaitForChannel(size_t channelIndex, int8_t pin, size_t activeLEDCount) override
+        {
+            const auto error = rmt_wait_tx_done(static_cast<rmt_channel_t>(channelIndex), kRmtWaitTimeout);
+            if (error != ESP_OK)
+            {
+                debugE("rmt_wait_tx_done failed for channel=%zu pin=%d leds=%zu error=%s",
+                       channelIndex,
+                       pin,
+                       activeLEDCount,
+                       esp_err_to_name(error));
+            }
+        }
+    };
+#endif // ESP_IDF_VERSION_MAJOR < 5
+
+#if ESP_IDF_VERSION_MAJOR >= 5
+    // driver_ng IDF RMT API (driver/rmt_tx.h). Holds parallel arrays of
+    // channel and encoder handles, since that API issues opaque handles
+    // rather than identifying channels by index.
+    constexpr rmt_symbol_word_t MakeRmtSymbol(uint16_t highTicks, uint16_t lowTicks)
+    {
+        rmt_symbol_word_t symbol{};
+        symbol.level0 = 1;
+        symbol.duration0 = highTicks;
+        symbol.level1 = 0;
+        symbol.duration1 = lowTicks;
+        return symbol;
+    }
+
+    class DriverNgTransport : public ::Transport
+    {
+        rmt_channel_handle_t _channels[NUM_CHANNELS] = {};
+        rmt_encoder_handle_t _encoders[NUM_CHANNELS] = {};
+
+    public:
+        bool ConfigureChannel(size_t channelIndex, gpio_num_t pin, size_t /*byteCount*/, String* errorMessage) override
+        {
+            rmt_tx_channel_config_t channelConfig = {};
+            channelConfig.gpio_num = pin;
+            channelConfig.clk_src = RMT_CLK_SRC_DEFAULT;
+            // 40 MHz / 25 ns ticks - matches legacy clock divider 2 from APB 80 MHz.
+            channelConfig.resolution_hz = 40 * 1000 * 1000;
+            channelConfig.mem_block_symbols = 64;
+            channelConfig.trans_queue_depth = 4;
+
+            if (const auto error = rmt_new_tx_channel(&channelConfig, &_channels[channelIndex]); error != ESP_OK)
+            {
+                _channels[channelIndex] = nullptr;
+                if (errorMessage)
+                    *errorMessage = FormatRmtError("rmt_new_tx_channel", error);
+                return false;
+            }
+
+            rmt_bytes_encoder_config_t encoderConfig = {};
+            encoderConfig.bit0 = MakeRmtSymbol(NsToRmtTicks(kWs2812T0HighNs), NsToRmtTicks(kWs2812T0LowNs));
+            encoderConfig.bit1 = MakeRmtSymbol(NsToRmtTicks(kWs2812T1HighNs), NsToRmtTicks(kWs2812T1LowNs));
+            encoderConfig.flags.msb_first = 1;
+
+            if (const auto error = rmt_new_bytes_encoder(&encoderConfig, &_encoders[channelIndex]); error != ESP_OK)
+            {
+                rmt_del_channel(_channels[channelIndex]);
+                _channels[channelIndex] = nullptr;
+                _encoders[channelIndex] = nullptr;
+                if (errorMessage)
+                    *errorMessage = FormatRmtError("rmt_new_bytes_encoder", error);
+                return false;
+            }
+
+            if (const auto error = rmt_enable(_channels[channelIndex]); error != ESP_OK)
+            {
+                rmt_del_encoder(_encoders[channelIndex]);
+                rmt_del_channel(_channels[channelIndex]);
+                _channels[channelIndex] = nullptr;
+                _encoders[channelIndex] = nullptr;
+                if (errorMessage)
+                    *errorMessage = FormatRmtError("rmt_enable", error);
+                return false;
+            }
+
+            return true;
+        }
+
+        void ReleaseChannel(size_t channelIndex) override
+        {
+            if (_channels[channelIndex])
+            {
+                const auto waitError = rmt_tx_wait_all_done(_channels[channelIndex], 100);
+                if (waitError == ESP_ERR_TIMEOUT)
+                {
+                    debugW("rmt_tx_wait_all_done timed out during ReleaseChannel for channel=%zu",
+                           channelIndex);
+                }
+                else if (waitError != ESP_OK)
+                {
+                    debugE("rmt_tx_wait_all_done failed during ReleaseChannel for channel=%zu error=%s",
+                           channelIndex,
+                           esp_err_to_name(waitError));
+                }
+
+                if (const auto error = rmt_disable(_channels[channelIndex]); error != ESP_OK)
+                {
+                    debugE("rmt_disable failed during ReleaseChannel for channel=%zu error=%s",
+                           channelIndex,
+                           esp_err_to_name(error));
+                }
+            }
+
+            if (_encoders[channelIndex])
+            {
+                if (const auto error = rmt_del_encoder(_encoders[channelIndex]); error != ESP_OK)
+                {
+                    debugE("rmt_del_encoder failed during ReleaseChannel for channel=%zu error=%s",
+                           channelIndex,
+                           esp_err_to_name(error));
+                }
+                _encoders[channelIndex] = nullptr;
+            }
+
+            if (_channels[channelIndex])
+            {
+                if (const auto error = rmt_del_channel(_channels[channelIndex]); error != ESP_OK)
+                {
+                    debugE("rmt_del_channel failed during ReleaseChannel for channel=%zu error=%s",
+                           channelIndex,
+                           esp_err_to_name(error));
+                }
+                _channels[channelIndex] = nullptr;
+            }
+        }
+
+        void TransmitChannel(size_t channelIndex, const uint8_t* bytes, size_t byteCount, int8_t pin, size_t activeLEDCount) override
+        {
+            rmt_transmit_config_t txConfig = {};
+            txConfig.loop_count = 0;
+            const auto error = rmt_transmit(_channels[channelIndex], _encoders[channelIndex], bytes, byteCount, &txConfig);
+            if (error != ESP_OK)
+            {
+                debugE("rmt_transmit failed for channel=%zu pin=%d leds=%zu error=%s",
+                       channelIndex,
+                       pin,
+                       activeLEDCount,
+                       esp_err_to_name(error));
+            }
+        }
+
+        void WaitForChannel(size_t channelIndex, int8_t pin, size_t activeLEDCount) override
+        {
+            const auto error = rmt_tx_wait_all_done(_channels[channelIndex], 100); // 100ms timeout
+            if (error != ESP_OK)
+            {
+                debugE("rmt_tx_wait_all_done failed for channel=%zu pin=%d leds=%zu error=%s",
+                       channelIndex,
+                       pin,
+                       activeLEDCount,
+                       esp_err_to_name(error));
+            }
+        }
+    };
+#endif // ESP_IDF_VERSION_MAJOR >= 5
+
+    std::unique_ptr<::Transport> CreateTransport()
+    {
+#if ESP_IDF_VERSION_MAJOR >= 5
+        return std::make_unique<DriverNgTransport>();
+#else
+        return std::make_unique<LegacyTransport>();
+#endif
+    }
 }
+
+// Out-of-line so the unique_ptr<Transport> default-deleter sees the full
+// Transport definition above.
+WS281xOutputManager::WS281xOutputManager() : _transport(CreateTransport()) {}
 
 WS281xOutputManager::~WS281xOutputManager()
 {
@@ -201,55 +532,40 @@ bool WS281xOutputManager::RecreateChannel(size_t channelIndex, int8_t pin, size_
 
     // A channel recreate is the "hard" reconfigure path: tear down any existing
     // RMT binding, resize the packed byte buffer if LED count changed, then
-    // install a fresh legacy-RMT TX channel on the new GPIO.
+    // install a fresh RMT TX channel on the new GPIO.
 
     if (state.installed)
         ReleaseChannel(channelIndex);
 
     if (!state.outputBytes || state.byteCount != byteCount)
     {
-        auto nextOutputBytes = std::make_unique<uint8_t[]>(byteCount);
-        if (!nextOutputBytes)
+        // The legacy driver DMAs from this buffer (so it MUST live in
+        // DMA-capable internal RAM) and driver_ng's non-DMA mode does fine
+        // with the same allocation. With the PSRAM-by-default policy in
+        // main.cpp, plain std::make_unique<uint8_t[]>(byteCount) lands
+        // buffers above the threshold in PSRAM, which fails on the legacy
+        // path with:
+        //   "rmt: Using buffer allocated from psram"  -> ESP_ERR_INVALID_ARG
+        // heap_caps_malloc with DMA+INTERNAL pins it correctly for both
+        // drivers, so we use the same allocator either way.
+        auto* mem = static_cast<uint8_t*>(heap_caps_malloc(byteCount,
+                            MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (!mem)
         {
             if (errorMessage)
-                *errorMessage = "failed to allocate WS281x byte buffer";
+                *errorMessage = "failed to allocate DMA-capable WS281x byte buffer";
             return false;
         }
 
-        std::fill_n(nextOutputBytes.get(), byteCount, 0);
-        state.outputBytes = std::move(nextOutputBytes);
+        std::fill_n(mem, byteCount, 0);
+        // unique_ptr<uint8_t[]> default deleter calls free(), which is the
+        // correct deallocator for heap_caps_malloc'd memory on ESP-IDF.
+        state.outputBytes.reset(mem);
         state.byteCount = byteCount;
     }
 
-    // The IDF4-compatible helper seeds a TX config for the requested channel/GPIO.
-    // We then override the pieces that matter for WS2812 timing and idle behavior.
-    rmt_config_t config = RMT_DEFAULT_CONFIG_TX(static_cast<gpio_num_t>(pin), static_cast<rmt_channel_t>(channelIndex));
-    config.clk_div = kRmtClockDivider;
-    config.mem_block_num = kRmtMemoryBlocksPerChannel;
-    config.tx_config.idle_output_en = true;
-    config.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
-
-    if (const auto error = rmt_config(&config); error != ESP_OK)
-    {
-        if (errorMessage)
-            *errorMessage = FormatRmtError("rmt_config", error);
+    if (!_transport->ConfigureChannel(channelIndex, static_cast<gpio_num_t>(pin), byteCount, errorMessage))
         return false;
-    }
-
-    if (const auto error = rmt_driver_install(static_cast<rmt_channel_t>(channelIndex), 0, ESP_INTR_FLAG_IRAM); error != ESP_OK)
-    {
-        if (errorMessage)
-            *errorMessage = FormatRmtError("rmt_driver_install", error);
-        return false;
-    }
-
-    if (const auto error = rmt_translator_init(static_cast<rmt_channel_t>(channelIndex), WS2812ByteTranslator); error != ESP_OK)
-    {
-        rmt_driver_uninstall(static_cast<rmt_channel_t>(channelIndex));
-        if (errorMessage)
-            *errorMessage = FormatRmtError("rmt_translator_init", error);
-        return false;
-    }
 
     state.pin = pin;
     state.ledCount = ledCount;
@@ -261,45 +577,14 @@ bool WS281xOutputManager::RecreateChannel(size_t channelIndex, int8_t pin, size_
 void WS281xOutputManager::ReleaseChannel(size_t channelIndex)
 {
     auto& state = _channels[channelIndex];
-    const auto channel = static_cast<rmt_channel_t>(channelIndex);
 
-    // Wait for any in-flight frame to finish before uninstalling the driver so
-    // a live pin/channel change does not pull the transport out from under Show().
+    // Wait for any in-flight frame to finish before tearing down the
+    // transport so a live pin/channel change does not pull the driver out
+    // from under Show().
 
     if (state.installed)
     {
-        const auto waitError = rmt_wait_tx_done(channel, kRmtWaitTimeout);
-        if (waitError == ESP_ERR_TIMEOUT)
-        {
-            debugW("rmt_wait_tx_done timed out during ReleaseChannel for channel=%zu pin=%d; forcing TX stop",
-                   channelIndex,
-                   state.pin);
-
-            const auto stopError = rmt_tx_stop(channel);
-            if (stopError != ESP_OK)
-            {
-                debugE("rmt_tx_stop failed during ReleaseChannel for channel=%zu pin=%d error=%s",
-                       channelIndex,
-                       state.pin,
-                       esp_err_to_name(stopError));
-            }
-        }
-        else if (waitError != ESP_OK)
-        {
-            debugE("rmt_wait_tx_done failed during ReleaseChannel for channel=%zu pin=%d error=%s",
-                   channelIndex,
-                   state.pin,
-                   esp_err_to_name(waitError));
-        }
-
-        const auto uninstallError = rmt_driver_uninstall(channel);
-        if (uninstallError != ESP_OK)
-        {
-            debugE("rmt_driver_uninstall failed during ReleaseChannel for channel=%zu pin=%d error=%s",
-                   channelIndex,
-                   state.pin,
-                   esp_err_to_name(uninstallError));
-        }
+        _transport->ReleaseChannel(channelIndex);
         state.installed = false;
     }
 
@@ -363,7 +648,7 @@ bool WS281xOutputManager::ApplyConfig(const DeviceConfig& config, const std::vec
     return true;
 }
 
-void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devices, uint16_t pixelsDrawn, uint8_t brightness)
+void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devices, uint16_t pixelsDrawn, uint8_t brightness, uint8_t fader)
 {
     // The same mutex used by ApplyConfig() keeps live transport mutations from
     // colliding with the draw loop while it is filling buffers or transmitting.
@@ -374,7 +659,6 @@ void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devi
         return;
 
     const size_t pixelsToShow = std::min(static_cast<size_t>(pixelsDrawn), _activeLEDCount);
-    const uint8_t scale = brightness;
 
     // First build packed output bytes for every active channel.  The GFX layer
     // owns CRGB frame buffers; the runtime transport owns these temporary-once-
@@ -388,19 +672,14 @@ void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devi
 
         const auto& device = devices[channelIndex];
         auto* output = state.outputBytes.get();
-        for (size_t pixelIndex = 0; pixelIndex < _activeLEDCount; ++pixelIndex)
-        {
-            CRGB color = pixelIndex < pixelsToShow ? device->leds[pixelIndex] : CRGB::Black;
-            nscale8x3_video(color.r, color.g, color.b, scale);
-            WriteColorOrderedBytes(output + (pixelIndex * 3), color, _colorOrder);
-        }
+        PackChannelPixelsForColorOrder(output, device->leds, _activeLEDCount, pixelsToShow, brightness, fader, _colorOrder);
     }
 
     const auto showStartMicros = micros();
 
     // Queue every active channel first, then wait for completion in a second
     // pass. This keeps all strips in the same frame as closely aligned as the
-    // legacy RMT API allows.
+    // RMT API allows.
 
     for (size_t channelIndex = 0; channelIndex < _activeChannelCount && channelIndex < devices.size(); ++channelIndex)
     {
@@ -408,15 +687,7 @@ void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devi
         if (!state.active || !state.installed || !state.outputBytes)
             continue;
 
-        const auto error = rmt_write_sample(static_cast<rmt_channel_t>(channelIndex), state.outputBytes.get(), state.byteCount, false);
-        if (error != ESP_OK)
-        {
-            debugE("rmt_write_sample failed for channel=%zu pin=%d leds=%zu error=%s",
-                   channelIndex,
-                   state.pin,
-                   _activeLEDCount,
-                   esp_err_to_name(error));
-        }
+        _transport->TransmitChannel(channelIndex, state.outputBytes.get(), state.byteCount, state.pin, _activeLEDCount);
     }
 
     // The transmit wait is also where live reconfiguration pressure tends to
@@ -428,15 +699,7 @@ void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devi
         if (!state.active || !state.installed)
             continue;
 
-        const auto error = rmt_wait_tx_done(static_cast<rmt_channel_t>(channelIndex), kRmtWaitTimeout);
-        if (error != ESP_OK)
-        {
-            debugE("rmt_wait_tx_done failed for channel=%zu pin=%d leds=%zu error=%s",
-                   channelIndex,
-                   state.pin,
-                   _activeLEDCount,
-                   esp_err_to_name(error));
-        }
+        _transport->WaitForChannel(channelIndex, state.pin, _activeLEDCount);
     }
 
     const auto showElapsedMicros = micros() - showStartMicros;

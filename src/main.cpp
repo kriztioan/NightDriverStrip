@@ -177,8 +177,12 @@
 #if defined(TOGGLE_BUTTON_0) || defined(TOGGLE_BUTTON_1)
 #include "Bounce2.h"
 #endif
+#include "audioserialbridge.h"
+#include "audioservice.h"
+#include "colorstreamerservice.h"
 #include "console.h"
 #include "debug_cli.h"
+#include "debugconsole.h"
 #include "deviceconfig.h"
 #include "effectmanager.h"
 #include "gfxbase.h"
@@ -195,6 +199,9 @@
 #include "logger.h"
 #include "nd_network.h"
 #include "ntptimeclient.h"
+#include "remotecontrol.h"
+#include "renderservice.h"
+#include "screen.h"
 #include "socketserver.h"
 #include "soundanalyzer.h"
 #include "systemcontainer.h"
@@ -221,7 +228,7 @@ void ConfirmUpdate();
 
 
 
-void ScreenUpdateLoopEntry(void *);
+// ScreenUpdateLoopEntry was migrated into Screen::Run() (ITaskService).
 
 #if ENABLE_ESPNOW
 #include <esp_arduino_version.h>
@@ -238,6 +245,7 @@ void onReceiveESPNOW(const uint8_t *macAddr, const uint8_t *data, int dataLen);
 
 DRAM_ATTR std::unique_ptr<SystemContainer> g_ptrSystem;
 DRAM_ATTR std::mutex g_buffer_mutex;
+DRAM_ATTR std::recursive_mutex g_render_mutex;
 DRAM_ATTR std::recursive_mutex g_effect_manager_mutex;
 
 // The one and only instance of ImprovSerial.  We instantiate it as the type needed
@@ -338,12 +346,42 @@ void setup()
     if (!SPIFFS.begin(true))
         Serial.println("WARNING: SPIFFS could not be initialized!");
 
-    // Enabling PSRAM allows us to use the extra 4MB of RAM on the ESP32-WROVER chip, but it caused
-    // problems with the S3 rebooting when WiFi connected, so for now, I've limited the default
-    // allocator to be PSRAM only on the MESMERIZER project where it's well tested.
+    // PSRAM-by-default policy
+    //
+    // Route any allocation above PSRAM_DEFAULT_THRESHOLD bytes through PSRAM
+    // automatically, leaving small allocations (and DMA-capable buffers, which
+    // explicitly request MALLOC_CAP_DMA elsewhere) in internal SRAM. This makes
+    // std::make_unique / std::make_shared / std::vector "do the right thing"
+    // for the common case without explicit *_psram helpers at every call site.
+    //
+    // On builds that don't define USE_PSRAM, the call below is a no-op (the
+    // ESP-IDF heap stays in internal-SRAM-only mode for that build).
+    //
+    // Originally limited to MESMERIZER because the S3 + WiFi-connect path was
+    // observed to crash with default-PSRAM enabled. The dynamic-services
+    // refactor reworked the start order and lifetimes that were implicated;
+    // we expect the issue is resolved, but per-environment opt-out remains
+    // possible by setting NO_PSRAM_DEFAULT in build_flags.
 
-    #if MESMERIZER
-        heap_caps_malloc_extmem_enable(96);
+    // Threshold is 96 because that's the value Mesmerizer ran with for years
+    // before this refactor. Dropping it lower panicked on the mesmerizer
+    // build with cache-disabled-region SPI flash crashes:
+    //   - 64 broke EffectManager construction (some object in the 64-95
+    //     byte size range ended up in PSRAM and got touched mid-SPIFFS op)
+    //   - 32 broke wifi_nvs_init / wifi_nvs_validate_sta_listen_interval
+    //     (some WiFi/NVS scratch buffer in the 32-95 byte size range ended
+    //     up in PSRAM and got touched while flash was being read at
+    //     boot-time WiFi setup)
+    // 96 is the proven working value across all LX6+PSRAM boards; raise it
+    // further (e.g. 128, 256) per environment if a board surfaces a similar
+    // issue, but do NOT lower it below 96 without testing every PSRAM env.
+
+    #if USE_PSRAM && !defined(NO_PSRAM_DEFAULT)
+        #ifndef PSRAM_DEFAULT_THRESHOLD
+            #define PSRAM_DEFAULT_THRESHOLD 96
+        #endif
+        heap_caps_malloc_extmem_enable(PSRAM_DEFAULT_THRESHOLD);
+        debugI("PSRAM-default routing enabled at threshold %d bytes", (int)PSRAM_DEFAULT_THRESHOLD);
     #endif
 
     // Initialize LZ library for decompressing compressed wifi packets
@@ -352,7 +390,7 @@ void setup()
 #endif
 
     // Create the SystemContainer that holds primary device management objects.
-    g_ptrSystem = make_unique_psram<SystemContainer>();
+    g_ptrSystem = std::make_unique<SystemContainer>();
 
     // Start the Task Manager which takes over the watchdog role and measures CPU usage
     auto& taskManager = g_ptrSystem->SetupTaskManager();
@@ -442,8 +480,14 @@ void setup()
 #if ENABLE_WIFI
         debugW("Starting ImprovSerial for %s", family.c_str());
         String name = "NDESP32" + nd_network::GetMacAddress().substring(6);
-        g_pImprovSerial = make_unique_psram<ImprovSerial<typeof(Serial)>>();
-        g_pImprovSerial->setup(PROJECT_NAME, FLASH_VERSION_NAME, family, name.c_str(), &Serial);
+
+        // Build stamp surfaces in Improv's GET_DEVICE_INFO response so the
+        // WebInstaller dialog can display exactly which firmware is running.
+        // Updated automatically every compile via __DATE__ / __TIME__.
+        static const String improv_version = String(FLASH_VERSION_NAME) + " (" + __DATE__ + " " + __TIME__ + ")";
+
+        g_pImprovSerial = std::make_unique<ImprovSerial<typeof(Serial)>>();
+        g_pImprovSerial->setup(PROJECT_NAME, improv_version, family, name.c_str(), &Serial);
 
         // Improv will feed unknown bytes to the Serial session's CLI processor
         g_pImprovSerial->set_on_unknown_byte([](uint8_t byte) {
@@ -536,6 +580,16 @@ void setup()
         M5.Lcd.setRotation(1);
         g_ptrSystem->SetupHardwareDisplay(M5.Lcd.width(), M5.Lcd.height());
 
+        #if M5STICKS3 && ENABLE_REMOTE
+            // The StickS3's AW8737 audio amp emits enough EMI to swamp the
+            // built-in IR receiver on G42. M5Stack's own IR-NEC sample
+            // documents the requirement: "When using the IR receive function,
+            // the SPK amplifier must be turned off; otherwise, reception will
+            // not work properly." NightDriver doesn't currently route audio
+            // out through this speaker, so leaving the amp off is harmless.
+            M5.Speaker.end();
+        #endif
+
     #elif ELECROW
 
             debugW("Creating Elecrow Screen");
@@ -602,10 +656,27 @@ void setup()
 
     // Start things that do not depend on the network
 
-    taskManager.StartDrawThread();
-    taskManager.StartScreenThread();
-    taskManager.StartAudioThread();
-    taskManager.StartRemoteThread();
+    g_ptrSystem->SetupRenderService().Start();
+
+    #if USE_SCREEN
+        if (g_ptrSystem->HasDisplay())
+            g_ptrSystem->GetDisplay().Start();
+    #endif
+
+    // Audio is owned by AudioService so it can be reconfigured at runtime
+    // (e.g. moving the I2S DIN pin from the SetupUI) without a reboot. We
+    // construct the service unconditionally so consumers can ask "is audio
+    // available?" via a stable interface, and start it now if this build
+    // has ENABLE_AUDIO. DeviceConfig has already been loaded above, so
+    // AudioConfig::FromCurrentSettings() picks up any persisted pin.
+
+    auto& audioService = g_ptrSystem->SetupAudioService();
+    audioService.Reconfigure(AudioConfig::FromCurrentSettings());
+
+    #if ENABLE_REMOTE
+        if (g_ptrSystem->HasRemoteControl())
+            g_ptrSystem->GetRemoteControl().Start();
+    #endif
 
     #if ENABLE_WIFI
         debugI("Making initial attempt to connect to WiFi.");
@@ -614,11 +685,25 @@ void setup()
 
     // Start the network-dependent services.  These will be NOPs on a non-wifi build.
 
-    taskManager.StartSerialThread();
-    taskManager.StartNetworkThread();
-    taskManager.StartColorDataThread();
-    taskManager.StartSocketThread();
-    taskManager.StartDebugThread();
+    #if ENABLE_AUDIOSERIAL
+        g_ptrSystem->SetupAudioSerialBridge().Start();
+    #endif
+    #if ENABLE_WIFI
+        // NetworkReader was constructed earlier (so effects could register).
+        // Start its task here, after WiFi credentials are loaded.
+        if (g_ptrSystem->HasNetworkReader())
+            g_ptrSystem->GetNetworkReader().Start();
+    #endif
+    #if COLORDATA_SERVER_ENABLED
+        g_ptrSystem->SetupColorStreamerService().Start();
+    #endif
+    #if INCOMING_WIFI_ENABLED
+        if (g_ptrSystem->HasSocketServer())
+            g_ptrSystem->GetSocketServer().Start();
+    #endif
+    #if ENABLE_WIFI
+        g_ptrSystem->SetupDebugConsole().Start();
+    #endif
 
     DebugCLI::InitDebugCLI();
     nd_network::InitNetworkCLI();
@@ -639,20 +724,21 @@ void loop()
 {
     while(true)
     {
-        // Feed any direct serial bytes to the console manager (if not handled by Improv)
-        while (Serial.available())
-        {
-            ConsoleManager::Instance().FeedSerialByte(Serial.read());
-        }
-
-        #if ENABLE_WIFI
-            EVERY_N_MILLIS(20)
-            {
+        // Improv owns the serial stream when WiFi is enabled. It forwards any
+        // non-Improv bytes to the serial CLI through its unknown-byte callback.
 #if ENABLE_WIFI
-                g_pImprovSerial->loop();
+        if (g_pImprovSerial)
+        {
+            g_pImprovSerial->loop();
+        }
+        else
 #endif
+        {
+            while (Serial.available())
+            {
+                ConsoleManager::Instance().FeedSerialByte(Serial.read());
             }
-        #endif
+        }
 
         #if ENABLE_OTA
             try

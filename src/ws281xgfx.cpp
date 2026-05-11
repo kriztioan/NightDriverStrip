@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <esp_heap_caps.h>
 
 #include "deviceconfig.h"
 #include "effectmanager.h"
@@ -52,20 +53,34 @@ std::mutex& WS281xGFX::TransportMutex()
     return g_ws281xTransportMutex;
 }
 
+// AllocLedBuffer
+//
+// FastLED's RMT path on ESP32 hands the CRGB array directly to rmt_write_sample,
+// which DMAs from it. DMA cannot reach PSRAM on the ESP32, so the strip's pixel
+// storage must live in internal RAM with the DMA-capable cap. Allocating this
+// from PSRAM (which is what the project's default allocator now does for any
+// allocation above PSRAM_DEFAULT_THRESHOLD) breaks every frame write with
+// "rmt: Using buffer allocated from psram" / ESP_ERR_INVALID_ARG.
+
+static CRGB* AllocLedBuffer(size_t count)
+{
+    void* mem = heap_caps_malloc(count * sizeof(CRGB),
+                                 MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!mem)
+        throw std::runtime_error("Unable to allocate DMA-capable LED buffer in WS281xGFX");
+    memset(mem, 0, count * sizeof(CRGB));
+    return static_cast<CRGB*>(mem);
+}
+
 WS281xGFX::WS281xGFX(size_t w, size_t h) : GFXBase(w, h)
 {
     debugV("Creating Device of size %zu x %zu", w, h);
-    // Strip pixel storage is one of the largest persistent allocations in the system. Prefer PSRAM
-    // so live-topology and UI work do not consume the smaller internal heap needed by drivers/tasks.
-    leds = static_cast<CRGB *>(PreferPSRAMAlloc(w * h * sizeof(CRGB)));
-    if(!leds)
-        throw std::runtime_error("Unable to allocate LEDs in WS281xGFX");
-    memset(leds, 0, w * h * sizeof(CRGB));
+    leds = AllocLedBuffer(w * h);
 }
 
 WS281xGFX::~WS281xGFX()
 {
-    free(leds);
+    heap_caps_free(leds);
     leds = nullptr;
 }
 
@@ -74,17 +89,12 @@ void WS281xGFX::ConfigureTopology(size_t width, size_t height, bool serpentine)
     const auto newLEDCount = width * height;
     if (newLEDCount != GetLEDCount())
     {
-        // Topology changes can resize the per-channel LED backing store significantly; keep that large
-        // buffer in PSRAM when available rather than growing pressure on the internal heap.
-        auto* newPixels = static_cast<CRGB*>(PreferPSRAMAlloc(newLEDCount * sizeof(CRGB)));
-        if (!newPixels)
-            throw std::runtime_error("Unable to resize LEDs in WS281xGFX");
-        memset(newPixels, 0, newLEDCount * sizeof(CRGB));
+        CRGB* newPixels = AllocLedBuffer(newLEDCount);
 
         if (leds)
         {
             memcpy(newPixels, leds, std::min(GetLEDCount(), newLEDCount) * sizeof(CRGB));
-            free(leds);
+            heap_caps_free(leds);
         }
 
         leds = newPixels;
@@ -105,7 +115,7 @@ void WS281xGFX::InitializeHardware(std::vector<std::shared_ptr<GFXBase>>& device
     for (int i = 0; i < NUM_CHANNELS; i++)
     {
         debugW("Allocating WS281xGFX for channel %d", i);
-        auto device = make_shared_psram<WS281xGFX>(deviceConfig.GetMatrixWidth(), deviceConfig.GetMatrixHeight());
+        auto device = std::make_shared<WS281xGFX>(deviceConfig.GetMatrixWidth(), deviceConfig.GetMatrixHeight());
         device->ConfigureTopology(deviceConfig.GetMatrixWidth(), deviceConfig.GetMatrixHeight(), deviceConfig.IsMatrixSerpentine());
         devices.push_back(device);
     }
@@ -142,9 +152,6 @@ void WS281xGFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsD
 
     if (!g_ptrSystem->HasWS281xOutputManager())
     {
-        static auto lastDrawTime = millis();
-        g_Values.FPS = 1000.0 / max(1UL, millis() - lastDrawTime);
-        lastDrawTime = millis();
         return;
     }
 
@@ -153,17 +160,12 @@ void WS281xGFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsD
         auto& graphics = effectManager.g(i);
         const auto ledCount = graphics.GetLEDCount();
         const auto activePixels = std::min<size_t>(pixelsDrawn, ledCount);
-
-        fadeLightBy(graphics.leds, activePixels, 255 - deviceConfig.GetBrightness());
         if (activePixels < ledCount)
             fill_solid(graphics.leds + activePixels, ledCount - activePixels, CRGB::Black);
     }
 
-    static auto lastDrawTime = millis();
     auto& outputManager = g_ptrSystem->GetWS281xOutputManager();
-    outputManager.Show(g_ptrSystem->GetDevices(), pixelsDrawn, g_Values.Fader);
-    g_Values.FPS = 1000.0 / max(1UL, millis() - lastDrawTime);
-    lastDrawTime = millis();
+    outputManager.Show(g_ptrSystem->GetDevices(), pixelsDrawn, deviceConfig.GetBrightness(), g_Values.Fader);
     #ifdef POWER_LIMIT_MW
         g_Values.Brite = 100.0 * calculate_max_brightness_for_power_mW(deviceConfig.GetBrightness(), POWER_LIMIT_MW) / 255;
     #else
@@ -189,7 +191,7 @@ void HexagonGFX::InitializeHardware(std::vector<std::shared_ptr<GFXBase>>& devic
     for (int i = 0; i < NUM_CHANNELS; i++)
     {
         debugW("Allocating HexagonGFX for channel %d", i);
-        devices.push_back(make_shared_psram<HexagonGFX>(NUM_LEDS));
+        devices.push_back(std::make_shared<HexagonGFX>(NUM_LEDS));
     }
 
     #if USE_WS281X

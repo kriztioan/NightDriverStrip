@@ -369,7 +369,50 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
     float                       _musicFactor;
     CRGB                         _skyColor;
     uint32_t                    _lastMusicBeatSequence = 0;
-    size_t                      _pendingMusicStars = 0;
+    uint32_t                    _lastMusicNearBeatSequence = 0;
+    bool                         _useBeatColorCoding = false;
+    std::deque<int16_t>          _pendingMusicStarColors;
+
+    // Effect name is referenced by the constructors regardless of ENABLE_AUDIO so it must
+    // remain visible on audio-less builds (demo). The indices below are only used by the
+    // audio-driven beat path and stay behind the guard.
+    static constexpr const char* kRgbMusicBlendStarsName = "RGB Music Blend Stars";
+
+    #if ENABLE_AUDIO
+    static constexpr int16_t kMusicStarRandomIndex = -1;
+    static constexpr uint8_t kMusicStarRedIndex = 0;
+    static constexpr uint8_t kMusicStarGreenIndex = 16;
+    static constexpr uint8_t kMusicStarBlueIndex = 32;
+
+    void QueueMusicStarsForBeat(const BeatInfo& beat, bool acceptedBeat)
+    {
+        if constexpr (std::is_same_v<StarType, MusicStar>)
+        {
+            const float confidence = std::clamp(beat.confidence, 0.0f, 1.5f);
+            const float strength = std::clamp(beat.strength, 0.0f, 2.5f);
+            const float scale = acceptedBeat ? 1.0f : 0.45f;
+            const bool strongBeat = acceptedBeat && strength >= 2.40f && confidence >= 1.20f;
+            const float majorBonus = strongBeat ? 8.0f : 0.0f;
+            const size_t minStars = acceptedBeat ? 5U : 1U;
+            const size_t maxStars = acceptedBeat ? 36U : 14U;
+            const int16_t colorIndex = _useBeatColorCoding
+                ? (acceptedBeat
+                    ? (strongBeat ? kMusicStarRedIndex : kMusicStarGreenIndex)
+                    : kMusicStarBlueIndex)
+                : kMusicStarRandomIndex;
+            const size_t stars = std::clamp<size_t>(
+                static_cast<size_t>((acceptedBeat ? 4.0f : 1.0f)
+                    + confidence * 8.0f * scale
+                    + strength * 8.0f * scale
+                    + majorBonus),
+                minStars,
+                maxStars);
+
+            for (size_t i = 0; i < stars && _pendingMusicStarColors.size() < cMaxNewStarsPerFrame; ++i)
+                _pendingMusicStarColors.push_back(colorIndex);
+        }
+    }
+    #endif
 
   public:
 
@@ -390,7 +433,8 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
         _maxSpeed(maxSpeed),
         _blurFactor(blurFactor),
         _musicFactor(musicFactor),
-        _skyColor(skyColor)
+        _skyColor(skyColor),
+        _useBeatColorCoding(strName == kRgbMusicBlendStarsName)
     {
     }
 
@@ -403,7 +447,8 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
         _maxSpeed(jsonObject[PTY_MAXSPEED]),
         _blurFactor(jsonObject[PTY_BLUR]),
         _musicFactor(jsonObject["msf"]),
-        _skyColor(jsonObject[PTY_COLOR].as<CRGB>())
+        _skyColor(jsonObject[PTY_COLOR].as<CRGB>()),
+        _useBeatColorCoding(jsonObject["fn"].as<String>() == kRgbMusicBlendStarsName)
     {
     }
 
@@ -440,16 +485,18 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
     virtual void CreateStars()
     {
         #if ENABLE_AUDIO
-            // MusicStar creation is driven exclusively from OnBeat(). Draw-time
+            // MusicStar creation is driven exclusively from beat callbacks. Draw-time
             // polling and VU-based probability scaling are intentionally bypassed.
             if constexpr (std::is_same_v<StarType, MusicStar>)
             {
-                while (_pendingMusicStars > 0 && _allParticles.size() < cMaxStars)
+                while (!_pendingMusicStarColors.empty() && _allParticles.size() < cMaxStars)
                 {
                     StarType newstar(_palette, _blendType, _maxSpeed * std::max(1.0f, _musicFactor), _starSize);
+                    if (_pendingMusicStarColors.front() >= 0)
+                        newstar.SetColorIndex(static_cast<uint8_t>(_pendingMusicStarColors.front()));
                     newstar._iPos = (int) random_range(0U, LEDStripEffect::_cLEDs - 1 - starWidth);
                     _allParticles.push_back(newstar);
-                    --_pendingMusicStars;
+                    _pendingMusicStarColors.pop_front();
                 }
                 return;
             }
@@ -497,10 +544,23 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
                     return;
 
                 _lastMusicBeatSequence = beat.sequence;
-                _pendingMusicStars = std::clamp<size_t>(
-                    static_cast<size_t>(6 + beat.confidence * 12.0f + beat.strength * 6.0f + (beat.major ? 6.0f : 0.0f)),
-                    6,
-                    30);
+                QueueMusicStarsForBeat(beat, true);
+            }
+        #endif
+    }
+
+    void OnNearBeat(const BeatInfo& beat) override
+    {
+        LEDStripEffect::OnNearBeat(beat);
+
+        #if ENABLE_AUDIO
+            if constexpr (std::is_same_v<StarType, MusicStar>)
+            {
+                if (beat.sequence == 0 || beat.sequence == _lastMusicNearBeatSequence)
+                    return;
+
+                _lastMusicNearBeatSequence = beat.sequence;
+                QueueMusicStarsForBeat(beat, false);
             }
         #endif
     }
@@ -528,7 +588,16 @@ class StarEffectBase : public EffectWithId<StarEffectBase<StarType, TEffect>>
         else
         {
             LEDStripEffect::g().blurRows(LEDStripEffect::g().leds, MATRIX_WIDTH, MATRIX_HEIGHT, 0, _blurFactor * 255);
-            LEDStripEffect::fadeAllChannelsToBlackBy(55 * (2.0 - g_Analyzer.VURatioFade()));
+            #if ENABLE_AUDIO
+                if constexpr (std::is_same_v<StarType, MusicStar>)
+                {
+                    LEDStripEffect::fadeAllChannelsToBlackBy(55);
+                }
+                else
+            #endif
+                {
+                    LEDStripEffect::fadeAllChannelsToBlackBy(55 * (2.0 - g_Analyzer.VURatioFade()));
+                }
         }
 
         for(auto i = _allParticles.begin(); i != _allParticles.end(); i++)
