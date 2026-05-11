@@ -202,7 +202,8 @@ public:
     virtual ~GFXBase() override;
 
     #if USE_NOISE
-    void EnsureNoise() const;
+    // Returns true if noise was just initialized, false if it was already initialized.
+    bool EnsureNoise() const;
 
     Noise &GetNoise()
     {

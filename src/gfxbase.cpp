@@ -1125,8 +1125,8 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
 
     void GFXBase::FillGetNoise() const
     {
-        EnsureNoise();
-        FillGetNoiseImpl();
+        if (!EnsureNoise())
+            FillGetNoiseImpl();
     }
 
     template<>
@@ -1420,9 +1420,10 @@ void GFXBase::ConfigureTopology(size_t width, size_t height, bool serpentine)
 }
 
 #if USE_NOISE
-void GFXBase::EnsureNoise() const
+bool GFXBase::EnsureNoise() const
 {
-    std::call_once(_noiseInitOnce, [this]()
+    bool justInitialized = false;
+    std::call_once(_noiseInitOnce, [&]()
     {
         // Noise is large and only used by a subset of effects. Lazy allocation keeps the boot path leaner
         // and still allows runtime topology to stay within the build-time maximum noise backing store.
@@ -1430,7 +1431,10 @@ void GFXBase::EnsureNoise() const
         assert(_ptrNoise);
         NoiseVariablesSetup();
         FillGetNoiseImpl();
+        justInitialized = true;
     });
+
+    return justInitialized;
 }
 #endif
 
