@@ -1096,7 +1096,10 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
         _ptrNoise->noise_scale_y = sy;
     }
 
-    void GFXBase::FillGetNoise() const
+    // Internal implementation: assumes _ptrNoise is already initialized.
+    // Must NOT call EnsureNoise() — this is invoked from within EnsureNoise()'s
+    // call_once lambda, and a recursive call_once on the same flag deadlocks.
+    void GFXBase::FillGetNoiseImpl() const
     {
         EnsureNoise();
         // Subtracting the center offset before scaling ensures the noise pattern radiates
@@ -1118,6 +1121,12 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
                 _ptrNoise->noise[i][j] = newdata;
             }
         }
+    }
+
+    void GFXBase::FillGetNoise() const
+    {
+        EnsureNoise();
+        FillGetNoiseImpl();
     }
 
     template<>
@@ -1420,7 +1429,7 @@ void GFXBase::EnsureNoise() const
         _ptrNoise = std::make_unique<Noise>();
         assert(_ptrNoise);
         NoiseVariablesSetup();
-        FillGetNoise();
+        FillGetNoiseImpl();
     });
 }
 #endif

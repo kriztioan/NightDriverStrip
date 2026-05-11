@@ -517,6 +517,13 @@ public:
 
         void FillGetNoise() const;
 
+    private:
+        // Called only from within EnsureNoise() (already inside call_once), and therefore
+        // must NOT call EnsureNoise() itself — doing so would deadlock std::call_once.
+        void FillGetNoiseImpl() const;
+
+    public:
+
         // The next couple of two-liners define function templates for the different noise approaches
         // that are implemented in the project. The desired noise approach for a particular use case
         // can be chosen by passing one of the NoiseApproach enum's values as a template parameter.
