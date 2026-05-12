@@ -512,8 +512,6 @@ public:
         // the oscillators: linear ramps 0-255
         // osci[0-3] are used for noise animation
         // osci[4-5] are used for palette rotation
-        void NoiseVariablesSetup() const;
-
         void SetNoise(uint32_t nx, uint32_t ny, uint32_t nz, uint32_t sx, uint32_t sy);
 
         void FillGetNoise() const;

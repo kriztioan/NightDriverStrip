@@ -1074,18 +1074,6 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
     // The following functions are specializations of noise-related member function
     // templates declared in gfxbase.h.
 
-    void GFXBase::NoiseVariablesSetup() const
-    {
-        EnsureNoise();
-        _ptrNoise->noisesmoothing = 200;
-
-        _ptrNoise->noise_x = random16();
-        _ptrNoise->noise_y = random16();
-        _ptrNoise->noise_z = random16();
-        _ptrNoise->noise_scale_x = 6000;
-        _ptrNoise->noise_scale_y = 6000;
-    }
-
     void GFXBase::SetNoise(uint32_t nx, uint32_t ny, uint32_t nz, uint32_t sx, uint32_t sy)
     {
         EnsureNoise();
@@ -1428,7 +1416,13 @@ bool GFXBase::EnsureNoise() const
         // and still allows runtime topology to stay within the build-time maximum noise backing store.
         _ptrNoise = std::make_unique<Noise>();
         assert(_ptrNoise);
-        NoiseVariablesSetup();
+        _ptrNoise->noisesmoothing = 200;
+
+        _ptrNoise->noise_x = random16();
+        _ptrNoise->noise_y = random16();
+        _ptrNoise->noise_z = random16();
+        _ptrNoise->noise_scale_x = 6000;
+        _ptrNoise->noise_scale_y = 6000;
         FillGetNoiseImpl();
         justInitialized = true;
     });
