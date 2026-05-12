@@ -143,6 +143,28 @@ void EffectManager::StartEffect()
         matrix.SetCaption(effect->FriendlyName(), CAPTION_TIME);
     #endif
 
+    // Zero the whites plane on every graphics device at effect-switch.
+    //
+    // CCT-aware effects (WarmGlowEffect and friends) write to whites[]
+    // every frame; effects that don't know about whites write only to
+    // leds[]. Without this reset, the previous effect's W-LED state
+    // persists through the transition and gets re-rendered by the
+    // PixelFormat under the new effect's colors - the strip ends up
+    // showing the old warm-white tint behind whatever colors the new
+    // effect draws. (leds[] doesn't need to be reset here for the same
+    // reason: every well-behaved effect overwrites the pixels it draws
+    // each frame, and effects that deliberately persist state across
+    // frames - like FireEffect's heat decay - want that persistence.
+    // The whites plane has no equivalent persisting-effect right now,
+    // so blanket-zeroing it on switch is the right semantic.)
+    
+    for (auto& device : _gfx)
+    {
+        if (device && device->whites)
+            memset(device->whites, 0,
+                   device->GetLEDCount() * sizeof(CRGBW));
+    }
+
     effect->Start();
     _lastBeatSequence = g_Analyzer.LastBeat().sequence;
     _lastNearBeatSequence = g_Analyzer.LastNearBeat().sequence;

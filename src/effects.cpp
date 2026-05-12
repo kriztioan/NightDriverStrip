@@ -47,6 +47,7 @@
 
 #include "effects/matrix/PatternClock.h"        // No matrix dependencies
 #include "effects/strip/bouncingballeffect.h"   // bouncing ball effects
+#include "effects/strip/cct_effects.h"          // WarmGlowEffect (whites/CCT plane)
 #include "effects/strip/doublepaletteeffect.h"  // double palette effect
 #include "effects/strip/fireeffect.h"           // fire effects
 #include "effects/strip/fireworkseffect.h"
@@ -228,7 +229,17 @@ void LoadEffectFactories()
             Effect<StarEffect<QuietStar>>("Rainbow Twinkle Stars", RainbowColors_p, kStarEffectProbability, 1, LINEARBLEND, 2.0, 0.0, kStarEffectMusicFactor),
             Effect<TwinkleEffect>(NUM_LEDS / 2, 20, 50),
             Effect<PaletteEffect>(RainbowColors_p, .25, 1, 0, 1.0, 0.0, LINEARBLEND, true, 1.0),
-            Effect<PaletteEffect>(RainbowColors_p)
+            Effect<PaletteEffect>(RainbowColors_p),
+            // CCT-aware reference effect. A single-white SK6812 strip cannot
+            // render warm/cool Kelvin endpoints distinctly, so expose one
+            // neutral white there. RGB-only builds use the fallback tinting
+            // path, where warm and cool presets are visibly different.
+            #if defined(USE_SK6812) && USE_SK6812
+                Effect<WarmGlowEffect>(4000, 200)
+            #else
+                Effect<WarmGlowEffect>(2700, 200),
+                Effect<WarmGlowEffect>(6500, 200)
+            #endif
         );
 
     #endif
@@ -553,7 +564,17 @@ void LoadEffectFactories()
             Effect<StarEffect<MusicStar>>("Green Stars", GreenColors_p, kStarEffectProbability, 1, LINEARBLEND, 2.0, 0.0, kStarEffectMusicFactor),
             Effect<TwinkleEffect>(NUM_LEDS / 2, 20, 50),
             Effect<PaletteEffect>(RainbowColors_p, .25, 1, 0, 1.0, 0.0, LINEARBLEND, true, 1.0),
-            Effect<PaletteEffect>(RainbowColors_p)
+            Effect<PaletteEffect>(RainbowColors_p),
+            // CCT-aware reference effect. A single-white SK6812 strip cannot
+            // render warm/cool Kelvin endpoints distinctly, so expose one
+            // neutral white there. RGB-only builds use the fallback tinting
+            // path, where warm and cool presets are visibly different.
+            #if defined(USE_SK6812) && USE_SK6812
+                Effect<WarmGlowEffect>(4000, 200)
+            #else
+                Effect<WarmGlowEffect>(2700, 200),
+                Effect<WarmGlowEffect>(6500, 200)
+            #endif
         );
     #endif
 

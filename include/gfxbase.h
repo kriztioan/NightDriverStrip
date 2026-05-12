@@ -73,6 +73,7 @@
 
 #include "Adafruit_GFX.h"
 #include "pixeltypes.h"
+#include "crgbw.h"
 
 // Calculates a weight for anti-aliasing in Wu's algorithm.
 constexpr static inline uint8_t WU_WEIGHT(uint8_t a, uint8_t b)
@@ -188,6 +189,22 @@ public:
     // Many of the Aurora effects need direct access to these from external classes
 
     CRGB *leds = nullptr;
+
+    // Optional "whites plane" used by 4-/5-channel addressable strips
+    // (SK6812 RGBW, SM16825 RGBCCW, WS2805, etc). Allocated parallel to
+    // `leds` by GFX subclasses that target white strips; left nullptr by
+    // default so existing CRGB-only effects keep working unchanged.
+    //
+    // Effects that want explicit cool-white / warm-white control call
+    // setPixelWhite() or setPixelCCT(); both are no-ops when this is
+    // nullptr, so the same effect source compiles and runs on plain
+    // WS2812 builds without conditional branches.
+    //
+    // The PixelFormat for each chip reads (leds[i], whites[i]) together
+    // at output time and decides how to map both planes onto the chip's
+    // actual channel count.
+
+    CRGBW *whites = nullptr;
     #if MATRIX_HEIGHT > 1
         std::unique_ptr<Boid[]> _boids;
     #endif
@@ -352,6 +369,46 @@ public:
             leds[x] = color;
         else
             debugE("Invalid setPixel request: x=%d, NUM_LEDS=%d", x, NUM_LEDS);
+    }
+
+    // ---- Whites plane (CCT) API -----------------------------------------
+    //
+    // setPixelWhite / setPixelCCT write to the whites[] plane parallel to
+    // leds[]. They are no-ops if the GFX subclass didn't allocate a whites
+    // plane (i.e. on plain WS2812 RGB-only builds), so calling them is
+    // always safe and effects don't need to branch on chip type.
+    //
+    // On 4-channel SK6812 strips both cw and ww route to the same physical
+    // white LED at output time; on 5-channel SM16825/WS2805 strips they
+    // drive the cool-white and warm-white channels independently. Effects
+    // can therefore code against the dual-white intent and the PixelFormat
+    // will collapse to single-white where the hardware only has one.
+
+    __attribute__((always_inline)) void setPixelWhite(int16_t x, int16_t y, uint8_t cw, uint8_t ww) noexcept
+    {
+        if (whites && isValidPixel(static_cast<uint>(x), static_cast<uint>(y)))
+            whites[XY(x, y)] = CRGBW(cw, ww);
+    }
+
+    __attribute__((always_inline)) void setPixelWhite(int x, uint8_t cw, uint8_t ww) noexcept
+    {
+        if (whites && isValidPixel(static_cast<uint>(x)))
+            whites[x] = CRGBW(cw, ww);
+    }
+
+    // Set a pixel's whites by color temperature and brightness. kelvin is
+    // clamped to [2700, 6500]; outside that range the helper saturates to
+    // pure WW or pure CW respectively.
+    __attribute__((always_inline)) void setPixelCCT(int16_t x, int16_t y, uint16_t kelvin, uint8_t brightness) noexcept
+    {
+        if (whites && isValidPixel(static_cast<uint>(x), static_cast<uint>(y)))
+            whites[XY(x, y)] = SplitByCct(kelvin, brightness);
+    }
+
+    __attribute__((always_inline)) void setPixelCCT(int x, uint16_t kelvin, uint8_t brightness) noexcept
+    {
+        if (whites && isValidPixel(static_cast<uint>(x)))
+            whites[x] = SplitByCct(kelvin, brightness);
     }
 
     // DrawSafeCircle

@@ -122,10 +122,22 @@ uint16_t GFXBase::to16bit(CRGB::HTMLColorCode code)
 
 void GFXBase::Clear(CRGB color)
 {
+    const size_t count = _width * _height;
     if (color == CRGB::Black)
-        memset(leds, 0, sizeof(CRGB) * _width * _height);
+        memset(leds, 0, sizeof(CRGB) * count);
     else
-        fill_solid(leds, _width * _height, color);
+        fill_solid(leds, count, color);
+
+    // Also zero the whites plane (if allocated). Without this, a previous
+    // effect that lit the dedicated W LEDs (e.g. WarmGlowEffect or any
+    // setPixelWhite/setPixelCCT caller) leaves them lit across the
+    // effect-switch boundary - the next effect writes only leds[] and the
+    // stale W content washes its colors out. Effects that want to preserve
+    // whites can rewrite them after the Clear() call; that's how the leds
+    // plane already behaves.
+    
+    if (whites)
+        memset(whites, 0, sizeof(CRGBW) * count);
 }
 
 // getPixel

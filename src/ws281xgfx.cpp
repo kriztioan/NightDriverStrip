@@ -46,6 +46,112 @@
 namespace
 {
     DRAM_ATTR std::mutex g_ws281xTransportMutex;
+
+    constexpr uint8_t kPowerRedMw = 16 * 5;      // FastLED default: 16 mA at 5 V
+    constexpr uint8_t kPowerGreenMw = 11 * 5;    // FastLED default: 11 mA at 5 V
+    constexpr uint8_t kPowerBlueMw = 15 * 5;     // FastLED default: 15 mA at 5 V
+    constexpr uint8_t kPowerDarkMw = 1 * 5;      // FastLED default: 1 mA at 5 V
+
+    #ifndef SK6812_WHITE_MW
+        #define SK6812_WHITE_MW (15 * 5)
+    #endif
+    #ifndef NIGHTDRIVER_DEFAULT_AMBIENT_CW
+        #define NIGHTDRIVER_DEFAULT_AMBIENT_CW 0
+    #endif
+    #ifndef NIGHTDRIVER_DEFAULT_AMBIENT_WW
+        #define NIGHTDRIVER_DEFAULT_AMBIENT_WW 0
+    #endif
+    #ifndef SK6812_WHITE_EXTRACT_RATIO
+        #define SK6812_WHITE_EXTRACT_RATIO 128
+    #endif
+
+    constexpr uint8_t kPowerWhiteMw = SK6812_WHITE_MW;
+    constexpr uint8_t kDefaultAmbientCw = NIGHTDRIVER_DEFAULT_AMBIENT_CW;
+    constexpr uint8_t kDefaultAmbientWw = NIGHTDRIVER_DEFAULT_AMBIENT_WW;
+    constexpr uint8_t kDefaultWhiteExtractRatio = SK6812_WHITE_EXTRACT_RATIO;
+
+    uint32_t EstimateRGBUnscaledPowerMw(const CRGB* leds, size_t ledCount)
+    {
+        uint32_t red = 0;
+        uint32_t green = 0;
+        uint32_t blue = 0;
+
+        for (size_t i = 0; i < ledCount; ++i)
+        {
+            red += leds[i].r;
+            green += leds[i].g;
+            blue += leds[i].b;
+        }
+
+        return ((red * kPowerRedMw) >> 8)
+             + ((green * kPowerGreenMw) >> 8)
+             + ((blue * kPowerBlueMw) >> 8)
+             + (kPowerDarkMw * ledCount);
+    }
+
+    uint8_t SaturatingAdd(uint8_t a, uint8_t b)
+    {
+        const uint16_t sum = static_cast<uint16_t>(a) + static_cast<uint16_t>(b);
+        return sum > 255 ? 255 : static_cast<uint8_t>(sum);
+    }
+
+    uint32_t EstimateWS281xUnscaledPowerMw(const GFXBase& graphics, size_t ledCount)
+    {
+        #if defined(USE_SK6812) && USE_SK6812
+            uint32_t red = 0;
+            uint32_t green = 0;
+            uint32_t blue = 0;
+            uint32_t white = 0;
+            const uint16_t ratio = static_cast<uint16_t>(kDefaultWhiteExtractRatio);
+            const uint8_t ambientWhite = SaturatingAdd(kDefaultAmbientCw, kDefaultAmbientWw);
+
+            for (size_t i = 0; i < ledCount; ++i)
+            {
+                CRGB color = graphics.leds[i];
+                const uint8_t shared = std::min(color.r, std::min(color.g, color.b));
+                const uint8_t pull = static_cast<uint8_t>((static_cast<uint16_t>(shared) * ratio + 127) / 255);
+                color.r -= pull;
+                color.g -= pull;
+                color.b -= pull;
+
+                uint8_t effectWhite = 0;
+                if (graphics.whites)
+                    effectWhite = SaturatingAdd(graphics.whites[i].cw, graphics.whites[i].ww);
+
+                red += color.r;
+                green += color.g;
+                blue += color.b;
+                white += std::max(SaturatingAdd(pull, effectWhite), ambientWhite);
+            }
+
+            return ((red * kPowerRedMw) >> 8)
+                 + ((green * kPowerGreenMw) >> 8)
+                 + ((blue * kPowerBlueMw) >> 8)
+                 + ((white * kPowerWhiteMw) >> 8)
+                 + (kPowerDarkMw * ledCount);
+        #else
+            return EstimateRGBUnscaledPowerMw(graphics.leds, ledCount);
+        #endif
+    }
+
+    uint8_t LimitBrightnessForPower(uint32_t unscaledPowerMw, uint8_t targetBrightness, uint8_t fader, uint32_t maxPowerMw)
+    {
+        if (unscaledPowerMw == 0 || targetBrightness == 0 || fader == 0)
+            return targetBrightness;
+
+        const uint64_t requestedMw =
+            (static_cast<uint64_t>(unscaledPowerMw) * targetBrightness * fader) / (256ULL * 256ULL);
+        if (requestedMw <= maxPowerMw)
+            return targetBrightness;
+
+        return static_cast<uint8_t>((static_cast<uint64_t>(targetBrightness) * maxPowerMw) / requestedMw);
+    }
+
+    uint32_t ScalePowerMw(uint32_t unscaledPowerMw, uint8_t brightness, uint8_t fader)
+    {
+        return static_cast<uint32_t>(
+            (static_cast<uint64_t>(unscaledPowerMw) * brightness * fader) / (256ULL * 256ULL));
+    }
 }
 
 std::mutex& WS281xGFX::TransportMutex()
@@ -72,16 +178,42 @@ static CRGB* AllocLedBuffer(size_t count)
     return static_cast<CRGB*>(mem);
 }
 
+#if defined(USE_SK6812) && USE_SK6812
+// The whites plane is consumed by PixelFormat::Pack at frame-build time
+// but never DMA'd directly, so we don't need DMA-capable memory. Pinning
+// it to internal RAM still keeps the per-frame access path off PSRAM,
+// which matters under the project's PSRAM-default allocator policy.
+static CRGBW* AllocWhitesBuffer(size_t count)
+{
+    void* mem = heap_caps_malloc(count * sizeof(CRGBW),
+                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!mem)
+        throw std::runtime_error("Unable to allocate whites plane in WS281xGFX");
+    memset(mem, 0, count * sizeof(CRGBW));
+    return static_cast<CRGBW*>(mem);
+}
+#endif
+
 WS281xGFX::WS281xGFX(size_t w, size_t h) : GFXBase(w, h)
 {
     debugV("Creating Device of size %zu x %zu", w, h);
     leds = AllocLedBuffer(w * h);
+    #if defined(USE_SK6812) && USE_SK6812
+        whites = AllocWhitesBuffer(w * h);
+    #endif
 }
 
 WS281xGFX::~WS281xGFX()
 {
     heap_caps_free(leds);
     leds = nullptr;
+    #if defined(USE_SK6812) && USE_SK6812
+        if (whites)
+        {
+            heap_caps_free(whites);
+            whites = nullptr;
+        }
+    #endif
 }
 
 void WS281xGFX::ConfigureTopology(size_t width, size_t height, bool serpentine)
@@ -98,6 +230,17 @@ void WS281xGFX::ConfigureTopology(size_t width, size_t height, bool serpentine)
         }
 
         leds = newPixels;
+
+        #if defined(USE_SK6812) && USE_SK6812
+            CRGBW* newWhites = AllocWhitesBuffer(newLEDCount);
+            if (whites)
+            {
+                memcpy(newWhites, whites,
+                       std::min(GetLEDCount(), newLEDCount) * sizeof(CRGBW));
+                heap_caps_free(whites);
+            }
+            whites = newWhites;
+        #endif
     }
 
     GFXBase::ConfigureTopology(width, height, serpentine);
@@ -161,17 +304,36 @@ void WS281xGFX::PostProcessFrame(uint16_t localPixelsDrawn, uint16_t wifiPixelsD
         const auto ledCount = graphics.GetLEDCount();
         const auto activePixels = std::min<size_t>(pixelsDrawn, ledCount);
         if (activePixels < ledCount)
+        {
             fill_solid(graphics.leds + activePixels, ledCount - activePixels, CRGB::Black);
+            // Zero the tail of the whites plane too (if allocated) so a
+            // previously-CCT-lit pixel that's now beyond pixelsDrawn doesn't
+            // stay lit on the next frame.
+            if (graphics.whites)
+                memset(graphics.whites + activePixels, 0,
+                       (ledCount - activePixels) * sizeof(CRGBW));
+        }
     }
 
     auto& outputManager = g_ptrSystem->GetWS281xOutputManager();
-    outputManager.Show(g_ptrSystem->GetDevices(), pixelsDrawn, deviceConfig.GetBrightness(), g_Values.Fader);
+    uint32_t unscaledPowerMw = 0;
+    const size_t activeChannelCount = std::min<size_t>(outputManager.GetActiveChannelCount(), NUM_CHANNELS);
+    const size_t activeLEDCount = outputManager.GetActiveLEDCount();
+    for (size_t i = 0; i < activeChannelCount; ++i)
+    {
+        auto& graphics = effectManager.g(i);
+        const size_t ledCount = std::min(activeLEDCount, graphics.GetLEDCount());
+        unscaledPowerMw += EstimateWS281xUnscaledPowerMw(graphics, ledCount);
+    }
+
+    uint8_t outputBrightness = deviceConfig.GetBrightness();
     #ifdef POWER_LIMIT_MW
-        g_Values.Brite = 100.0 * calculate_max_brightness_for_power_mW(deviceConfig.GetBrightness(), POWER_LIMIT_MW) / 255;
-    #else
-        g_Values.Brite = 100.0 * deviceConfig.GetBrightness() / 255;
+        outputBrightness = LimitBrightnessForPower(unscaledPowerMw, outputBrightness, g_Values.Fader, POWER_LIMIT_MW);
     #endif
-    g_Values.Watts = calculate_unscaled_power_mW(effectManager.g().leds, pixelsDrawn) / 1000; // 1000 for mw->W
+    outputManager.Show(g_ptrSystem->GetDevices(), pixelsDrawn, outputBrightness, g_Values.Fader);
+
+    g_Values.Brite = 100.0 * outputBrightness / 255;
+    g_Values.Watts = ScalePowerMw(unscaledPowerMw, outputBrightness, g_Values.Fader) / 1000; // 1000 for mW->W
     #endif
 }
 
