@@ -1101,7 +1101,6 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
     // call_once lambda, and a recursive call_once on the same flag deadlocks.
     void GFXBase::FillGetNoiseImpl() const
     {
-        EnsureNoise();
         // Subtracting the center offset before scaling ensures the noise pattern radiates
         // outwards from the center of the display (exactly as #803 intended).
         //
