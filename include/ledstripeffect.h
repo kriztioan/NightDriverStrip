@@ -34,6 +34,7 @@
 #include "effects.h"
 #include "hashing.h"
 #include "jsonserializer.h"
+#include "crgbw.h"
 
 #include <functional>
 #include <memory>
@@ -225,6 +226,9 @@ class LEDStripEffect : public IJSONSerializable
     // Smooth drawing on fractional pixels on all channels in the given color; if merge is specified,
 
     void setPixelsFOnAllChannels(float fPos, float count, CRGB c, bool bMerge = false);
+    void setWhitePixelsFOnAllChannels(float fPos, float count, CRGBW white, bool bMerge = false);
+    void setWhiteOnAllChannels(float fPos, float count, CRGBW white, bool bMerge = false);
+    void clearWhitesOnAllChannels();
 
     // ClearFrameOnAllChannels
     //

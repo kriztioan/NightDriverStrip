@@ -32,6 +32,7 @@
 
 #include "globals.h"
 
+#include <cmath>
 #include <gfxfont.h>
 #include <memory>
 #include <stdexcept>
@@ -376,6 +377,96 @@ void GFXBase::setPixelsF(float fPos, float count, CRGB c, bool bMerge) const
     if (count > 0)
         if (p >= 0 && isValidPixel(p))
             leds[(int)p] = bMerge ? leds[(int)p] + c2 : c2;
+}
+
+uint8_t GFXBase::ScaleWhiteCoverage(float coverage)
+{
+    return static_cast<uint8_t>(std::clamp(coverage, 0.0f, 1.0f) * 255.0f);
+}
+
+void GFXBase::setWhitePixelsF(float fPos, float count, CRGBW white, bool bMerge) const
+{
+    if (!whites || count <= 0.0f)
+        return;
+
+    const float start = fPos;
+    const float end = fPos + count;
+    const int firstPixel = static_cast<int>(floorf(start));
+    const int lastPixel = static_cast<int>(floorf(end));
+
+    for (int pixel = firstPixel; pixel <= lastPixel; ++pixel)
+    {
+        const float pixelStart = static_cast<float>(pixel);
+        const float pixelEnd = pixelStart + 1.0f;
+        const float coverage = std::min(end, pixelEnd) - std::max(start, pixelStart);
+        if (coverage <= 0.0f || !isValidPixel(pixel))
+            continue;
+
+        const uint8_t scale = ScaleWhiteCoverage(coverage);
+        CRGBW scaled(
+            scale8_video(white.cw, scale),
+            scale8_video(white.ww, scale));
+
+        if (bMerge)
+        {
+            whites[pixel].cw = qadd8(whites[pixel].cw, scaled.cw);
+            whites[pixel].ww = qadd8(whites[pixel].ww, scaled.ww);
+        }
+        else
+        {
+            whites[pixel] = scaled;
+        }
+    }
+}
+
+CRGB GFXBase::ApproximateRgbForKelvin(uint16_t kelvin, uint8_t brightness)
+{
+    constexpr uint16_t kKelvinWarm = 2700;
+    constexpr uint16_t kKelvinCool = 6500;
+    constexpr uint16_t kKelvinSpan = kKelvinCool - kKelvinWarm;
+
+    const uint16_t clamped = std::min<uint16_t>(std::max<uint16_t>(kelvin, kKelvinWarm), kKelvinCool);
+    const uint16_t coolPart = static_cast<uint16_t>(clamped - kKelvinWarm);
+    const uint16_t warmPart = static_cast<uint16_t>(kKelvinSpan - coolPart);
+
+    const auto mix = [&](uint8_t warm, uint8_t cool) -> uint8_t {
+        const uint32_t channel = (static_cast<uint32_t>(warm) * warmPart)
+                               + (static_cast<uint32_t>(cool) * coolPart)
+                               + (kKelvinSpan / 2);
+        return static_cast<uint8_t>((channel / kKelvinSpan) * brightness / 255);
+    };
+
+    return CRGB(mix(255, 205), mix(180, 225), mix(100, 255));
+}
+
+CRGB GFXBase::ScaleRgbToMax(CRGB color, uint8_t brightness)
+{
+    const uint8_t maxChannel = std::max(color.r, std::max(color.g, color.b));
+    if (maxChannel == 0)
+        return CRGB::Black;
+
+    color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * 255U) / maxChannel);
+    color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * 255U) / maxChannel);
+    color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * 255U) / maxChannel);
+    color.nscale8_video(brightness);
+    return color;
+}
+
+CRGB GFXBase::MaximumRgbForKelvin(uint16_t kelvin, uint8_t brightness)
+{
+    return ScaleRgbToMax(ApproximateRgbForKelvin(kelvin, 255), brightness);
+}
+
+CRGBW GFXBase::MaximumWhiteForKelvin(uint16_t kelvin, uint8_t brightness)
+{
+    CRGBW split = SplitByCct(kelvin, 255);
+    const uint8_t maxChannel = std::max(split.cw, split.ww);
+    if (maxChannel == 0 || brightness == 0)
+        return CRGBW::Black();
+
+    split.cw = static_cast<uint8_t>((static_cast<uint32_t>(split.cw) * 255U * brightness) / (maxChannel * 255U));
+    split.ww = static_cast<uint8_t>((static_cast<uint32_t>(split.ww) * 255U * brightness) / (maxChannel * 255U));
+    return split;
 }
 
 void GFXBase::blurRows(CRGB *leds, uint16_t width, uint16_t height, uint16_t first, fract8 blur_amount)

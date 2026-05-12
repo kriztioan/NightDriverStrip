@@ -235,10 +235,10 @@ void LoadEffectFactories()
             // neutral white there. RGB-only builds use the fallback tinting
             // path, where warm and cool presets are visibly different.
             #if defined(USE_SK6812) && USE_SK6812
-                Effect<WarmGlowEffect>(4000, 200)
+                Effect<WarmGlowEffect>(4000, 255)
             #else
-                Effect<WarmGlowEffect>(2700, 200),
-                Effect<WarmGlowEffect>(6500, 200)
+                Effect<WarmGlowEffect>(2700, 255),
+                Effect<WarmGlowEffect>(6500, 255)
             #endif
         );
 
@@ -570,10 +570,10 @@ void LoadEffectFactories()
             // neutral white there. RGB-only builds use the fallback tinting
             // path, where warm and cool presets are visibly different.
             #if defined(USE_SK6812) && USE_SK6812
-                Effect<WarmGlowEffect>(4000, 200)
+                Effect<WarmGlowEffect>(4000, 255)
             #else
-                Effect<WarmGlowEffect>(2700, 200),
-                Effect<WarmGlowEffect>(6500, 200)
+                Effect<WarmGlowEffect>(2700, 255),
+                Effect<WarmGlowEffect>(6500, 255)
             #endif
         );
     #endif

@@ -432,6 +432,37 @@ public:
     //   We fill pixel with .75 worth of color
     void setPixelsF(float fPos, float count, CRGB c, bool bMerge = false) const;
 
+    // setWhitePixelsF - Floating point variant for the whites plane.
+    //
+    // This mirrors setPixelsF() for CRGBW. If the device has no whites plane,
+    // it is a no-op. When bMerge is true, CW/WW are saturating-added to the
+    // existing white pixel data instead of replacing it.
+
+    void setWhitePixelsF(float fPos, float count, CRGBW white, bool bMerge = false) const;
+    
+    // ScaleWhtieCoverage - Helper for setWhitePixelsF() to convert a fractional 
+    // coverage (0.0..1.0) into a linear scale factor (0..255) for the white channels.
+
+    static uint8_t ScaleWhiteCoverage(float coverage);
+    
+    // ApproximateRgbForKelvin - Helper to convert a color temperature in Kelvin to an RGB 
+    // approximation of that color, at a given brightness. Useful for effects that want to 
+    // approximate CCT on RGB-only strips.
+
+    static CRGB ApproximateRgbForKelvin(uint16_t kelvin, uint8_t brightness);
+    
+    // ScaleRgbToMax - Helper to scale an RGB color so that its brightest channel is at the specified brightness.
+
+    static CRGB ScaleRgbToMax(CRGB color, uint8_t brightness);
+    
+    // MaximumRgbForKelvin / MaximumWhiteForKelvin - Helpers to calculate the maximum RGB or 
+    // white values for a given CCT and brightness, based on the SK6812's white extraction behavior. 
+    // Useful for effects that want to use the whites plane on RGBW strips, or want to know how much 
+    // headroom they have when approximating CCT on RGB strips.
+
+    static CRGB MaximumRgbForKelvin(uint16_t kelvin, uint8_t brightness);
+    static CRGBW MaximumWhiteForKelvin(uint16_t kelvin, uint8_t brightness);
+
     void blurRows(CRGB *leds, uint16_t width, uint16_t height, uint16_t first, fract8 blur_amount);
 
     // blurColumns: perform a blur1d on each column of a rectangular matrix

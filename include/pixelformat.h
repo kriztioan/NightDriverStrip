@@ -253,21 +253,23 @@ public:
             // of 128 strikes a workable middle ground on the strips we've
             // tested so far. The right value is strip-dependent; expose
             // through DeviceConfig + SetupUI once we wire that through.
-            const uint8_t shared = std::min(color.r, std::min(color.g, color.b));
-            // pull = round(shared * ratio / 255)
-            const uint8_t pull = static_cast<uint8_t>((static_cast<uint16_t>(shared) * ratio + 127) / 255);
-            color.r -= pull;
-            color.g -= pull;
-            color.b -= pull;
-
-            // Explicit effect-set whites (if the whites plane is allocated
-            // and the effect wrote to it). On a single-white strip both
-            // CW and WW intent route to the same W channel. The extract
-            // ratio does NOT apply here - effects that explicitly drove
-            // the white plane meant it.
             uint8_t effectWhite = 0;
             if (whites)
                 effectWhite = PixelFormatHelpers::SaturatingAdd(whites[i].cw, whites[i].ww);
+
+            // Explicit effect-set whites are additive on top of RGB. When an
+            // effect wrote a white value, do not pull shared white out of RGB:
+            // the effect is intentionally asking for both RGB and W output.
+            uint8_t pull = 0;
+            if (effectWhite == 0)
+            {
+                const uint8_t shared = std::min(color.r, std::min(color.g, color.b));
+                // pull = round(shared * ratio / 255)
+                pull = static_cast<uint8_t>((static_cast<uint16_t>(shared) * ratio + 127) / 255);
+                color.r -= pull;
+                color.g -= pull;
+                color.b -= pull;
+            }
 
             uint8_t w = PixelFormatHelpers::SaturatingAdd(pull, effectWhite);
             w        = std::max(w, ambientWhite);

@@ -108,15 +108,19 @@ namespace
             for (size_t i = 0; i < ledCount; ++i)
             {
                 CRGB color = graphics.leds[i];
-                const uint8_t shared = std::min(color.r, std::min(color.g, color.b));
-                const uint8_t pull = static_cast<uint8_t>((static_cast<uint16_t>(shared) * ratio + 127) / 255);
-                color.r -= pull;
-                color.g -= pull;
-                color.b -= pull;
-
                 uint8_t effectWhite = 0;
                 if (graphics.whites)
                     effectWhite = SaturatingAdd(graphics.whites[i].cw, graphics.whites[i].ww);
+
+                uint8_t pull = 0;
+                if (effectWhite == 0)
+                {
+                    const uint8_t shared = std::min(color.r, std::min(color.g, color.b));
+                    pull = static_cast<uint8_t>((static_cast<uint16_t>(shared) * ratio + 127) / 255);
+                    color.r -= pull;
+                    color.g -= pull;
+                    color.b -= pull;
+                }
 
                 red += color.r;
                 green += color.g;

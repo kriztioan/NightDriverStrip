@@ -32,6 +32,7 @@
 #include "ledstripeffect.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cstdlib>
 #include <iterator>
 #include <stdexcept>
@@ -264,6 +265,24 @@ void LEDStripEffect::setPixelsFOnAllChannels(float fPos, float count, CRGB c, bo
 {
     for (auto& device : _GFX)
         device->setPixelsF(fPos, count, c, bMerge);
+}
+
+void LEDStripEffect::setWhitePixelsFOnAllChannels(float fPos, float count, CRGBW white, bool bMerge)
+{
+    for (auto& device : _GFX)
+        device->setWhitePixelsF(fPos, count, white, bMerge);
+}
+
+void LEDStripEffect::setWhiteOnAllChannels(float fPos, float count, CRGBW white, bool bMerge)
+{
+    setWhitePixelsFOnAllChannels(fPos, count, white, bMerge);
+}
+
+void LEDStripEffect::clearWhitesOnAllChannels()
+{
+    for (auto& device : _GFX)
+        if (device->whites)
+            memset(device->whites, 0, _cLEDs * sizeof(CRGBW));
 }
 
 // ClearFrameOnAllChannels
