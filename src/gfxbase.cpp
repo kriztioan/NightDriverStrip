@@ -1098,7 +1098,7 @@ CRGB GFXBase::HsvToRgb(uint8_t h, uint8_t s, uint8_t v)
 
     // Internal implementation: assumes _ptrNoise is already initialized.
     // Must NOT call EnsureNoise() — this is invoked from within EnsureNoise()'s
-    // call_once lambda, and a recursive call_once on the same flag deadlocks.
+    // call_once lambda, and a recursive call_once on the same flag is UB.
     void GFXBase::FillGetNoiseImpl() const
     {
         // Subtracting the center offset before scaling ensures the noise pattern radiates
