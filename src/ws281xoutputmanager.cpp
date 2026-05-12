@@ -663,7 +663,7 @@ void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devi
         // white pulled into the dedicated W LED
         
         #ifndef SK6812_WHITE_EXTRACT_RATIO
-            #define SK6812_WHITE_EXTRACT_RATIO 96
+            #define SK6812_WHITE_EXTRACT_RATIO 128
         #endif
         
         constexpr uint16_t kDefaultCctKelvin   = NIGHTDRIVER_DEFAULT_CCT_KELVIN;
