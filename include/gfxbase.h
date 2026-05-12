@@ -202,7 +202,9 @@ public:
     virtual ~GFXBase() override;
 
     #if USE_NOISE
-    // Returns true if noise was just initialized, false if it was already initialized.
+    // Ensures noise is initialized.
+    // Returns true only if this call performed the initialization; returns false for all
+    // other calls, including concurrent callers that observe initialization complete.
     bool EnsureNoise() const;
 
     Noise &GetNoise()
@@ -520,7 +522,7 @@ public:
 
     private:
         // Called only from within EnsureNoise() (already inside call_once), and therefore
-        // must NOT call EnsureNoise() itself — doing so would deadlock std::call_once.
+        // must NOT call EnsureNoise() itself — doing so would result in undefined behavior.
         void FillGetNoiseImpl() const;
 
     public:
