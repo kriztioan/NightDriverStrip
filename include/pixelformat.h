@@ -153,7 +153,7 @@ namespace PixelFormatHelpers
 // ---------------------------------------------------------------------
 //
 // Reproduces the pre-strategy behavior exactly. Picked as the format when
-// the build doesn't set a whiteys flag.
+// the build doesn't enable white channels.
 
 class Ws2812Format final : public PixelFormat
 {
