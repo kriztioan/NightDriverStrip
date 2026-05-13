@@ -51,11 +51,15 @@ protected:
 
     static String NameForKelvin(uint16_t kelvin)
     {
+        // Return a string of the format "Warm White: 3000K" based on the temp
+
+        String result("White");
         if (kelvin <= 3000)
-            return "Warm White Glow";
-        if (kelvin >= 5000)
-            return "Cool White Glow";
-        return "White Glow";
+            result = "Warm White";
+        if (kelvin >= 4500)
+            result = "Cool White";
+        
+        return result + ": " + String(kelvin) + "K";
     }
 
 public:

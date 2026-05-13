@@ -461,6 +461,7 @@ public:
     // headroom they have when approximating CCT on RGB strips.
 
     static CRGB MaximumRgbForKelvin(uint16_t kelvin, uint8_t brightness);
+
     static CRGBW MaximumWhiteForKelvin(uint16_t kelvin, uint8_t brightness);
 
     void blurRows(CRGB *leds, uint16_t width, uint16_t height, uint16_t first, fract8 blur_amount);
