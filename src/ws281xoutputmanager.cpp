@@ -48,6 +48,7 @@
 #endif
 
 #include "gfxbase.h"
+#include "pixelformat.h"
 #include "ws281xgfx.h"
 
 // Transport base class. Concrete subclasses (in the anonymous namespace below)
@@ -149,63 +150,9 @@ namespace
     }
 #endif // ESP_IDF_VERSION_MAJOR < 5
 
-    template <uint8_t RIndex, uint8_t GIndex, uint8_t BIndex>
-    void PackChannelPixels(uint8_t* output,
-                           const CRGB* source,
-                           size_t activeLedCount,
-                           size_t pixelsToShow,
-                           uint8_t brightness,
-                           uint8_t fader)
-    {
-        for (size_t pixelIndex = 0; pixelIndex < activeLedCount; ++pixelIndex)
-        {
-            CRGB color = pixelIndex < pixelsToShow ? source[pixelIndex] : CRGB::Black;
-
-            // Preserve the compiled-path semantics without first mutating the effect buffer:
-            // scale by configured brightness, then apply the global master fader.
-            nscale8x3_video(color.r, color.g, color.b, brightness);
-            nscale8x3_video(color.r, color.g, color.b, fader);
-
-            const size_t offset = pixelIndex * 3;
-            output[offset + RIndex] = color.r;
-            output[offset + GIndex] = color.g;
-            output[offset + BIndex] = color.b;
-        }
-    }
-
-    void PackChannelPixelsForColorOrder(uint8_t* output,
-                                        const CRGB* source,
-                                        size_t activeLedCount,
-                                        size_t pixelsToShow,
-                                        uint8_t brightness,
-                                        uint8_t fader,
-                                        DeviceConfig::WS281xColorOrder colorOrder)
-    {
-        switch (colorOrder)
-        {
-            case DeviceConfig::WS281xColorOrder::RGB:
-                PackChannelPixels<0, 1, 2>(output, source, activeLedCount, pixelsToShow, brightness, fader);
-                return;
-            case DeviceConfig::WS281xColorOrder::RBG:
-                PackChannelPixels<0, 2, 1>(output, source, activeLedCount, pixelsToShow, brightness, fader);
-                return;
-            case DeviceConfig::WS281xColorOrder::GRB:
-                PackChannelPixels<1, 0, 2>(output, source, activeLedCount, pixelsToShow, brightness, fader);
-                return;
-            case DeviceConfig::WS281xColorOrder::GBR:
-                PackChannelPixels<2, 0, 1>(output, source, activeLedCount, pixelsToShow, brightness, fader);
-                return;
-            case DeviceConfig::WS281xColorOrder::BRG:
-                PackChannelPixels<1, 2, 0>(output, source, activeLedCount, pixelsToShow, brightness, fader);
-                return;
-            case DeviceConfig::WS281xColorOrder::BGR:
-                PackChannelPixels<2, 1, 0>(output, source, activeLedCount, pixelsToShow, brightness, fader);
-                return;
-            default:
-                PackChannelPixels<1, 0, 2>(output, source, activeLedCount, pixelsToShow, brightness, fader);
-                return;
-        }
-    }
+    // Per-pixel packing moved into PixelFormat (see include/pixelformat.h).
+    // Ws2812Format reproduces the previous PackChannelPixels behavior; new
+    // chips (SK6812, SM16825, WS2805) add sibling format classes there.
 
     void LogRuntimeWS281xConfiguration(const DeviceConfig& config, const std::vector<std::shared_ptr<GFXBase>>& devices, const char* reason)
     {
@@ -502,9 +449,29 @@ namespace
     }
 }
 
+namespace
+{
+    // Pick the PixelFormat that matches the LED chip on the wire. Currently
+    // selected by compile-time flag - eventually this could become a
+    // DeviceConfig runtime knob. SK6812 (4-channel RGBW) is the second chip
+    // we support; the WS2812 path is the default.
+    std::unique_ptr<PixelFormat> CreatePixelFormat()
+    {
+#if defined(USE_SK6812) && USE_SK6812
+        return std::make_unique<Sk6812Format>();
+#else
+        return std::make_unique<Ws2812Format>();
+#endif
+    }
+}
+
 // Out-of-line so the unique_ptr<Transport> default-deleter sees the full
-// Transport definition above.
-WS281xOutputManager::WS281xOutputManager() : _transport(CreateTransport()) {}
+// Transport definition above, and the unique_ptr<PixelFormat> deleter sees
+// the full PixelFormat hierarchy from pixelformat.h.
+WS281xOutputManager::WS281xOutputManager()
+    : _transport(CreateTransport()), _format(CreatePixelFormat())
+{
+}
 
 WS281xOutputManager::~WS281xOutputManager()
 {
@@ -528,7 +495,9 @@ void WS281xOutputManager::Reset()
 bool WS281xOutputManager::RecreateChannel(size_t channelIndex, int8_t pin, size_t ledCount, String* errorMessage)
 {
     auto& state = _channels[channelIndex];
-    const auto byteCount = ledCount * 3;
+    // BytesPerPixel comes from the chip-specific PixelFormat (3 for WS2812,
+    // 4 for SK6812, 5 for SM16825/WS2805).
+    const auto byteCount = ledCount * _format->BytesPerPixel();
 
     // A channel recreate is the "hard" reconfigure path: tear down any existing
     // RMT binding, resize the packed byte buffer if LED count changed, then
@@ -672,7 +641,47 @@ void WS281xOutputManager::Show(const std::vector<std::shared_ptr<GFXBase>>& devi
 
         const auto& device = devices[channelIndex];
         auto* output = state.outputBytes.get();
-        PackChannelPixelsForColorOrder(output, device->leds, _activeLEDCount, pixelsToShow, brightness, fader, _colorOrder);
+        
+        // Delegate to the chip-specific format. Passes the optional whites
+        // plane (nullptr for plain WS2812 builds; populated by setPixelCCT /
+        // setPixelWhite calls on SK6812+ builds). cctKelvin, ambient white,
+        // and white-extract ratio defaults are baked in here pending the
+        // DeviceConfig knobs landing in a follow-up commit. Each can be
+        // overridden at build time via a -D in the env's build_src_flags.
+
+        #ifndef NIGHTDRIVER_DEFAULT_CCT_KELVIN
+            #define NIGHTDRIVER_DEFAULT_CCT_KELVIN 4000
+        #endif
+        #ifndef NIGHTDRIVER_DEFAULT_AMBIENT_CW
+            #define NIGHTDRIVER_DEFAULT_AMBIENT_CW 0
+        #endif
+        #ifndef NIGHTDRIVER_DEFAULT_AMBIENT_WW
+            #define NIGHTDRIVER_DEFAULT_AMBIENT_WW 0
+        #endif
+        
+        // SK6812_WHITE_EXTRACT_RATIO: 0..255, fraction of shared-portion
+        // white pulled into the dedicated W LED
+        
+        #ifndef SK6812_WHITE_EXTRACT_RATIO
+            #define SK6812_WHITE_EXTRACT_RATIO 128
+        #endif
+        
+        constexpr uint16_t kDefaultCctKelvin   = NIGHTDRIVER_DEFAULT_CCT_KELVIN;
+        constexpr uint8_t  kDefaultAmbientCw   = NIGHTDRIVER_DEFAULT_AMBIENT_CW;
+        constexpr uint8_t  kDefaultAmbientWw   = NIGHTDRIVER_DEFAULT_AMBIENT_WW;
+        constexpr uint8_t  kDefaultExtractRatio = SK6812_WHITE_EXTRACT_RATIO;
+
+        _format->Pack(output,
+                      device->leds,
+                      device->whites,                 // may be nullptr
+                      _activeLEDCount,
+                      pixelsToShow,
+                      brightness, fader,
+                      _colorOrder,
+                      kDefaultCctKelvin,
+                      kDefaultAmbientCw,
+                      kDefaultAmbientWw,
+                      kDefaultExtractRatio);
     }
 
     const auto showStartMicros = micros();

@@ -77,7 +77,25 @@ class FireworksEffect : public EffectWithId<FireworksEffect>
             return color;
         }
 
+        // I want to opportunistically pull the ignition phase towards pure white, so that if the beat is 
+        // strong and the particle ignites fully, it has a bright white core.  This is a defining 
+        // characteristic of fireworks and makes them pop visually, but it also means that at lower 
+        // brightness levels, the colors can be very dim until the particle is well into its ignition phase.  
+        // This method allows effects that want to maintain a more colorful look at low brightness to 
+        // check whether the particle is still in that very-white ignition phase.
+
+        bool IsPureWhiteIgnition() const
+        {
+            if (age >= preignitionTime + ignitionTime)
+                return false;
+
+            const float ignitionAge = std::max(0.0f, age - preignitionTime);
+            const float ignitionBlend = ignitionTime > 0.0f ? std::clamp(ignitionAge / ignitionTime, 0.0f, 1.0f) : 1.0f;
+            return ignitionBlend < 0.60f;
+        }
+
       private:
+
         static CRGB BlendColor(const CRGB& a, const CRGB& b, uint8_t amountOfB)
         {
             CRGB mixed = a;
@@ -192,6 +210,7 @@ class FireworksEffect : public EffectWithId<FireworksEffect>
     void Draw() override
     {
         fadeAllChannelsToBlackBy(_frameFade);
+        clearWhitesOnAllChannels();
 
         const float deltaSeconds = static_cast<float>(g_Values.AppTime.LastFrameTime());
         if (deltaSeconds <= 0.0f)
@@ -207,7 +226,10 @@ class FireworksEffect : public EffectWithId<FireworksEffect>
                 continue;
             }
 
-            setPixelsFOnAllChannels(it->position - it->size * 0.5f, it->size, it->CurrentColor(), true);
+            const float start = it->position - it->size * 0.5f;
+            setPixelsFOnAllChannels(start, it->size, it->CurrentColor(), true);
+            if (it->IsPureWhiteIgnition())
+                setWhiteOnAllChannels(start, it->size, CRGBW(255, 255), true);
             ++it;
         }
     }

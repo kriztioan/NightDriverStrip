@@ -32,6 +32,7 @@
 #include "ledstripeffect.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cstdlib>
 #include <iterator>
 #include <stdexcept>
@@ -238,11 +239,21 @@ void LEDStripEffect::fillSolidOnAllChannels(CRGB color, int iStart, int numToFil
         if (everyN == 1)
         {
             fill_solid(device->leds + iStart, numToFill, color);
+            // Zero the matching whites range so a prior CCT-aware effect's
+            // residual W intensity doesn't bleed under the new solid color.
+            // Mirrors the leds[] semantics: "fill with X" means "this region
+            // now displays X and nothing else."
+            if (device->whites)
+                memset(device->whites + iStart, 0, numToFill * sizeof(CRGBW));
             continue;
         }
 
         for (int i = iStart; i < iStart + numToFill; i += everyN)
+        {
             device->leds[i] = color;
+            if (device->whites)
+                device->whites[i] = CRGBW(0, 0);
+        }
     }
 }
 
@@ -254,6 +265,24 @@ void LEDStripEffect::setPixelsFOnAllChannels(float fPos, float count, CRGB c, bo
 {
     for (auto& device : _GFX)
         device->setPixelsF(fPos, count, c, bMerge);
+}
+
+void LEDStripEffect::setWhitePixelsFOnAllChannels(float fPos, float count, CRGBW white, bool bMerge)
+{
+    for (auto& device : _GFX)
+        device->setWhitePixelsF(fPos, count, white, bMerge);
+}
+
+void LEDStripEffect::setWhiteOnAllChannels(float fPos, float count, CRGBW white, bool bMerge)
+{
+    setWhitePixelsFOnAllChannels(fPos, count, white, bMerge);
+}
+
+void LEDStripEffect::clearWhitesOnAllChannels()
+{
+    for (auto& device : _GFX)
+        if (device->whites)
+            memset(device->whites, 0, _cLEDs * sizeof(CRGBW));
 }
 
 // ClearFrameOnAllChannels
@@ -327,7 +356,13 @@ void LEDStripEffect::setAllOnAllChannels(uint8_t r, uint8_t g, uint8_t b) const
 {
     const CRGB color(r, g, b);
     for (auto& device : _GFX)
+    {
         fill_solid(device->leds, _cLEDs, color);
+        // Same rationale as fillSolidOnAllChannels: "set everything to X"
+        // implies "no residual whites from a previous effect."
+        if (device->whites)
+            memset(device->whites, 0, _cLEDs * sizeof(CRGBW));
+    }
 }
 
 // setPixelOnAllChannels
