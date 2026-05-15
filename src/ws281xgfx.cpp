@@ -36,10 +36,10 @@
 
 #include "deviceconfig.h"
 #include "effectmanager.h"
+#include "pixelformat.h"
 #include "systemcontainer.h"
 #include "values.h"
 #include "ws281xgfx.h"
-#include "pixelformat.h"
 #if USE_WS281X
 #include "ws281xoutputmanager.h"
 #endif
