@@ -76,7 +76,7 @@ build_dir = env.subst("$BUILD_DIR")
 progname = env.subst("$PROGNAME")
 
 app_bin = os.path.join(build_dir, f"{progname}.bin")
-merged_image = os.path.join(build_dir, "merged_image.bin")
+merged_image = os.path.join(build_dir, env.GetProjectOption("custom_merged_image", "merged_image.bin"))
 
 merged_target = env.Command(
     target=merged_image,
