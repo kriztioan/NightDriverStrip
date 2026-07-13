@@ -38,6 +38,7 @@
 #include "deviceconfig.h"
 #include "effectfactories.h"
 #include "effectmanager.h"
+#include "effects.h"
 #include "gfxbase.h"
 #include "jsonserializer.h"
 #include "ledstripeffect.h"
@@ -69,6 +70,9 @@ extern DRAM_ATTR bool l_EffectManagerInitializing;
     {
         debugW("InitSplashEffectManager");
 
+        #if EFFECTS_FULLMATRIX
+            ConfigureMatrixJpegDecoder();
+        #endif
         g_ptrSystem->SetupEffectManager(make_shared_psram<SplashLogoEffect>(), g_ptrSystem->GetDevices());
     }
 
@@ -84,6 +88,10 @@ namespace
 {
     void WriteEffectManagerConfigFile()
     {
+        #if NO_EFFECT_PERSISTENCE
+            return;
+        #endif
+
         if (!SaveToJSONFile(EFFECTS_CONFIG_FILE, g_ptrSystem->GetEffectManager()) && EFFECT_PERSISTENCE_CRITICAL)
             throw std::runtime_error("Effects serialization failed");
     }

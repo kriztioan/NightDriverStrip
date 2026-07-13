@@ -155,12 +155,13 @@ public:
         }
 
         // Buffer Status Line 3
-        auto &bufferManager = g_ptrSystem->GetBufferManagers()[0];
         size_t bufferDepth = 0;
         size_t bufferCount = 0;
         double oldestAge = 0.0;
         double newestAge = 0.0;
+        if (g_ptrSystem->HasBufferManagers())
         {
+            auto &bufferManager = g_ptrSystem->GetBufferManagers()[0];
             // The display runs on its own task, so even status-only buffer
             // reads need the producer/consumer mutex to avoid sampling torn
             // circular-buffer indices.

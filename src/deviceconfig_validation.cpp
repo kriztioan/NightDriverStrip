@@ -20,8 +20,19 @@ SuccessResultWithMessage DeviceConfig::ValidateTopology(uint16_t width, uint16_t
     if (width == 0 || height == 0)
         return { false, "matrix dimensions must be greater than zero" };
 
-    if (static_cast<size_t>(width) * height > GetCompiledLEDCount())
-        return { false, DeviceConfigInternal::RecompileNeededMessage() };
+    const size_t requestedLEDCount = static_cast<size_t>(width) * height;
+    const size_t compiledLEDCount = GetCompiledLEDCount();
+    if (requestedLEDCount > compiledLEDCount)
+    {
+        return {
+            false,
+            String("Matrix dimensions ") + width + " x " + height
+                + " require " + static_cast<unsigned long>(requestedLEDCount)
+                + " LEDs, but this firmware was compiled for "
+                + static_cast<unsigned long>(compiledLEDCount)
+                + ". Lower width/height or flash a build compiled for more LEDs."
+        };
+    }
 
     if (IsHub75Build())
     {

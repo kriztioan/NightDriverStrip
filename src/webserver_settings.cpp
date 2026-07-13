@@ -216,8 +216,14 @@ bool CWebServer::EnsureDeviceSettingSpecsJson()
         return true;
 
     String json;
-    if (!BuildSettingSpecsJson(json, LoadDeviceSettingSpecs()))
+    try
     {
+        if (!BuildSettingSpecsJson(json, LoadDeviceSettingSpecs()))
+            return false;
+    }
+    catch (const std::bad_alloc&)
+    {
+        debugE("Insufficient memory to build device setting specs JSON.");
         return false;
     }
 

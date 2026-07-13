@@ -13,6 +13,7 @@
 #include "globals.h"
 
 #include <array>
+#include <limits>
 #include <optional>
 
 #include "audioservice.h"
@@ -119,6 +120,28 @@ ResultWithMessage<std::optional<int>> DeviceConfig::ResolveUnifiedAudioInputPin(
     }
 
     return { requestedAudioInputPin, "" };
+}
+
+namespace
+{
+    ResultWithMessage<std::optional<uint16_t>> ParseTopologyDimension(JsonObjectConst topology, const char* key)
+    {
+        auto value = topology[key];
+        if (value.isNull())
+            return { std::nullopt, "" };
+
+        if (!value.is<size_t>())
+            return { std::nullopt, String(key) + " must be a positive integer" };
+
+        const size_t dimension = value.as<size_t>();
+        if (dimension == 0)
+            return { std::nullopt, String(key) + " must be greater than zero" };
+
+        if (dimension > std::numeric_limits<uint16_t>::max())
+            return { std::nullopt, String(key) + " is too large" };
+
+        return { static_cast<uint16_t>(dimension), "" };
+    }
 }
 
 void DeviceConfig::SerializeUnifiedSettings(JsonObject root) const
@@ -313,14 +336,21 @@ SuccessResultWithMessage DeviceConfig::ParseAndValidateUnifiedSettings(JsonObjec
     if (root["topology"].is<JsonObjectConst>())
     {
         auto topology = root["topology"].as<JsonObjectConst>();
-        if (topology["width"].is<uint16_t>())
+        auto [requestedWidth, widthMessage] = ParseTopologyDimension(topology, "width");
+        if (!requestedWidth.has_value() && !widthMessage.isEmpty())
+            return { false, widthMessage };
+        if (requestedWidth.has_value())
         {
-            out.requestedRuntimeConfig.topology.width = topology["width"].as<uint16_t>();
+            out.requestedRuntimeConfig.topology.width = requestedWidth.value();
             out.runtimeConfigTouched = true;
         }
-        if (topology["height"].is<uint16_t>())
+
+        auto [requestedHeight, heightMessage] = ParseTopologyDimension(topology, "height");
+        if (!requestedHeight.has_value() && !heightMessage.isEmpty())
+            return { false, heightMessage };
+        if (requestedHeight.has_value())
         {
-            out.requestedRuntimeConfig.topology.height = topology["height"].as<uint16_t>();
+            out.requestedRuntimeConfig.topology.height = requestedHeight.value();
             out.runtimeConfigTouched = true;
         }
         if (topology["serpentine"].is<bool>())

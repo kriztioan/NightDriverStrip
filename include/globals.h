@@ -220,8 +220,7 @@ extern std::recursive_mutex g_effect_manager_mutex;
 // #define SOCKET_CORE             1
 // #define REMOTE_CORE             1
 
-// Some "Reliability Rules"
-// Drawing must be on Core 1 if using SmartMatrix unless you specify SMARTMATRIX_OPTIONS_ESP32_CALC_TASK_CORE_1
+// Keep drawing on Core 1 so the render workload remains isolated from audio.
 
 #define DRAWING_CORE            1
 #define NET_CORE                1
@@ -797,7 +796,9 @@ extern const int g_aRingSizeTable[];
         #endif
     #endif
 #else
-    #define AUDIO_INPUT_PIN 0
+    #ifndef AUDIO_INPUT_PIN
+        #define AUDIO_INPUT_PIN 0
+    #endif
 #endif
 
 #ifndef IR_REMOTE_PIN

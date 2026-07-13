@@ -67,6 +67,7 @@ using FactoryId = uint64_t;
 #define PTY_SPEEDDIVISOR    "sdd"
 #define PTY_DELTAHUE        "dth"
 #define PTY_MIRRORED        "mrd"
+#define PTY_FITLEDCOUNT     "flc"
 #define PTY_EVERYNTH        "ent"
 #define PTY_COLOR           "clr"
 #define PTY_BLEND           "bld"
@@ -87,3 +88,9 @@ using FactoryId = uint64_t;
 #define PTY_IGNOREGLOBALCOLOR   "igc"
 
 #define EFFECTS_CONFIG_FILE "/effects.cfg"
+
+#if EFFECTS_FULLMATRIX
+// Configure the shared TJpg_Decoder output callback before any matrix effect
+// (including the early boot splash) attempts to decode an embedded JPEG.
+void ConfigureMatrixJpegDecoder();
+#endif

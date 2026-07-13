@@ -275,7 +275,7 @@ make_unique_internal(size_t n)
 // make_unique_dma / make_shared_dma
 //
 // Construct an object in DMA-capable internal RAM. The peripherals that
-// require this (FastLED RMT, SmartMatrix HUB75, I2S audio, ADC continuous)
+// require this (FastLED RMT, HUB75 DMA, I2S audio, ADC continuous)
 // generally call heap_caps_malloc(MALLOC_CAP_DMA) directly, but these helpers
 // are available for any project-side buffer that needs to be DMA-reachable.
 template <typename T, typename... Args>

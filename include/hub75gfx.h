@@ -38,8 +38,7 @@
 
 #include "MatrixHardware_ESP32_Custom.h"
 
-#define SM_INTERNAL     // Silence build messages from their header
-#include <SmartMatrix.h>
+#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 
 #include <cmath>
 #include <memory>
@@ -50,8 +49,6 @@
 //
 // Matrix Panel
 //
-
-#define COLOR_DEPTH 24 // known working: 24, 48 - If the sketch uses type `rgb24` directly, COLOR_DEPTH must be 24
 
 class HUB75GFX : public GFXBase
 {
@@ -64,15 +61,9 @@ protected:
     float totalCaptionDuration = 0;
 
 public:
-    typedef RGB_TYPE(COLOR_DEPTH) SM_RGB;
-    static const uint8_t kPanelType = SMARTMATRIX_HUB75_32ROW_MOD16SCAN;                // use SMARTMATRIX_HUB75_16ROW_MOD8SCAN for common 16x32 panels
-    static const uint8_t kMatrixOptions = (SMARTMATRIX_OPTIONS_BOTTOM_TO_TOP_STACKING   /* | SMARTMATRIX_OPTIONS_ESP32_CALC_TASK_CORE_1 */); // see http://docs.pixelmatix.com/SmartMatrix for options
-    static const uint8_t kBackgroundLayerOptions = (SM_BACKGROUND_OPTIONS_NONE);
     static const uint8_t kDefaultBrightness = 255; // full (100%) brightness
 
-    static SMLayerBackground<SM_RGB, kBackgroundLayerOptions> backgroundLayer;
-    static SMLayerBackground<SM_RGB, kBackgroundLayerOptions> titleLayer;
-    static SmartMatrixHub75Calc<COLOR_DEPTH, kMatrixWidth, kMatrixHeight, kPanelType, kMatrixOptions> matrix;
+    static std::unique_ptr<MatrixPanel_I2S_DMA> matrix;
 
     HUB75GFX(size_t w, size_t h);
 
@@ -133,8 +124,15 @@ public:
     // Matrix interop
 
     static void StartMatrix();
+    static int GetRefreshRate();
     static CRGB *GetMatrixBackBuffer();
     static bool WaitForMatrixSwap(uint32_t timeoutMs = 100);
-    static void MatrixSwapBuffers(bool bSwapBackground);
+    static void MatrixSwapBuffers(bool copyPresentedFrame);
+
+private:
+    static CRGB frameBuffers[2][kMatrixWidth * kMatrixHeight];
+    static uint8_t drawBufferIndex;
+    static uint32_t lastSwapMs;
+    static void FlushFrameToMatrix();
 };
 #endif

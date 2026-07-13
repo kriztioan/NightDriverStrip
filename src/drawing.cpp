@@ -116,6 +116,11 @@ std::shared_ptr<LEDStripEffect> GetSpectrumAnalyzer(CRGB color);    // Defined i
 
 uint16_t WiFiDraw()
 {
+    // Builds with INCOMING_WIFI_ENABLED=0 never create the buffer managers,
+    // but this path is still reachable whenever WiFi itself is connected.
+    if (!g_ptrSystem->HasBufferManagers())
+        return 0;
+
     std::lock_guard guard(g_buffer_mutex);
 
     uint16_t pixelsDrawn = 0;
@@ -334,8 +339,8 @@ void ShowOnboardPixel()
 //
 // Start/Stop/IsRunning are inherited final from ITaskService; this class
 // only supplies the task config and the per-frame render loop body. The
-// render task is pinned to DRAWING_CORE because SmartMatrix and FastLED
-// both impose core affinity expectations on whatever drives them.
+// The render task is pinned to DRAWING_CORE to isolate the display workload
+// from audio sampling and other timing-sensitive services.
 
 ITaskService::TaskConfig RenderService::GetTaskConfig() const
 {

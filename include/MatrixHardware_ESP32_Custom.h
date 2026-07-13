@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * SmartMatrix Library - Hardware-Specific Header File (ESP32 pinout collection)
+ * HUB75 hardware-specific pinout collection for ESP32 targets
  *
  * Copyright (c) 2020 Louis Beaudoin (Pixelmatix)
  *
@@ -29,40 +29,6 @@
 
 #ifndef MATRIX_HARDWARE_H
 #define MATRIX_HARDWARE_H
-// formula used is 80000000L/(cfg->clkspeed_hz + 1), must result in >=2.  Acceptable values 26.67MHz, 20MHz, 16MHz, 13.34MHz...
-#define ESP32_I2S_CLOCK_SPEED (20000000UL)
-
-//#define GPIOPINOUT ESP32_FORUM_PINOUT_WITH_LATCH // note this mode is untested as of 2018-05-17 - not being used anymore now that SmartMatrix Shield is available
-//#define GPIOPINOUT SMARTLED_SHIELD_V0_PINOUT
-
-//Upper half RGB
-#define BIT_R1  (1<<0)
-#define BIT_G1  (1<<1)
-#define BIT_B1  (1<<2)
-//Lower half RGB
-#define BIT_R2  (1<<3)
-#define BIT_G2  (1<<4)
-#define BIT_B2  (1<<5)
-
-// Control Signals
-#define BIT_LAT (1<<6)
-#define BIT_OE  (1<<7)
-
-#define BIT_A (1<<8)
-#define BIT_B (1<<9)
-#define BIT_C (1<<10)
-#define BIT_D (1<<11)
-#define BIT_E (1<<12)
-
-
-
-    // #pragma message "MatrixHardware: Custom Wrover Kit wiring"
-
-    // ADDX is output directly using GPIO
-    #define CLKS_DURING_LATCH   0
-    #define MATRIX_I2S_MODE I2S_PARALLEL_BITS_16
-    #define MATRIX_DATA_STORAGE_TYPE uint16_t
-
     /*
     HUB 75
     01 02 B0
@@ -118,20 +84,54 @@
     #define CLK_PIN GPIO_NUM_2
     */
 
-    #define R1_PIN  GPIO_NUM_2
-    #define G1_PIN  GPIO_NUM_0
-    #define B1_PIN  GPIO_NUM_32
-    #define R2_PIN  GPIO_NUM_25
-    #define G2_PIN  GPIO_NUM_33
-    #define B2_PIN  GPIO_NUM_27
-    #define A_PIN   GPIO_NUM_5
-    #define B_PIN   GPIO_NUM_4
-    #define C_PIN   GPIO_NUM_19
-    #define D_PIN   GPIO_NUM_18
-    #define E_PIN   GPIO_NUM_26
-    #define LAT_PIN GPIO_NUM_21
-    #define OE_PIN  GPIO_NUM_23
-    #define CLK_PIN GPIO_NUM_22
+    #if defined(MESMERIZER_DEVKIT_S3) && MESMERIZER_DEVKIT_S3
+        // ESP32-S3-DevKitC-1 HUB75 wiring.
+        #define R1_PIN  GPIO_NUM_18
+        #define G1_PIN  GPIO_NUM_8
+        #define B1_PIN  GPIO_NUM_17
+        #define R2_PIN  GPIO_NUM_16
+        #define G2_PIN  GPIO_NUM_1
+        #define B2_PIN  GPIO_NUM_15
+        #define A_PIN   GPIO_NUM_7
+        #define B_PIN   GPIO_NUM_48
+        #define C_PIN   GPIO_NUM_6
+        #define D_PIN   GPIO_NUM_47
+        #define E_PIN   GPIO_NUM_2
+        #define LAT_PIN GPIO_NUM_21
+        #define OE_PIN  GPIO_NUM_4
+        #define CLK_PIN GPIO_NUM_5
+    #elif defined(MESMERIZER_DEVKIT) && MESMERIZER_DEVKIT
+        // ESP32-DevKitC V4 HUB75 wiring.
+        #define R1_PIN  GPIO_NUM_18
+        #define G1_PIN  GPIO_NUM_17
+        #define B1_PIN  GPIO_NUM_19
+        #define R2_PIN  GPIO_NUM_21
+        #define G2_PIN  GPIO_NUM_23
+        #define B2_PIN  GPIO_NUM_27
+        #define A_PIN   GPIO_NUM_26
+        #define B_PIN   GPIO_NUM_16
+        #define C_PIN   GPIO_NUM_25
+        #define D_PIN   GPIO_NUM_4
+        #define E_PIN   GPIO_NUM_22
+        #define LAT_PIN GPIO_NUM_2
+        #define OE_PIN  GPIO_NUM_32
+        #define CLK_PIN GPIO_NUM_33
+    #else
+        #define R1_PIN  GPIO_NUM_2
+        #define G1_PIN  GPIO_NUM_0
+        #define B1_PIN  GPIO_NUM_32
+        #define R2_PIN  GPIO_NUM_25
+        #define G2_PIN  GPIO_NUM_33
+        #define B2_PIN  GPIO_NUM_27
+        #define A_PIN   GPIO_NUM_5
+        #define B_PIN   GPIO_NUM_4
+        #define C_PIN   GPIO_NUM_19
+        #define D_PIN   GPIO_NUM_18
+        #define E_PIN   GPIO_NUM_26
+        #define LAT_PIN GPIO_NUM_21
+        #define OE_PIN  GPIO_NUM_23
+        #define CLK_PIN GPIO_NUM_22
+    #endif
 
 //#define DEBUG_PINS_ENABLED
 //#define DEBUG_1_GPIO    GPIO_NUM_13

@@ -1127,6 +1127,7 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     control.addEventListener("change", () => {
       const validation = validateFieldValue(spec, control.value);
       if (!validation.valid) {
+        setDraftValue(control.value);
         setFieldError(true, validation.message);
         return;
       }
@@ -1339,12 +1340,8 @@ $$$$$$$b   *u    ^$L            $$  $$$$$$$$$$$$u@       $$  d$$$$$$
     }
 
     const message = `Matrix dimensions ${width} x ${height} require ${requestedLeds} LEDs, but this firmware supports ${maxLeds}. Lower width/height or flash a build compiled for more LEDs.`;
-    if (!errors.has("matrixWidth")) {
-      errors.set("matrixWidth", message);
-    }
-    if (!errors.has("matrixHeight")) {
-      errors.set("matrixHeight", message);
-    }
+    errors.set("matrixWidth", message);
+    errors.set("matrixHeight", message);
   }
 
   function getCompiledMaxLEDs() {

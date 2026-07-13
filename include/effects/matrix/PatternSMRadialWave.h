@@ -14,7 +14,7 @@ class PatternSMRadialWave : public EffectWithId<PatternSMRadialWave>
 
     virtual size_t DesiredFramesPerSecond() const           // Desired framerate of the LED drawing
     {
-        return 45;
+        return 60;
     }
 
     void Start() override

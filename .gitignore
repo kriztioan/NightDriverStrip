@@ -21,6 +21,7 @@ lib/*
 NightDriverStrip.code-workspace
 site/dist
 site/favicon.ico
+**/node_modules/
 src/-defines-.cpp
 src/uzlib/src/*.o
 tools/__pycache__

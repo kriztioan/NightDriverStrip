@@ -95,7 +95,8 @@ public:
         this->device_name_ = name;
 
         #if !(ENABLE_IMPROV_LOGGING)
-            SPIFFS.remove(IMPROV_LOG_FILE);
+            if (SPIFFS.exists(IMPROV_LOG_FILE))
+                SPIFFS.remove(IMPROV_LOG_FILE);
         #endif
 
         log_write("Finished Improv setup");
