@@ -667,8 +667,8 @@ void setup()
         splashGraphics.PrepareFrame();
         splashManager.Update();
         splashGraphics.PostProcessFrame(splashGraphics.GetLEDCount(), 0);
-    
-        #endif
+
+    #endif
 
     InitEffectsManager();
 
@@ -767,7 +767,7 @@ void setup()
 void loop()
 {
     // Add button support to the DEVKIT boards so you can step the effect
-    
+
     #if (defined(MESMERIZER_DEVKIT) || defined(MESMERIZER_DEVKIT_S3)) && defined(TOGGLE_BUTTON_0)
         static Bounce2::Button s_nextEffectButton;
         static bool s_nextEffectButtonInitialized = false;
