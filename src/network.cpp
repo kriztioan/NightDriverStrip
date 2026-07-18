@@ -650,14 +650,15 @@ namespace nd_network
 
     void DoStatsCommand(const DebugCLI::cli_argv &)
     {
-        auto &bufferManager = g_ptrSystem->GetBufferManagers()[0];
         const auto& config = g_ptrSystem->GetDeviceConfig();
 
         DebugCLI::cli_printf("%s:%zux%zu %zuK %ddB:%s",
             FLASH_VERSION_NAME, g_ptrSystem->GetDevices().size(),
             config.GetActiveLEDCount(), (size_t)(ESP.getFreeHeap()/1024), abs(WiFi.RSSI()),
             IsWiFiConnected() ? WiFi.localIP().toString().c_str() : "None");
+        if (g_ptrSystem->HasBufferManagers())
         {
+            auto &bufferManager = g_ptrSystem->GetBufferManagers()[0];
             // Buffer indices are mutated by the socket task and consumed by
             // the render task; status reads need the same mutex or they can
             // sample a half-updated ring state on the other core.

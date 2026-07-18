@@ -28,6 +28,9 @@
 
 #include "globals.h"
 
+#include <algorithm>
+#include <cstring>
+
 #include "console.h"
 #include "debug_cli.h"
 #include "logger.h"

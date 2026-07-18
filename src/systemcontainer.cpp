@@ -212,10 +212,17 @@ SystemContainer::BufferManagerContainer& SystemContainer::SetupBufferManagers()
     }
 
     #if USE_PSRAM
-        uint32_t memtouse = ESP.getFreePsram() - RESERVE_MEMORY;
+        const uint32_t freeMemory = ESP.getFreePsram();
     #else
-        uint32_t memtouse = ESP.getFreeHeap() - RESERVE_MEMORY;
+        const uint32_t freeMemory = ESP.getFreeHeap();
     #endif
+
+    // Saturate at zero when the requested reserve exceeds available memory.
+    // Subtracting unsigned values directly wraps around and produces a bogus,
+    // enormous buffer count on memory-constrained boards.
+    const uint32_t memtouse = freeMemory > RESERVE_MEMORY
+        ? freeMemory - RESERVE_MEMORY
+        : 0;
 
     uint32_t memtoalloc = 0;
     for (const auto& device : *_ptrDevices)

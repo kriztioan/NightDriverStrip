@@ -171,14 +171,16 @@ class RainbowFillEffect : public EffectWithId<RainbowFillEffect>
     float _speedDivisor;
     int   _deltaHue;
     bool  _mirrored;
+    bool  _fitLEDCount;
 
   public:
 
-    RainbowFillEffect(float speedDivisor = 12.0f, int deltaHue = 14, bool mirrored = false)
+    RainbowFillEffect(float speedDivisor = 12.0f, int deltaHue = 14, bool mirrored = false, bool fitLEDCount = false)
   : EffectWithId<RainbowFillEffect>("RainbowFill Rainbow"),
         _speedDivisor(speedDivisor),
         _deltaHue(deltaHue),
-        _mirrored(mirrored)
+        _mirrored(mirrored),
+        _fitLEDCount(fitLEDCount)
     {
         debugV("RainbowFill constructor");
     }
@@ -187,7 +189,8 @@ class RainbowFillEffect : public EffectWithId<RainbowFillEffect>
       : EffectWithId<RainbowFillEffect>(jsonObject),
         _speedDivisor(jsonObject[PTY_SPEEDDIVISOR]),
         _deltaHue(jsonObject[PTY_DELTAHUE]),
-        _mirrored(jsonObject[PTY_MIRRORED])
+        _mirrored(jsonObject[PTY_MIRRORED]),
+        _fitLEDCount(jsonObject[PTY_FITLEDCOUNT].is<bool>() ? jsonObject[PTY_FITLEDCOUNT].as<bool>() : false)
     {
         debugV("RainbowFill JSON constructor");
     }
@@ -202,6 +205,7 @@ class RainbowFillEffect : public EffectWithId<RainbowFillEffect>
         jsonDoc[PTY_SPEEDDIVISOR] = _speedDivisor;
         jsonDoc[PTY_DELTAHUE] = _deltaHue;
         jsonDoc[PTY_MIRRORED] = _mirrored;
+        jsonDoc[PTY_FITLEDCOUNT] = _fitLEDCount;
 
         return SetIfNotOverflowed(jsonDoc, jsonObject, __PRETTY_FUNCTION__);
     }
@@ -216,7 +220,29 @@ class RainbowFillEffect : public EffectWithId<RainbowFillEffect>
 
         hue += (float) msElapsed / _speedDivisor;
         hue = fmod(hue, 256.0);
-        fillRainbowAllChannels(0, _cLEDs, hue, _deltaHue, 1, _mirrored);
+        if (_fitLEDCount && _cLEDs > 0)
+        {
+            const float hueStep = 256.0f / static_cast<float>(_cLEDs);
+
+            for (size_t i = 0; i < _cLEDs; i++)
+            {
+                CHSV hsv;
+                hsv.hue = static_cast<uint8_t>(fmod(hue + static_cast<float>(i) * hueStep, 256.0f));
+                hsv.val = 255;
+                hsv.sat = 255;
+
+                CRGB rgb;
+                hsv2rgb_rainbow(hsv, rgb);
+
+                setPixelOnAllChannels(i, rgb);
+                if (_mirrored)
+                    setPixelOnAllChannels(_cLEDs - i - 1, rgb);
+            }
+        }
+        else
+        {
+            fillRainbowAllChannels(0, _cLEDs, hue, _deltaHue, 1, _mirrored);
+        }
         delay(10);
     }
 };

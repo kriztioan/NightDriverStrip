@@ -193,9 +193,6 @@ void CWebServer::begin()
     _staticStats.FreeSketchSpace = ESP.getFreeSketchSpace();
     _staticStats.FlashChipSize = ESP.getFlashChipSize();
 
-    if (!EnsureDeviceSettingSpecsJson())
-        debugW("WebServer: failed to pre-cache device setting specs JSON.");
-
     debugI("Connecting Web Endpoints");
 
     // SPIFFS file requests

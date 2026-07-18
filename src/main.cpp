@@ -344,6 +344,7 @@ void setup()
     // Route all ESP-IDF log output through ConsoleManager so CRLF translation
     // and Serial.flush() are applied on every log line.
     Logger::InstallLogHook();
+    Logger::SetLevel(LogLevel::Info);
 
     // Initialize SPIFFS for file access to non-volatile storage
     if (!SPIFFS.begin(true))
@@ -394,8 +395,6 @@ void setup()
 
     // Start the Task Manager which takes over the watchdog role and measures CPU usage
     auto& taskManager = g_ptrSystem->SetupTaskManager();
-
-    esp_log_level_set("*", ESP_LOG_DEBUG);       // set all components to an appropriate logging level
 
     // Display a simple startup header on the serial port
     PrintOutputHeader();
@@ -643,12 +642,32 @@ void setup()
         #endif
     #endif
 
-    g_ptrSystem->SetupBufferManagers();
+    // Network LED frame buffers are sizeable and serve no purpose in a
+    // local-effects-only build. In particular, omitting two 64x32 buffers
+    // gives the no-PSRAM DEVKIT enough internal RAM to launch its renderer.
+    #if INCOMING_WIFI_ENABLED
+        g_ptrSystem->SetupBufferManagers();
+    #endif
 
     // Show splash effect on matrix
     #if USE_HUB75
         debugI("Initializing splash effect manager...");
         InitSplashEffectManager();
+
+        // The normal render service is intentionally started only after the
+        // full effect manager has been loaded.  Render one splash frame here
+        // so the panel has immediate visual feedback while effects, WiFi, and
+        // the remaining services initialize.  Without this synchronous draw,
+        // InitEffectsManager() replaces the temporary splash effect before a
+        // render task ever gets a chance to display it.
+
+        auto& splashManager  = g_ptrSystem->GetEffectManager();
+        auto& splashGraphics = splashManager.g();
+        splashManager.StartEffect();
+        splashGraphics.PrepareFrame();
+        splashManager.Update();
+        splashGraphics.PostProcessFrame(splashGraphics.GetLEDCount(), 0);
+
     #endif
 
     InitEffectsManager();
@@ -747,8 +766,32 @@ void setup()
 
 void loop()
 {
+    // Add button support to the DEVKIT boards so you can step the effect
+
+    #if (defined(MESMERIZER_DEVKIT) || defined(MESMERIZER_DEVKIT_S3)) && defined(TOGGLE_BUTTON_0)
+        static Bounce2::Button s_nextEffectButton;
+        static bool s_nextEffectButtonInitialized = false;
+        if (!s_nextEffectButtonInitialized)
+        {
+            s_nextEffectButton.attach(TOGGLE_BUTTON_0, INPUT_PULLUP);
+            s_nextEffectButton.interval(5);
+            s_nextEffectButton.setPressedState(LOW);
+            s_nextEffectButtonInitialized = true;
+            debugI("Next-effect button initialized on GPIO %d", TOGGLE_BUTTON_0);
+        }
+    #endif
+
     while(true)
     {
+        #if (defined(MESMERIZER_DEVKIT) || defined(MESMERIZER_DEVKIT_S3)) && defined(TOGGLE_BUTTON_0)
+            s_nextEffectButton.update();
+            if (s_nextEffectButton.pressed() && g_ptrSystem->HasEffectManager())
+            {
+                debugI("Next-effect button pressed");
+                g_ptrSystem->GetEffectManager().NextEffect();
+            }
+        #endif
+
         // Improv owns the serial stream when WiFi is enabled. It forwards any
         // non-Improv bytes to the serial CLI through its unknown-byte callback.
 #if ENABLE_WIFI
@@ -777,8 +820,14 @@ void loop()
             }
         #endif
 
-        EVERY_N_SECONDS(5)
+        // Keep operational telemetry independent of FastLED's timer macros.
+        // This runs on the Arduino loop task and deliberately catches up from
+        // the current time rather than emitting a burst after a long stall.
+        static uint32_t s_lastStatusUpdateMs = 0;
+        const uint32_t statusNowMs = millis();
+        if (s_lastStatusUpdateMs == 0 || statusNowMs - s_lastStatusUpdateMs >= 5000)
         {
+            s_lastStatusUpdateMs = statusNowMs;
             String strOutput;
 
             #if ENABLE_WIFI
@@ -793,7 +842,7 @@ void loop()
             #endif
 
             #if USE_HUB75
-                strOutput += str_sprintf("Refresh: %d Hz, Power: %d mW, Brite: %3.0lf%%, ", HUB75GFX::matrix.getRefreshRate(), g_Values.MatrixPowerMilliwatts, g_Values.MatrixScaledBrightness / 2.55);
+                strOutput += str_sprintf("Refresh: %d Hz, Power: %d mW, Brite: %3.0lf%%, ", HUB75GFX::GetRefreshRate(), g_Values.MatrixPowerMilliwatts, g_Values.MatrixScaledBrightness / 2.55);
             #endif
 
             #if ENABLE_AUDIO
@@ -815,12 +864,17 @@ void loop()
             const auto& taskManager = g_ptrSystem->GetTaskManager();
             strOutput += str_sprintf("CPU: %03.0f%%, %03.0f%%, FreeDraw: %4.3lf", taskManager.GetCPUUsagePercent(0), taskManager.GetCPUUsagePercent(1), g_Values.FreeDrawTime);
 
-            debugI("%s", strOutput.c_str());
+            // Status is user-facing operational telemetry, not diagnostic
+            // chatter. Send it directly to the console sinks so a runtime log
+            // threshold cannot suppress it and no second large formatting
+            // buffer needs to be allocated by Logger::Logf().
+            ConsoleManager::Instance().Broadcast(LogLevel::Info, TAG, strOutput.c_str());
         }
 
-        // Once an update is underway, we loop tightly on ArduinoOTA.handle.  Otherwise, we delay a bit to share the CPU.
-
-        if (!g_Values.UpdateStarted)
-            delay(1);
+        // Yield explicitly; Improv and OTA polling are non-blocking and do
+        // not otherwise guarantee that the Arduino loop task gives time back.
+        // A single tick also keeps ArduinoOTA.handle() serviced tightly once
+        // an update is underway.
+        delay(1);
     }
 }

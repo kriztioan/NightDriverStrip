@@ -18,6 +18,19 @@ const std::vector<std::reference_wrapper<SettingSpec>>& DeviceConfig::GetSetting
 {
     if (settingSpecs.empty())
     {
+        // Build the table in one allocation. On no-PSRAM boards this metadata
+        // is created after the HUB75 DMA buffers, so geometric vector growth
+        // can temporarily require both old and new contiguous blocks.
+        constexpr size_t kFixedSettingSpecCapacity = 26;
+        const auto compiledChannelCount = GetCompiledChannelCount();
+        const size_t outputSettingSpecCount = compiledChannelCount
+        #if USE_APA102
+            * 2
+        #endif
+        ;
+        settingSpecs.reserve(kFixedSettingSpecCapacity + outputSettingSpecCount);
+        settingSpecReferences.reserve(kFixedSettingSpecCapacity + outputSettingSpecCount);
+
         // Section keys used below correspond to entries in the section catalog
         // emitted by FillUnifiedSettingsSchemaJson(). Keep them in sync.
         constexpr const char* kSectionSystem     = "system";
@@ -323,12 +336,6 @@ const std::vector<std::reference_wrapper<SettingSpec>>& DeviceConfig::GetSetting
         #else
             4;
         #endif
-        const auto compiledChannelCount = GetCompiledChannelCount();
-        settingSpecs.reserve(settingSpecs.size() + compiledChannelCount
-        #if USE_APA102
-            * 2
-        #endif
-        );
         pinSpecStrings.reserve(compiledChannelCount * kPinStringsPerChannel);
         const auto stableCStr = [](const String& s) { return s.c_str(); };
 

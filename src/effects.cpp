@@ -141,6 +141,11 @@
 
 #define EFFECT_SET_VERSION 9
 
+// Central Adafruit-GFX font used by the matrix information effects.
+#if USE_MATRIX
+#include "FontGfx_apple5x7.h"
+#endif
+
 // Inform the linker which effects have setting specs, and in which class member
 
 //#if USE_HUB75 && ENABLE_WIFI
@@ -149,14 +154,21 @@
     INIT_EFFECT_SETTING_SPECS(PatternStocks, mySettingSpecs);
 #endif
 
-// Apple5x7 font definition - needed for WiFi-enabled matrix patterns using Adafruit-style fonts
-// Define this unconditionally (guarded by ENABLE_WIFI) so the symbol is always available regardless of M5/LGFX usage.
-#if USE_MATRIX
-#include <FontGfx_apple5x7.h>           // Requires the SmartMatrix dependency to pick up this font
-#endif
-
 // Default and JSON factory functions + decoration for effects
 DRAM_ATTR allocated_unique_ptr<EffectFactories> g_ptrEffectFactories = nullptr;
+
+#if EFFECTS_FULLMATRIX
+void ConfigureMatrixJpegDecoder()
+{
+    TJpgDec.setJpgScale(1);
+    TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap)
+    {
+        auto& gfx = g_ptrSystem->GetEffectManager().g();
+        gfx.drawRGBBitmap(x, y, bitmap, w, h);
+        return true;
+    });
+}
+#endif
 
 // This function sets up the effect factories for the effects for whatever project is being built. The ADD_EFFECT macro variations
 //   are provided and used for convenience.
@@ -185,6 +197,13 @@ void LoadEffectFactories()
         RegisterAll(*g_ptrEffectFactories,
             Effect<StatusEffect>(CRGB::White),
             Effect<RainbowFillEffect>(6, 2)
+        );
+    #endif
+
+    #if defined(EFFECTS_IMPERIAL)
+        // Imperial effect set: one 134-LED strip running RainbowFill.
+        RegisterAll(*g_ptrEffectFactories,
+            Effect<RainbowFillEffect>(6.0f, 8, true, true)
         );
     #endif
 
@@ -313,26 +332,24 @@ void LoadEffectFactories()
     #endif
 
     #if defined(EFFECTS_FULLMATRIX)
-        TJpgDec.setJpgScale(1);
-        TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap)
-        {
-            auto& gfx = g_ptrSystem->GetEffectManager().g();
-            gfx.drawRGBBitmap(x, y, bitmap, w, h);
-            return true;
-        });
+        ConfigureMatrixJpegDecoder();
 
         // Full matrix effect set for advanced displays (Mesmerizer, etc.)
+        #if ENABLE_AUDIO
         RegisterAll(*g_ptrEffectFactories,
             Effect<SpectrumBarEffect>("Audiograph", 16, 4, 0),
             Effect<SpectrumAnalyzerEffect>("Spectrum", NUM_BANDS, spectrumAltColors, false, 0, 0, 1.6, 1.6),
-            Effect<SpectrumAnalyzerEffect>("AudioWave", MATRIX_WIDTH, CRGB(0,0,40), 0, 1.25, 1.25, true),
+            Effect<SpectrumAnalyzerEffect>("AudioWave", MATRIX_WIDTH, CRGB(0,0,40), 0, 1.25, 1.25, true)
+        );
+        #endif
+
+        RegisterAll(*g_ptrEffectFactories,
             Effect<PatternSMRadialWave>(),
             Effect<PatternAnimatedGIF>("Fire Log", GIFIdentifier::Firelog),
             Effect<PatternAnimatedGIF>("Pacman", GIFIdentifier::Pacman),
             Effect<PatternPongClock>(),
             Effect<PatternAnimatedGIF>("Colorball", GIFIdentifier::ColorSphere),
             Effect<PatternSMFire2021>(),
-            Effect<GhostWave>("GhostWave", 0, 30, false, 10),
             Effect<PatternSMGamma>(),
             Effect<PatternAnimatedGIF>("Rings", GIFIdentifier::ThreeRings),
             Effect<PatternAnimatedGIF>("Atomic", GIFIdentifier::Atomic),
@@ -344,7 +361,12 @@ void LoadEffectFactories()
             Effect<PatternAnimatedGIF>("Nyancat", GIFIdentifier::Nyancat),
             Effect<PatternAnimatedGIF>("On Air", GIFIdentifier::OnAir),
             Effect<PatternLife>(),
-            Effect<PatternCircuit>(),
+            Effect<PatternCircuit>()
+        );
+
+        #if ENABLE_AUDIO
+        RegisterAll(*g_ptrEffectFactories,
+            Effect<GhostWave>("GhostWave", 0, 30, false, 10),
             Effect<SpectrumAnalyzerEffect>("USA", NUM_BANDS, USAColors_p, true, 0, 0, 0.75, 0.75),
             Effect<SpectrumAnalyzerEffect>("Spectrum 2", 32, spectrumBasicColors, false, 100, 0, 0.75, 0.75),
             Effect<SpectrumAnalyzerEffect>("Spectrum++", NUM_BANDS, spectrumBasicColors, false, 0, 40, -1.0, 2.0),
@@ -352,6 +374,7 @@ void LoadEffectFactories()
             Effect<GhostWave>("WaveOut", 0, 0, true, 0),
             Effect<StarEffect<MusicStar>>("Stars", RainbowColors_p, 1.0, 1, LINEARBLEND, 2.0, 0.5, 10.0)
         );
+        #endif
 
         #if ENABLE_WIFI
         RegisterAll(*g_ptrEffectFactories,
@@ -363,7 +386,6 @@ void LoadEffectFactories()
 
         RegisterAll(*g_ptrEffectFactories,
             Effect<PatternSMSmoke>(),
-            Effect<GhostWave>("PlasmaWave", 0, 255, false),
             Effect<PatternSMNoise>("Shikon", PatternSMNoise::EffectType::Shikon_t),
             Effect<PatternSMRadialFire>(),
             Effect<PatternSMFlowFields>(),
@@ -385,7 +407,6 @@ void LoadEffectFactories()
             Effect<PatternSunburst>(),
             Effect<PatternClock>(),
             Effect<PatternAlienText>(),
-            Effect<PatternPulsar>(),
             Effect<PatternBounce>(),
             Effect<PatternWave>(),
             Effect<PatternSwirl>(),
@@ -394,6 +415,13 @@ void LoadEffectFactories()
             Effect<PatternMunch>(),
             Effect<PatternMaze>()
         );
+
+        #if ENABLE_AUDIO
+        RegisterAll(*g_ptrEffectFactories,
+            Effect<GhostWave>("PlasmaWave", 0, 255, false),
+            Effect<PatternPulsar>()
+        );
+        #endif
     #endif
 
     #if defined(EFFECTS_UMBRELLA)
